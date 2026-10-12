@@ -144,22 +144,24 @@
   function listen(btn, opts) {
     if (active && active.btn === btn) { stopAll(); return; }
     stopAll();
-    var state = { btn: btn, keep: !!opts.continuous, rec: null };
+    // Chrome on Android repeats words in continuous mode, so we always listen one
+    // phrase at a time and restart between phrases while the button is on.
+    var state = { btn: btn, keep: !!opts.continuous, rec: null, lastHeard: Date.now() };
     var base = opts.base ? opts.base() : "";
     function start() {
       var rec = new SR();
       rec.lang = "en-US";
-      rec.continuous = !!opts.continuous;
+      rec.continuous = false;
       rec.interimResults = true;
+      rec.maxAlternatives = 1;
       state.rec = rec;
-      var finalText = "";
       rec.onresult = function (ev) {
-        var interim = "";
-        for (var i = ev.resultIndex; i < ev.results.length; i++) {
-          if (ev.results[i].isFinal) finalText += ev.results[i][0].transcript + " ";
-          else interim += ev.results[i][0].transcript;
-        }
-        opts.onText(base, finalText, interim);
+        // Use only the newest result; Android can resend earlier partials.
+        var r = ev.results[ev.results.length - 1];
+        var text = r[0].transcript.trim();
+        state.lastHeard = Date.now();
+        if (r.isFinal) opts.onText(base, text + " ", "");
+        else opts.onText(base, "", text);
       };
       rec.onerror = function (ev) {
         if (ev.error === "not-allowed" || ev.error === "service-not-allowed") {
@@ -169,7 +171,8 @@
       };
       rec.onend = function () {
         base = opts.base ? opts.base() : base;
-        if (state.keep && active === state) { try { start(); } catch (e) { finish(); } }
+        var idle = Date.now() - state.lastHeard > 20000;  // stop after 20s of silence
+        if (state.keep && !idle && active === state) { try { start(); } catch (e) { finish(); } }
         else finish();
       };
       rec.start();
