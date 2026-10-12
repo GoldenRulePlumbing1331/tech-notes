@@ -139,14 +139,20 @@
   }
 
   var active = null;
-  function stopAll() { if (active) { active.keep = false; try { active.rec.stop(); } catch (e) {} } }
+  // Stop listening; if cb is given, call it once the last phrase has been written in.
+  function stopAll(cb) {
+    if (!active) { if (cb) cb(); return; }
+    if (cb) active.after.push(cb);
+    active.keep = false;
+    try { active.rec.stop(); } catch (e) {}
+  }
 
   function listen(btn, opts) {
     if (active && active.btn === btn) { stopAll(); return; }
     stopAll();
     // Chrome on Android repeats words in continuous mode, so we always listen one
     // phrase at a time and restart between phrases while the button is on.
-    var state = { btn: btn, keep: !!opts.continuous, rec: null, lastHeard: Date.now() };
+    var state = { btn: btn, keep: !!opts.continuous, rec: null, lastHeard: Date.now(), after: [] };
     var base = opts.base ? opts.base() : "";
     function start() {
       var rec = new SR();
@@ -182,6 +188,8 @@
       if (opts.label) opts.label(false);
       if (active === state) active = null;
       if (opts.done) opts.done();
+      var cbs = state.after; state.after = [];
+      cbs.forEach(function (f) { f(); });
     }
     active = state;
     btn.classList.add("rec");
@@ -207,7 +215,18 @@
 
   // ---- send ----
   $("send").onclick = function () {
-    stopAll();
+    var b = $("send");
+    if (b.disabled) return;
+    if (!active) { send(); return; }
+    // Still listening: stop the mic and wait for the last phrase before sending.
+    b.disabled = true; b.textContent = "Finishing…";
+    var done = false;
+    function go() { if (done) return; done = true; b.disabled = false; send(); }
+    stopAll(go);
+    setTimeout(go, 2500);
+  };
+
+  function send() {
     var code = get(KEY) || $("code").value.trim();
     var job = $("job").value.trim();
     var notes = $("notes").value.trim();
@@ -230,7 +249,7 @@
     }).catch(function () {
       show("❌ Couldn't reach the server. Check your signal and try again. Your notes are still here.", false);
     }).then(function () { b.disabled = false; b.textContent = "Send to Housecall Pro"; });
-  };
+  }
 })();
 </script>
 </body>
