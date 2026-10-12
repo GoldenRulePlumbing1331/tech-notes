@@ -1,0 +1,234 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#14365c">
+<meta name="robots" content="noindex">
+<title>Tech Notes</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='14' fill='%2314365c'/%3E%3Crect x='25' y='12' width='14' height='26' rx='7' fill='%23f2b632'/%3E%3Cpath d='M18 32a14 14 0 0 0 28 0' stroke='%23f2b632' stroke-width='4' fill='none'/%3E%3Crect x='30' y='46' width='4' height='8' fill='%23f2b632'/%3E%3C/svg%3E">
+<style>
+  :root {
+    --bg: #f3f4f6; --card: #ffffff; --ink: #14181f; --muted: #5d6573; --line: #d5d9e0;
+    --brand: #14365c; --accent: #f2b632; --ok-bg: #e4f4e8; --ok-ink: #14532d;
+    --err-bg: #fde8e8; --err-ink: #7f1d1d; --rec: #c62828;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root { --bg: #0f1216; --card: #191d23; --ink: #eef1f5; --muted: #9aa3b0; --line: #2e343d;
+      --ok-bg: #12301d; --ok-ink: #b9f0c9; --err-bg: #3a1515; --err-ink: #ffc9c9; }
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; background: var(--bg); color: var(--ink); }
+  body { font: 17px/1.45 -apple-system, "Segoe UI", Roboto, Arial, sans-serif;
+         padding: 16px 16px calc(24px + env(safe-area-inset-bottom)); max-width: 560px; margin: 0 auto; }
+  header { display: flex; align-items: center; gap: 10px; margin: 4px 0 16px; }
+  header .dot { width: 34px; height: 34px; border-radius: 9px; background: var(--brand);
+                display: grid; place-items: center; color: var(--accent); font-weight: 800; }
+  h1 { font-size: 21px; margin: 0; }
+  .card { background: var(--card); border: 1px solid var(--line); border-radius: 14px; padding: 14px; margin-bottom: 14px; }
+  label { display: block; font-weight: 650; margin-bottom: 8px; }
+  .row { display: flex; gap: 10px; align-items: stretch; }
+  input, textarea { width: 100%; font: inherit; color: var(--ink); background: var(--card);
+                    border: 1px solid var(--line); border-radius: 10px; padding: 12px; }
+  #job { font-size: 26px; font-weight: 700; letter-spacing: 1px; }
+  textarea { min-height: 150px; resize: vertical; }
+  .mic { flex: 0 0 64px; border: 0; border-radius: 12px; background: var(--brand); color: #fff;
+         display: grid; place-items: center; cursor: pointer; }
+  .mic svg { width: 28px; height: 28px; }
+  .mic.big { width: 100%; height: 64px; flex: none; margin-top: 10px; font-family: inherit; font-size: 18px; font-weight: 650; gap: 10px;
+             display: flex; justify-content: center; align-items: center; }
+  .mic.rec { background: var(--rec); animation: pulse 1.2s infinite; }
+  @keyframes pulse { 50% { opacity: .75; } }
+  .hint { font-size: 14px; color: var(--muted); margin-top: 8px; }
+  .toggle { display: flex; gap: 8px; margin-top: 12px; }
+  .toggle button { flex: 1; padding: 11px; font-family: inherit; font-size: 15px; font-weight: 600; border-radius: 10px;
+                   border: 1px solid var(--line); background: var(--card); color: var(--ink); }
+  .toggle button[aria-pressed="true"] { background: var(--brand); color: #fff; border-color: var(--brand); }
+  #send { width: 100%; padding: 18px; border: 0; border-radius: 12px; background: var(--accent);
+          color: #1a1300; font-family: inherit; font-size: 19px; font-weight: 800; }
+  #send:disabled { opacity: .55; }
+  #msg { display: none; white-space: pre-wrap; border-radius: 12px; padding: 14px; margin-top: 14px; }
+  #msg.ok { display: block; background: var(--ok-bg); color: var(--ok-ink); }
+  #msg.err { display: block; background: var(--err-bg); color: var(--err-ink); }
+  #codeCard { display: none; }
+  a { color: inherit; }
+  footer { text-align: center; font-size: 13px; color: var(--muted); margin-top: 18px; }
+</style>
+</head>
+<body>
+<header>
+  <div class="dot">GR</div>
+  <h1>Tech Notes</h1>
+</header>
+
+<div class="card" id="codeCard">
+  <label for="code">Your access code</label>
+  <input id="code" inputmode="numeric" autocomplete="off" placeholder="8-digit code">
+  <div class="hint">Enter it once. This phone remembers it after your first note goes through.</div>
+</div>
+
+<div class="card">
+  <label for="job">Job number</label>
+  <div class="row">
+    <input id="job" inputmode="numeric" autocomplete="off" placeholder="e.g. 49692">
+    <button class="mic" id="micJob" aria-label="Say the job number">
+      <svg viewBox="0 0 24 24" fill="currentColor"><path d="M12 15a3 3 0 0 0 3-3V6a3 3 0 0 0-6 0v6a3 3 0 0 0 3 3zm5-3a5 5 0 0 1-10 0H5a7 7 0 0 0 6 6.92V21h2v-2.08A7 7 0 0 0 19 12h-2z"/></svg>
+    </button>
+  </div>
+</div>
+
+<div class="card">
+  <label for="notes">What did you do?</label>
+  <textarea id="notes" placeholder="Tap the microphone and talk. You can fix anything here before sending."></textarea>
+  <button class="mic big" id="micNotes">
+    <svg viewBox="0 0 24 24" fill="currentColor" width="24" height="24"><path d="M12 15a3 3 0 0 0 3-3V6a3 3 0 0 0-6 0v6a3 3 0 0 0 3 3zm5-3a5 5 0 0 1-10 0H5a7 7 0 0 0 6 6.92V21h2v-2.08A7 7 0 0 0 19 12h-2z"/></svg>
+    <span id="micNotesLabel">Tap to talk</span>
+  </button>
+  <div class="toggle" role="group" aria-label="Replace or add">
+    <button id="modeReplace" aria-pressed="true">Replace notes</button>
+    <button id="modeAppend" aria-pressed="false">Add to notes</button>
+  </div>
+  <div class="hint">Notes are cleaned up before they go on the invoice.</div>
+</div>
+
+<button id="send">Send to Housecall Pro</button>
+<div id="msg" role="status" aria-live="polite"></div>
+
+<footer><a href="#" id="forget">Not you? Change code</a></footer>
+
+<script>
+(function () {
+  var ENDPOINT = "https://script.google.com/macros/s/AKfycbzmZAs9GmVh6srwcwMabNf2LKEjMH1lumMvy5vlB1AKVbMMjQnGfTmN0z67UpTQc4JC_w/exec";
+  var KEY = "grTechCode";
+  function $(id) { return document.getElementById(id); }
+  function get(k) { try { return localStorage.getItem(k) || ""; } catch (e) { return ""; } }
+  function put(k, v) { try { localStorage.setItem(k, v); } catch (e) {} }
+  function drop(k) { try { localStorage.removeItem(k); } catch (e) {} }
+
+  function refreshWho() {
+    var has = !!get(KEY);
+    $("codeCard").style.display = has ? "none" : "block";
+  }
+  refreshWho();
+  $("forget").onclick = function (e) { e.preventDefault(); drop(KEY); $("code").value = ""; refreshWho(); };
+
+  var mode = "replace";
+  function setMode(m) {
+    mode = m;
+    $("modeReplace").setAttribute("aria-pressed", m === "replace");
+    $("modeAppend").setAttribute("aria-pressed", m === "append");
+  }
+  $("modeReplace").onclick = function () { setMode("replace"); };
+  $("modeAppend").onclick = function () { setMode("append"); };
+
+  function show(text, ok) { var m = $("msg"); m.textContent = text; m.className = ok ? "ok" : "err"; }
+
+  // ---- speech ----
+  var SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+  if (!SR) {
+    $("micJob").style.display = "none";
+    $("micNotes").style.display = "none";
+    $("notes").placeholder = "Voice input isn't supported in this browser. Use Chrome, or the microphone on your keyboard.";
+  }
+
+  var WORDS = { zero: 0, oh: 0, o: 0, one: 1, won: 1, two: 2, to: 2, too: 2, three: 3, four: 4, for: 4, five: 5,
+                six: 6, seven: 7, eight: 8, ate: 8, nine: 9 };
+  function toDigits(s) {
+    return s.toLowerCase().replace(/[a-z]+/g, function (w) { return w in WORDS ? String(WORDS[w]) : " "; })
+            .replace(/[^0-9-]/g, "");
+  }
+
+  var active = null;
+  function stopAll() { if (active) { active.keep = false; try { active.rec.stop(); } catch (e) {} } }
+
+  function listen(btn, opts) {
+    if (active && active.btn === btn) { stopAll(); return; }
+    stopAll();
+    var state = { btn: btn, keep: !!opts.continuous, rec: null };
+    var base = opts.base ? opts.base() : "";
+    function start() {
+      var rec = new SR();
+      rec.lang = "en-US";
+      rec.continuous = !!opts.continuous;
+      rec.interimResults = true;
+      state.rec = rec;
+      var finalText = "";
+      rec.onresult = function (ev) {
+        var interim = "";
+        for (var i = ev.resultIndex; i < ev.results.length; i++) {
+          if (ev.results[i].isFinal) finalText += ev.results[i][0].transcript + " ";
+          else interim += ev.results[i][0].transcript;
+        }
+        opts.onText(base, finalText, interim);
+      };
+      rec.onerror = function (ev) {
+        if (ev.error === "not-allowed" || ev.error === "service-not-allowed") {
+          state.keep = false;
+          show("❌ Microphone is blocked. Allow microphone access for this site in your browser settings.", false);
+        }
+      };
+      rec.onend = function () {
+        base = opts.base ? opts.base() : base;
+        if (state.keep && active === state) { try { start(); } catch (e) { finish(); } }
+        else finish();
+      };
+      rec.start();
+    }
+    function finish() {
+      btn.classList.remove("rec");
+      if (opts.label) opts.label(false);
+      if (active === state) active = null;
+      if (opts.done) opts.done();
+    }
+    active = state;
+    btn.classList.add("rec");
+    if (opts.label) opts.label(true);
+    try { start(); } catch (e) { finish(); }
+  }
+
+  $("micJob").onclick = function () {
+    listen($("micJob"), {
+      continuous: false,
+      onText: function (_b, fin, interim) { var d = toDigits(fin + interim); if (d) $("job").value = d; }
+    });
+  };
+
+  $("micNotes").onclick = function () {
+    listen($("micNotes"), {
+      continuous: true,
+      base: function () { var v = $("notes").value.trim(); return v ? v + " " : ""; },
+      onText: function (base, fin, interim) { $("notes").value = (base + fin + interim).replace(/\s+/g, " ").trimStart(); },
+      label: function (on) { $("micNotesLabel").textContent = on ? "Listening… tap to stop" : "Tap to talk"; }
+    });
+  };
+
+  // ---- send ----
+  $("send").onclick = function () {
+    stopAll();
+    var code = get(KEY) || $("code").value.trim();
+    var job = $("job").value.trim();
+    var notes = $("notes").value.trim();
+    if (!code) { show("❌ Enter your access code first.", false); return; }
+    if (!/^\d+(-\d+)?$/.test(job)) { show("❌ Say or type the job number.", false); return; }
+    if (!notes) { show("❌ Add your notes first.", false); return; }
+    var b = $("send");
+    b.disabled = true; b.textContent = "Sending…"; $("msg").className = "";
+    fetch(ENDPOINT, {
+      method: "POST",
+      headers: { "Content-Type": "text/plain" },
+      body: JSON.stringify({ token: code, job: job, summary: notes, mode: mode })
+    }).then(function (r) { return r.text(); }).then(function (t) {
+      var ok = t.indexOf("✅") === 0;
+      show(t, ok);
+      if (ok) {
+        if (!get(KEY)) put(KEY, code);
+        $("notes").value = ""; setMode("replace"); refreshWho();
+      }
+    }).catch(function () {
+      show("❌ Couldn't reach the server. Check your signal and try again. Your notes are still here.", false);
+    }).then(function () { b.disabled = false; b.textContent = "Send to Housecall Pro"; });
+  };
+})();
+</script>
+</body>
+</html>
