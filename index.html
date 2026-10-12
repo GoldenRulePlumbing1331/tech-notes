@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <meta name="theme-color" content="#14365c">
 <meta name="robots" content="noindex">
-<title>Tech Notes</title>
+<title>Tech Details</title>
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='14' fill='%2314365c'/%3E%3Crect x='25' y='12' width='14' height='26' rx='7' fill='%23f2b632'/%3E%3Cpath d='M18 32a14 14 0 0 0 28 0' stroke='%23f2b632' stroke-width='4' fill='none'/%3E%3Crect x='30' y='46' width='4' height='8' fill='%23f2b632'/%3E%3C/svg%3E">
 <style>
   :root {
@@ -58,13 +58,13 @@
 <body>
 <header>
   <div class="dot">GR</div>
-  <h1>Tech Notes</h1>
+  <h1>Tech Details</h1>
 </header>
 
 <div class="card" id="codeCard">
   <label for="code">Your access code</label>
   <input id="code" inputmode="numeric" autocomplete="off" placeholder="8-digit code">
-  <div class="hint">Enter it once. This phone remembers it after your first note goes through.</div>
+  <div class="hint">Enter it once. This phone remembers it after your first send goes through.</div>
 </div>
 
 <div class="card">
@@ -85,10 +85,10 @@
     <span id="micNotesLabel">Tap to talk</span>
   </button>
   <div class="toggle" role="group" aria-label="Replace or add">
-    <button id="modeReplace" aria-pressed="true">Replace notes</button>
-    <button id="modeAppend" aria-pressed="false">Add to notes</button>
+    <button id="modeReplace" aria-pressed="true">Replace details</button>
+    <button id="modeAppend" aria-pressed="false">Add to details</button>
   </div>
-  <div class="hint">Notes are cleaned up before they go on the invoice.</div>
+  <div class="hint">Details are cleaned up before they go on the invoice.</div>
 </div>
 
 <button id="send">Send to Housecall Pro</button>
@@ -232,7 +232,7 @@
     var notes = $("notes").value.trim();
     if (!code) { show("❌ Enter your access code first.", false); return; }
     if (!/^\d+(-\d+)?$/.test(job)) { show("❌ Say or type the job number.", false); return; }
-    if (!notes) { show("❌ Add your notes first.", false); return; }
+    if (!notes) { show("❌ Add your details first.", false); return; }
     var b = $("send");
     b.disabled = true; b.textContent = "Sending…"; $("msg").className = "";
     fetch(ENDPOINT, {
@@ -247,7 +247,7 @@
         $("notes").value = ""; setMode("replace"); refreshWho();
       }
     }).catch(function () {
-      show("❌ Couldn't reach the server. Check your signal and try again. Your notes are still here.", false);
+      show("❌ Couldn't reach the server. Check your signal and try again. Your details are still here.", false);
     }).then(function () { b.disabled = false; b.textContent = "Send to Housecall Pro"; });
   }
 })();
