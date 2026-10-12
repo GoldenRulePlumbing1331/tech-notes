@@ -204,8 +204,10 @@
 
 <script>
 (function () {
-  var ENDPOINT = "https://script.google.com/macros/s/AKfycbzmZAs9GmVh6srwcwMabNf2LKEjMH1lumMvy5vlB1AKVbMMjQnGfTmN0z67UpTQc4JC_w/exec";
-  var KEY = "grTechCode";   // shared with the Job notes page
+  // "HCP New Job" Apps Script web app (its own project, separate from Job notes).
+  var ENDPOINT = "__NEW_JOB_EXEC_URL__";
+  var KEY = "grNewJobCode";
+  var NOTES_KEY = "grTechCode";   // Job notes page's code: tried once, never changed from here
   function $(id) { return document.getElementById(id); }
   function get(k) { try { return localStorage.getItem(k) || ""; } catch (e) { return ""; } }
   function put(k, v) { try { localStorage.setItem(k, v); } catch (e) {} }
@@ -219,22 +221,24 @@
   // ---------- server ----------
   function api(action, data) {
     data = data || {}; data.action = action; data.token = S.code;
+    if (ENDPOINT.indexOf("https://") !== 0) return Promise.resolve({ ok: false, error: "New Job isn't connected yet. Check back soon." });
     return fetch(ENDPOINT, { method: "POST", headers: { "Content-Type": "text/plain" }, body: JSON.stringify(data) })
       .then(function (r) { return r.json(); })
       .catch(function () { return { ok: false, error: "Couldn't reach the server. Check your signal and try again.", net: true }; })
       .then(function (r) {
-        if (!r.ok && /access code|Too many wrong/.test(r.error || "")) { drop(KEY); S.code = ""; showCode(r.error); }
+        if (!r.ok && action !== "init" && /access code|Too many wrong/.test(r.error || "")) { drop(KEY); S.code = ""; showCode(r.error); }
+        if (!r.ok && action === "init" && /access code|Too many wrong/.test(r.error || "")) drop(KEY);
         return r;
       });
   }
 
   // ---------- access code ----------
   function showCode(msg) { show($("codeCard"), true); show($("app"), false); say("codeMsg", msg, "err"); }
-  function start(code) {
+  function start(code, quiet) {
     S.code = code;
     say("codeMsg", "Checking…", "busy");
     api("init").then(function (r) {
-      if (!r.ok) { if (S.code) showCode(r.error); return; }
+      if (!r.ok) { if (quiet) { S.code = ""; showCode(""); } else if (S.code) showCode(r.error); return; }
       put(KEY, code);
       S.me = r.me || ""; S.today = r.today || "";
       var sel = $("jEmp");
@@ -247,7 +251,9 @@
   $("codeGo").onclick = function () { var c = $("code").value.trim(); if (c) start(c); };
   $("code").onkeydown = function (e) { if (e.key === "Enter") $("codeGo").click(); };
   $("forget").onclick = function (e) { e.preventDefault(); drop(KEY); S.code = ""; $("code").value = ""; showCode(""); };
-  if (get(KEY)) start(get(KEY)); else showCode("");
+  if (get(KEY)) start(get(KEY));
+  else if (get(NOTES_KEY)) start(get(NOTES_KEY), true);   // same code may work here too
+  else showCode("");
 
   // ---------- mode ----------
   var HINTS = {
