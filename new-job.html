@@ -181,6 +181,11 @@
       <span id="micDescLabel">Add to description</span>
     </button>
     <div class="grid" style="margin-top:12px">
+      <div class="full"><label for="jType">Job type</label><select id="jType"><option value="">— None —</option></select></div>
+      <div class="full"><label for="jUnit">Business unit</label><select id="jUnit"><option value="">— None —</option></select></div>
+    </div>
+    <div class="hint" id="jfHint">Picked from the description. <button class="link" id="suggest">Suggest again</button></div>
+    <div class="grid" style="margin-top:12px">
       <div><label for="jDate">Date</label><input id="jDate" type="date"></div>
       <div><label for="jTime">Time</label><input id="jTime" type="time" step="900"></div>
       <div><label for="jArrival">Arrival window</label>
@@ -216,7 +221,7 @@
   function say(id, text, kind) { var m = $(id); m.textContent = text || ""; m.className = "status" + (text ? " " + (kind || "ok") : ""); }
   function el(tag, cls, text) { var e = document.createElement(tag); if (cls) e.className = cls; if (text != null) e.textContent = text; return e; }
 
-  var S = { code: "", mode: "auto", fields: null, cust: null, isNew: false, addr: "", me: "", today: "" };
+  var S = { code: "", mode: "auto", fields: null, cust: null, isNew: false, addr: "", me: "", today: "", usualUnit: {} };
 
   // ---------- server ----------
   function api(action, data) {
@@ -244,6 +249,10 @@
       var sel = $("jEmp");
       (r.employees || []).forEach(function (e) { var o = el("option", null, e.name); o.value = e.id; sel.appendChild(o); });
       sel.value = S.me;
+      S.usualUnit = r.usual_unit || {};
+      [["jType", r.job_types], ["jUnit", r.business_units]].forEach(function (d) {
+        (d[1] || []).forEach(function (x) { var o = el("option", null, x.name); o.value = x.id; $(d[0]).appendChild(o); });
+      });
       if (S.today) $("jDate").min = S.today;
       show($("codeCard"), false); show($("app"), true); say("codeMsg", "");
     });
@@ -378,7 +387,26 @@
     });
   }
 
+  function setJobFields(t, u) {
+    $("jType").value = t || "";
+    $("jUnit").value = u || (t && S.usualUnit[t]) || "";
+    if ($("jType").value !== (t || "")) $("jType").value = "";   // id not in the list
+    if (!$("jUnit").value) $("jUnit").value = "";
+  }
+  $("jType").onchange = function () { var u = S.usualUnit[$("jType").value]; if (u && !$("jUnit").value) $("jUnit").value = u; };
+  $("suggest").onclick = function () {
+    var text = $("desc").value.trim();
+    if (!text) { say("submitMsg", "❌ Add a job description first.", "err"); return; }
+    var b = $("suggest"); b.disabled = true; b.textContent = "Suggesting…";
+    api("classify", { text: text }).then(function (r) {
+      b.disabled = false; b.textContent = "Suggest again";
+      if (r.ok) setJobFields(r.job_type_id, r.business_unit_id);
+      else say("submitMsg", "❌ " + r.error, "err");
+    });
+  };
+
   function fillJob(f) {
+    setJobFields(f.job_type_id, f.business_unit_id);
     if (f.job_description) $("desc").value = f.job_description;
     $("jDate").value = f.date || "";
     $("jTime").value = f.time || "";
@@ -520,7 +548,8 @@
   function submit() {
     if ($("submit").disabled) return;
     var data = { job: { description: $("desc").value.trim(), date: $("jDate").value, time: $("jTime").value,
-                        arrival: $("jArrival").value, employee_id: $("jEmp").value } };
+                        arrival: $("jArrival").value, employee_id: $("jEmp").value,
+                        job_type_id: $("jType").value, business_unit_id: $("jUnit").value } };
     if (!data.job.description) { say("submitMsg", "❌ Add a job description.", "err"); $("desc").focus(); return; }
     if (data.job.time && !data.job.date) { say("submitMsg", "❌ Pick a date for that time.", "err"); return; }
     if (S.isNew) {
@@ -561,7 +590,7 @@
   $("again").onclick = function () {
     S.fields = null; S.cust = null; resetSubmit();
     $("heard").value = ""; $("desc").value = ""; $("jDate").value = ""; $("jTime").value = "";
-    $("jArrival").value = "120"; $("jEmp").value = S.me; $("searchBox").value = "";
+    $("jArrival").value = "120"; $("jEmp").value = S.me; $("searchBox").value = ""; setJobFields("", "");
     say("talkMsg", ""); show($("matchCard"), false); show($("confirmCard"), false);
     window.scrollTo({ top: 0, behavior: "smooth" });
   };
