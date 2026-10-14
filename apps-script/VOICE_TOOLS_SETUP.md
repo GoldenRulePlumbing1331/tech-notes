@@ -1,8 +1,9 @@
 # Golden Rule voice tools — setup & test guide
 
-> **Status (2026-10-14, 1:55 PM):** direct submit to the Weinstein web store is built, tested against a fake
-> store (31 backend + 9 page checks) and deployed as HCP Order v5 — needs `WEINSTEIN_USER`/`PASS` + a
-> `verifyWeinstein` run (see the new section below). Earlier: all three Apps Script projects are created, configured, authorized and
+> **Status (2026-10-14, 4:15 PM):** offline support is live — every page opens with no signal, and Job Notes
+> queues and auto-sends (Job Summary script v8 dedupes by `req_id`). Direct submit to the Weinstein web store
+> is built, tested against a fake store (31 backend + 9 page checks) and deployed as HCP Order v5 — needs
+> `WEINSTEIN_USER`/`PASS` + a `verifyWeinstein` run (see the Weinstein section). Earlier: all three Apps Script projects are created, configured, authorized and
 > deployed; `config.js` on the `voice-tools` branch has all five URLs. `verifyAccess()` passed on real HCP for
 > all three (schedule/dispatch writes work with the Company key; time round-trips exactly; price book is
 > searchable). The Weinstein Orders sheet exists with 443 parts from the HCP price book. Remaining: merge the
@@ -177,6 +178,25 @@ logged/emailed and the page falls back to **Text the counter**.
 
 **Still true:** no Hajoca API; texting 610-436-0880 is the branch's own channel and stays as the backup;
 SupplyZone's Quick Pad list is still offered on the done screen.
+
+## No signal — what works offline (added 2026-10-14, 4:15 PM)
+
+- **Every page opens with no signal** after its first visit: `sw.js` (a service worker, registered from
+  `config.js`) keeps the six pages + config/manifest/icon on the phone and refreshes them in the background,
+  so an update shows up the second time a page is opened after it ships. Nothing from script.google.com is cached.
+- **Job Notes queues and auto-sends.** Every note is saved to the phone's outbox before it is sent. No
+  signal → "📶 No signal — saved", the form clears, and a *Waiting to send* card lists the note with
+  Send now / Edit / Delete. It sends itself when the phone comes back online, when the page is reopened, and
+  every minute while the page is open. Each note carries a `req_id`; the Job Summary script (v8) remembers
+  answered ids for 3 days, so a note that reached HCP but never got its reply back is **not** posted twice
+  (matters for "Add to details"). A real ❌ from the server (wrong job number, bad code) keeps the note in
+  the card with the error until the tech fixes it with Edit. The home page shows "N waiting to send" on the
+  Job Notes tile.
+- **Voice typing needs a connection** — Chrome's "Tap to talk" fails offline (the page now says so and points
+  to the keyboard's microphone key, which works offline once Gboard's offline English pack is downloaded).
+- New Job, Estimate and Order still need signal to finish (Haiku parsing, customer/job lookup, part matching
+  and the tech's review happen live). They open offline but their Build/Look up buttons say the server can't
+  be reached; a "save the dictation and resume later" outbox for those is the natural next step if needed.
 
 ## Things to watch (unverified until the real run)
 
