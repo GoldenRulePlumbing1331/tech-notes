@@ -1,6 +1,8 @@
 # Golden Rule voice tools — setup & test guide
 
-> **Status (2026-10-14, 12:50 PM):** all three Apps Script projects are created, configured, authorized and
+> **Status (2026-10-14, 1:55 PM):** direct submit to the Weinstein web store is built, tested against a fake
+> store (31 backend + 9 page checks) and deployed as HCP Order v5 — needs `WEINSTEIN_USER`/`PASS` + a
+> `verifyWeinstein` run (see the new section below). Earlier: all three Apps Script projects are created, configured, authorized and
 > deployed; `config.js` on the `voice-tools` branch has all five URLs. `verifyAccess()` passed on real HCP for
 > all three (schedule/dispatch writes work with the Company key; time round-trips exactly; price book is
 > searchable). The Weinstein Orders sheet exists with 443 parts from the HCP price book. Remaining: merge the
@@ -142,23 +144,39 @@ Enter your access code once on the home page; every tool picks it up.
 
 ---
 
-## Weinstein channel — what I found and what to decide
+## Weinstein web store — direct submit (added 2026-10-14 afternoon)
 
-- **No API, no HCP integration.** Hajoca/Weinstein publish no ordering API. Their only field-service
-  integration is ServiceTitan (West Chester is on it). HCP's supplier integrations are Reece and Watsco only.
-- **SupplyZone** (the app you linked, formerly "OE Touch") is Innovo's native order-entry app on Hajoca's
-  Epicor Eclipse ERP. Its **Quick Pad** takes part numbers + quantities. The web store
-  (supplyweb.hajoca.com) also has **Quickpad** and **Upload Order File** (CSV/TXT — column format not
-  published; the emailed `order.csv` is Part Number, Quantity, Description, which you can adjust once you see
-  theirs).
-- **The branch's own words:** "Just call or **text** us at 610-436-0880, Mon–Fri 7–4." That's why the page's
-  main button is *Text the counter* — it's their channel, it comes from the tech's own phone, and nothing
-  fragile sits in between.
-- **Email** (purch411@hajoca.com is their published purchasing address) is published as a contact, not an
-  order channel. **Ask the counter** whether they'll work orders from email. If yes → set `ORDER_TO` to that
-  address and the voice page becomes fully hands-off. Until then, orders email you and the tech texts.
-- Browser automation of the web store is possible (it's a plain form-based site) but fragile; I'd only go
-  there if they say no to email and texting proves too slow.
+The web store (shop.weinsteinwestchester.com, Epicor Eclipse) is a plain form site, so `hcp_order.gs` now
+drives it the way a person would: **log in → Quickpad (`.partnumber` + qty) → cart → Standard Checkout
+(PO #, ordered by, ship via, required date, instructions) → submit.** "Express Checkout" is never used.
+
+**Script Properties (HCP Order project):**
+
+| Property | Value |
+|---|---|
+| `WEINSTEIN_USER` / `WEINSTEIN_PASS` | web-store login. Best: a dedicated user made on the site (My Account → Edit Users) so the script's cart never collides with a person's. |
+| `WEINSTEIN_MODE` | `off` = text/email only · `cart` = fill the cart, office checks out on the site · `submit` = hands-off, returns the Weinstein order # |
+| `WEINSTEIN_CONFIRM_EMAIL` | optional extra confirmation email (defaults to `ORDER_TO`) |
+| `WEINSTEIN_PHONE` | optional phone for the order (defaults to the company phone) |
+
+**Rolling it out:**
+1. Set the login + `WEINSTEIN_MODE = cart`. Run **verifyWeinstein** (logs in, reads the cart, changes nothing).
+2. Run **testWeinsteinCart** → one 3/4 PEX elbow ($0.99) lands in the cart with the comment "TEST - IGNORE". Open
+   the site, see it, empty the cart.
+3. Place a real order from the phone in `cart` mode for a day — the office opens My Cart → Standard Checkout.
+4. Flip `WEINSTEIN_MODE = submit`. (Optional dry run: `testWeinsteinSubmit` places a real $0.99 pickup order
+   with PO "TEST - VOICE TOOL" once you flip the guard constant at the bottom of the script.)
+
+**What the order carries:** PO # = `PO # <job>` / `TRUCK STOCK` / `SHOP STOCK` (same as before, so the weekly
+CSV → HCP upload still matches); Ordered By = the tech; Ship Via = *PKS PICKUP SOLAR* or *Delivery (OT)* with the
+job-site address when delivering to the job; Required Date from "tomorrow" / "Friday" / "10/16" (else today);
+Shipping Instructions = tech, pickup/delivery, needed-by, note, and any lines that had no exact part number
+("ALSO NEED …"). The done screen shows the Weinstein order # (or the cart link in `cart` mode); the Log sheet's
+Status column and the HCP job note get it too. If the store is down or the login fails, the order is still
+logged/emailed and the page falls back to **Text the counter**.
+
+**Still true:** no Hajoca API; texting 610-436-0880 is the branch's own channel and stays as the backup;
+SupplyZone's Quick Pad list is still offered on the done screen.
 
 ## Things to watch (unverified until the real run)
 
