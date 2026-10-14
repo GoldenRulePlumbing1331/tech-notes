@@ -265,7 +265,9 @@ function woMatch_(q, keywords, limit, catalog) {
     if (sizes.length && !sizes.some(s => row.sizes.indexOf(s) !== -1)) score *= 0.35;   // wrong size
     if (material && row.material && row.material !== material) score *= 0.4;            // wrong material
     if (hay.indexOf(phrase) !== -1) score += 1;                                          // whole phrase present
-    scored.push({ i: i, score: score / (concepts.length + 1) });
+    // Tie-break: a row with extra words the query never mentioned ("DROP EAR", "STREET") is a less exact match.
+    const extra = Math.max(0, row.ntok - hits);
+    scored.push({ i: i, score: score / (concepts.length + 1) - 0.03 * extra });
   }
   scored.sort((a, b) => b.score - a.score);
   return scored.slice(0, limit || WO.CANDIDATES).map(s => { const r = catalog[s.i]; return { part: r.part, desc: r.desc, uom: r.uom, price: r.price, score: Math.round(s.score * 100) / 100 }; });
@@ -304,7 +306,8 @@ function woReadCatalog_() {
     const aliases = String(r[5] || '');
     const toks = woTokens_(desc + ' ' + aliases + ' ' + part);
     const hay = ' ' + toks.join(' ') + ' ';
-    out.push({ part: part, desc: desc, uom: String(r[2] || '').trim(), price: Number(r[3]) || 0, hay: hay, sizes: toks.filter(woIsSize_), material: woMaterial_(toks) });
+    const descToks = woTokens_(desc).filter(t => t.length > 1 && t !== 'x');
+    out.push({ part: part, desc: desc, uom: String(r[2] || '').trim(), price: Number(r[3]) || 0, hay: hay, sizes: toks.filter(woIsSize_), material: woMaterial_(toks), ntok: descToks.length });
   });
   return out;
 }
