@@ -12,3 +12,8 @@ window.GR_ENDPOINTS = {
 
 /* Counter texting for the Order tool (the West Chester branch says "call or text" this number). */
 window.GR_COUNTER = { name: "Weinstein West Chester", sms: "6104360880" };
+
+/* Offline: install the service worker (sw.js) so every page opens with no signal after its first visit. */
+if ("serviceWorker" in navigator && location.protocol === "https:") {
+  try { navigator.serviceWorker.register("sw.js").catch(function () {}); } catch (e) {}
+}

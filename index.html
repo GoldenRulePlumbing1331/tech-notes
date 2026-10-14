@@ -10,12 +10,12 @@
 <style>
   :root {
     --bg: #f3f4f6; --card: #ffffff; --ink: #14181f; --muted: #5d6573; --line: #d5d9e0;
-    --brand: #14365c; --accent: #f2b632; --ok-bg: #e4f4e8; --ok-ink: #14532d;
+    --brand: #14365c; --accent: #f2b632; --ok-bg: #e4f4e8; --ok-ink: #14532d; --wait-bg: #fff4d6; --wait-ink: #6b4a00;
     --err-bg: #fde8e8; --err-ink: #7f1d1d; --rec: #c62828;
   }
   @media (prefers-color-scheme: dark) {
     :root { --bg: #0f1216; --card: #191d23; --ink: #eef1f5; --muted: #9aa3b0; --line: #2e343d;
-      --ok-bg: #12301d; --ok-ink: #b9f0c9; --err-bg: #3a1515; --err-ink: #ffc9c9; }
+      --ok-bg: #12301d; --ok-ink: #b9f0c9; --err-bg: #3a1515; --err-ink: #ffc9c9; --wait-bg: #3a2e0f; --wait-ink: #ffe3a3; }
   }
   * { box-sizing: border-box; }
   html, body { margin: 0; background: var(--bg); color: var(--ink); }
@@ -52,6 +52,16 @@
   #msg { display: none; white-space: pre-wrap; border-radius: 12px; padding: 14px; margin-top: 14px; }
   #msg.ok { display: block; background: var(--ok-bg); color: var(--ok-ink); }
   #msg.err { display: block; background: var(--err-bg); color: var(--err-ink); }
+  #msg.wait { display: block; background: var(--wait-bg); color: var(--wait-ink); }
+  .ob { border-top: 1px solid var(--line); padding: 10px 0; }
+  .ob:first-child { border-top: 0; padding-top: 2px; }
+  .ob b { display: block; }
+  .ob .txt { font-size: 14px; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .ob .st { font-size: 14px; margin-top: 4px; }
+  .ob .st.err { color: var(--err-ink); }
+  .ob .acts { display: flex; gap: 8px; margin-top: 8px; }
+  .ob .acts button { flex: 1; padding: 9px; font-family: inherit; font-size: 14px; font-weight: 600; border-radius: 9px;
+                     border: 1px solid var(--line); background: var(--card); color: var(--ink); }
   #codeCard { display: none; }
   a { color: inherit; }
   footer { text-align: center; font-size: 13px; color: var(--muted); margin-top: 18px; }
@@ -97,6 +107,12 @@
 <button id="send">Send to Housecall Pro</button>
 <div id="msg" role="status" aria-live="polite"></div>
 
+<div class="card" id="outboxCard" style="display:none">
+  <label>Waiting to send</label>
+  <div class="hint" id="outboxHint">Saved on this phone. They send themselves when you're back in signal, or next time you open this page.</div>
+  <div id="outboxList"></div>
+</div>
+
 <footer><a href="#" id="forget">Not you? Change code</a></footer>
 
 <script src="config.js"></script>
@@ -126,7 +142,7 @@
   $("modeReplace").onclick = function () { setMode("replace"); };
   $("modeAppend").onclick = function () { setMode("append"); };
 
-  function show(text, ok) { var m = $("msg"); m.textContent = text; m.className = ok ? "ok" : "err"; }
+  function show(text, ok, kind) { var m = $("msg"); m.textContent = text; m.className = kind || (ok ? "ok" : "err"); }
 
   // ---- speech ----
   var SR = window.SpeechRecognition || window.webkitSpeechRecognition;
@@ -178,6 +194,10 @@
         if (ev.error === "not-allowed" || ev.error === "service-not-allowed") {
           state.keep = false;
           show("❌ Microphone is blocked. Allow microphone access for this site in your browser settings.", false);
+        } else if (ev.error === "network") {
+          // Chrome's voice typing needs a connection. The keyboard's own mic key works offline.
+          state.keep = false;
+          show("📶 No signal for voice. Tap the box and use the microphone key on your keyboard instead — it works offline. Your note still saves and sends itself later.", false, "wait");
         }
       };
       rec.onend = function () {
@@ -231,6 +251,35 @@
     setTimeout(go, 2500);
   };
 
+  // ---- outbox: every note is saved on the phone first, then sent; anything that can't reach the
+  //      server stays queued and goes out on its own when signal returns (or next time the page opens).
+  var OUTBOX = "grNotesOutbox";
+  var TIMEOUT_MS = 40000;   // a send normally takes 5–15 s (Haiku cleanup + HCP); past this we treat it as no signal
+  function readBox() { try { var b = JSON.parse(get(OUTBOX) || "[]"); return Array.isArray(b) ? b : []; } catch (e) { return []; } }
+  function writeBox(b) { put(OUTBOX, JSON.stringify(b)); renderBox(); }
+  function boxUpdate(id, patch) { var b = readBox(); b.forEach(function (x) { if (x.id === id) Object.keys(patch).forEach(function (k) { x[k] = patch[k]; }); }); writeBox(b); }
+  function boxRemove(id) { writeBox(readBox().filter(function (x) { return x.id !== id; })); }
+  function newId() { return Date.now().toString(36) + Math.random().toString(36).slice(2, 8); }
+  function when(t) { return new Date(t).toLocaleString([], { weekday: "short", hour: "numeric", minute: "2-digit" }); }
+
+  // One attempt at the server. Resolves {ok, text} for a real reply; rejects on no signal / timeout.
+  function post(item) {
+    var ctrl = window.AbortController ? new AbortController() : null;
+    var timer = ctrl ? setTimeout(function () { ctrl.abort(); }, TIMEOUT_MS) : null;
+    return fetch(ENDPOINT, {
+      method: "POST", headers: { "Content-Type": "text/plain" }, signal: ctrl ? ctrl.signal : undefined,
+      body: JSON.stringify({ token: item.token, job: item.job, summary: item.summary, mode: item.mode, req_id: item.id })
+    }).then(function (r) { return r.text(); }).then(function (t) { return { ok: t.indexOf("✅") === 0, text: t }; })
+      .then(function (r) { if (timer) clearTimeout(timer); return r; }, function (e) { if (timer) clearTimeout(timer); throw e; });
+  }
+  function sent(item, text) {
+    boxRemove(item.id);
+    if (!get(KEY)) put(KEY, item.token);
+    try { var r = JSON.parse(get("grRecent") || "[]"); r.unshift({ tool: "Job Notes", text: "Job " + item.job, at: Date.now() }); put("grRecent", JSON.stringify(r.slice(0, 20))); } catch (e) {}
+    refreshWho();
+    return text;
+  }
+
   function send() {
     var code = get(KEY) || $("code").value.trim();
     var job = $("job").value.trim();
@@ -238,24 +287,69 @@
     if (!code) { show("❌ Enter your access code first.", false); return; }
     if (!/^\d+(-\d+)?$/.test(job)) { show("❌ Say or type the job number.", false); return; }
     if (!notes) { show("❌ Add your details first.", false); return; }
+    var item = { id: newId(), token: code, job: job, summary: notes, mode: mode, at: Date.now() };
+    var box = readBox(); box.push(item); writeBox(box);     // saved before we even try
     var b = $("send");
     b.disabled = true; b.textContent = "Sending…"; $("msg").className = "";
-    fetch(ENDPOINT, {
-      method: "POST",
-      headers: { "Content-Type": "text/plain" },
-      body: JSON.stringify({ token: code, job: job, summary: notes, mode: mode })
-    }).then(function (r) { return r.text(); }).then(function (t) {
-      var ok = t.indexOf("✅") === 0;
-      show(t, ok);
-      if (ok) {
-        if (!get(KEY)) put(KEY, code);
-        try { var r = JSON.parse(get("grRecent") || "[]"); r.unshift({ tool: "Job Notes", text: "Job " + job, at: Date.now() }); put("grRecent", JSON.stringify(r.slice(0, 20))); } catch (e) {}
-        $("notes").value = ""; setMode("replace"); refreshWho();
-      }
+    post(item).then(function (r) {
+      if (r.ok) { show(sent(item, r.text), true); $("notes").value = ""; setMode("replace"); }
+      else { boxRemove(item.id); show(r.text, false); }   // the server answered: a real problem to fix here (job number, code…)
     }).catch(function () {
-      show("❌ Couldn't reach the server. Check your signal and try again. Your details are still here.", false);
-    }).then(function () { b.disabled = false; b.textContent = "Send to Housecall Pro"; });
+      boxUpdate(item.id, { tries: 1, last: Date.now() });
+      $("notes").value = ""; setMode("replace");
+      show("📶 No signal — saved. Job " + job + " will send itself when you're back in range, or next time you open this page. (Anything you type now is a new note.)", false, "wait");
+    }).then(function () { b.disabled = false; b.textContent = "Send to Housecall Pro"; flushSoon(); });
   }
+
+  // ---- flush the queue: on open, when the phone comes back online, every minute while something waits ----
+  var flushing = false, flushTimer = null;
+  function flushSoon() { if (flushTimer) clearTimeout(flushTimer); flushTimer = setTimeout(flush, 1500); }
+  function flush(manualId) {
+    if (flushing) return;
+    var items = readBox().filter(function (x) { return manualId ? x.id === manualId : !x.err; });
+    if (!items.length) return;
+    flushing = true;
+    var i = 0, anySent = false;
+    (function next() {
+      if (i >= items.length) { flushing = false; if (anySent) show("✅ Saved notes sent." + (readBox().length ? " " + readBox().length + " still waiting." : ""), true); return; }
+      var item = items[i++];
+      if (!readBox().some(function (x) { return x.id === item.id; })) return next();   // deleted meanwhile
+      boxUpdate(item.id, { sending: true });
+      post(item).then(function (r) {
+        if (r.ok) { sent(item, r.text); anySent = true; }
+        else boxUpdate(item.id, { sending: false, err: r.text.replace(/^❌\s*/, "") });
+        next();
+      }).catch(function () {
+        boxUpdate(item.id, { sending: false, tries: (item.tries || 0) + 1, last: Date.now() });
+        flushing = false;   // no signal: stop here, the rest will fail the same way
+        renderBox();
+      });
+    })();
+  }
+  function renderBox() {
+    var box = readBox(), card = $("outboxCard"), list = $("outboxList");
+    card.style.display = box.length ? "block" : "none";
+    list.innerHTML = "";
+    box.forEach(function (x) {
+      var d = document.createElement("div"); d.className = "ob";
+      var t = document.createElement("b"); t.textContent = "Job " + x.job + " · " + when(x.at) + (x.mode === "append" ? " · add to details" : ""); d.appendChild(t);
+      var p = document.createElement("div"); p.className = "txt"; p.textContent = x.summary; d.appendChild(p);
+      var st = document.createElement("div"); st.className = "st" + (x.err ? " err" : "");
+      st.textContent = x.sending ? "Sending…" : x.err ? "❌ " + x.err + " — fix it with Edit, or delete it." : "Waiting for signal" + (x.tries ? " · tried " + x.tries + "×" : ""); d.appendChild(st);
+      var acts = document.createElement("div"); acts.className = "acts";
+      [["Send now", function () { boxUpdate(x.id, { err: "" }); flush(x.id); }],
+       ["Edit", function () { $("job").value = x.job; $("notes").value = x.summary; setMode(x.mode === "append" ? "append" : "replace"); boxRemove(x.id); window.scrollTo({ top: 0, behavior: "smooth" }); }],
+       ["Delete", function () { if (confirm("Delete the saved note for job " + x.job + "?")) boxRemove(x.id); }]
+      ].forEach(function (a) { var bt = document.createElement("button"); bt.textContent = a[0]; bt.onclick = a[1]; if (x.sending) bt.disabled = true; acts.appendChild(bt); });
+      d.appendChild(acts);
+      list.appendChild(d);
+    });
+  }
+  renderBox();
+  flushSoon();
+  window.addEventListener("online", flushSoon);
+  document.addEventListener("visibilitychange", function () { if (!document.hidden) flushSoon(); });
+  setInterval(function () { if (!document.hidden && readBox().some(function (x) { return !x.err; })) flush(); }, 60000);
 })();
 </script>
 </body>

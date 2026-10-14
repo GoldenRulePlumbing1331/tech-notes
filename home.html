@@ -113,6 +113,8 @@
       icon: "M3 4h2l3 10h10l3-7H7.4M9 18a1.5 1.5 0 100 3 1.5 1.5 0 000-3zm8 0a1.5 1.5 0 100 3 1.5 1.5 0 000-3z" }
   ];
 
+  // Job Notes saved with no signal (index.html's outbox) — shown as a badge so nobody forgets them.
+  function queued() { try { var b = JSON.parse(get("grNotesOutbox") || "[]"); return Array.isArray(b) ? b.length : 0; } catch (e) { return 0; } }
   function renderTiles() {
     var box = $("tiles"); box.innerHTML = "";
     TOOLS.forEach(function (t) {
@@ -121,6 +123,7 @@
       var ic = el("div", "ic"); ic.innerHTML = '<svg viewBox="0 0 24 24"><path d="' + t.icon + '"/></svg>'; a.appendChild(ic);
       a.appendChild(el("b", null, t.name)); a.appendChild(el("span", null, t.desc));
       if (!on) a.appendChild(el("div", "badge", "Not connected"));
+      else if (t.key === "notes") { var q = queued(); if (q) a.appendChild(el("div", "badge", q + " waiting to send")); }
       box.appendChild(a);
     });
   }
