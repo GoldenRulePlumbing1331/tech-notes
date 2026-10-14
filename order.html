@@ -157,7 +157,9 @@
 
 <!-- 3. Done -->
 <div class="card hidden" id="doneCard">
-  <h2>Send it to Weinstein</h2>
+  <h2 id="doneTitle">Send it to Weinstein</h2>
+  <div class="status hidden" id="weinMsg"></div>
+  <a class="btn hidden" id="cartBtn" href="#" target="_blank" rel="noopener">🛒 Open the Weinstein cart</a>
   <div class="hint" id="doneHint"></div>
   <a class="btn primary" id="smsBtn" href="#">💬 Text the counter</a>
   <button class="btn" id="copyQp">Copy Quick Pad list (SupplyZone app)</button>
@@ -187,7 +189,7 @@
   function recent(text) { try { var r = JSON.parse(get("grRecent") || "[]"); r.unshift({ tool: "Order", text: text, at: Date.now() }); put("grRecent", JSON.stringify(r.slice(0, 20))); } catch (e) {} }
   function seg(groupSel, attr, value) { Array.prototype.forEach.call(document.querySelectorAll(groupSel + " button"), function (b) { b.setAttribute("aria-pressed", b.dataset[attr] === value); }); }
 
-  var S = { code: "", who: "", today: "", shop: "", emailOn: false, emailTo: "", catalog: 0, forWhat: "job", ful: "pickup", to: "job", job: null, reqId: "", result: null };
+  var S = { code: "", who: "", today: "", shop: "", emailOn: false, emailTo: "", catalog: 0, wein: "", forWhat: "job", ful: "pickup", to: "job", job: null, reqId: "", result: null };
 
   // ---------- server ----------
   function api(action, data) {
@@ -207,6 +209,8 @@
       if (!r.ok) { if (quiet) { S.code = ""; showCode(""); } else showCode(r.error); return; }
       put(KEY, code);
       S.who = r.who || ""; S.today = r.today || ""; S.shop = r.shop_address || ""; S.emailOn = !!r.email_on; S.emailTo = r.email_to || ""; S.catalog = r.catalog || 0;
+      S.wein = r.weinstein === "submit" || r.weinstein === "cart" ? r.weinstein : "";
+      $("submit").textContent = S.wein === "submit" ? "Place order with Weinstein" : S.wein === "cart" ? "Put it in the Weinstein cart" : "Place order";
       show($("codeCard"), false); show($("app"), true); say("codeMsg", "");
     });
   }
@@ -383,9 +387,9 @@
     var order = { items: items, stock: stock, stock_kind: S.forWhat, job_number: stock ? "" : jobNum, fulfillment: S.ful, deliver_to: S.to,
                   deliver_address: $("delAddr").value.trim(), needed_by: $("needed").value.trim(), notes: $("notes").value.trim() };
     if (!S.reqId) S.reqId = Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
-    var b = $("submit"); b.disabled = true; b.textContent = "Placing…"; say("submitMsg", "");
+    var b = $("submit"); var label = b.textContent; b.disabled = true; b.textContent = S.wein ? "Sending to Weinstein… (about 15 s)" : "Placing…"; say("submitMsg", "");
     api("place", { req_id: S.reqId, order: order }).then(function (r) {
-      b.textContent = "Place order";
+      b.textContent = label;
       if (!r.ok) { b.disabled = false; if (!r.net) S.reqId = ""; say("submitMsg", "❌ " + r.error, "err"); return; }
       S.result = r;
       say("submitMsg", r.message, "ok");
@@ -395,9 +399,27 @@
   }
   function openDone(r) {
     var ios = /iPhone|iPad|iPod/i.test(navigator.userAgent);
+    var w = r.weinstein || null;
     $("smsBtn").href = "sms:" + COUNTER.sms + (ios ? "&" : "?") + "body=" + encodeURIComponent(r.sms_text);
     $("smsBtn").textContent = "💬 Text the counter (" + COUNTER.name + ")";
-    $("doneHint").textContent = (S.emailOn ? "A copy was emailed to " + S.emailTo + ". " : "") + "Texting is the branch's own ordering channel — tap below, check the message, send.";
+    show($("weinMsg"), !!w); show($("cartBtn"), false);
+    if (w && w.ok && w.mode === "submit") {
+      $("doneTitle").textContent = "Ordered from Weinstein";
+      say("weinMsg", "✅ " + w.note + (w.unmatched && w.unmatched.length ? "\n⚠️ Not on the web order (no part #): " + w.unmatched.join("; ") + " — ask at the counter." : ""), "ok");
+      $("doneHint").textContent = "The order is in. Nothing else to send — the text below is only if you want to add something.";
+      $("smsBtn").className = "btn"; $("smsBtn").textContent = "💬 Text the counter about it";
+    } else if (w && w.ok) {
+      $("doneTitle").textContent = "In the Weinstein cart";
+      say("weinMsg", "🛒 " + w.note + (w.unmatched && w.unmatched.length ? "\n⚠️ Not in the cart (no part #): " + w.unmatched.join("; ") : ""), "ok");
+      $("cartBtn").href = w.cart_url || "#"; show($("cartBtn"), true);
+      $("doneHint").textContent = "The office checks it out from the web store (My Cart → Standard Checkout). Texting the counter is optional.";
+      $("smsBtn").className = "btn"; $("smsBtn").textContent = "💬 Text the counter instead";
+    } else {
+      $("doneTitle").textContent = "Send it to Weinstein";
+      if (w) say("weinMsg", "⚠️ Couldn't place it on the web store: " + (w.error || "unknown error") + ". Text the counter instead.", "warn");
+      $("doneHint").textContent = (S.emailOn ? "A copy was emailed to " + S.emailTo + ". " : "") + "Texting is the branch's own ordering channel — tap below, check the message, send.";
+      $("smsBtn").className = "btn primary";
+    }
     $("orderText").textContent = r.sms_text;
     show($("copyQp"), !!r.quickpad);
     show($("doneCard"), true);

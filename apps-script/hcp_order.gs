@@ -6,14 +6,14 @@
  *   1. pulls the items out of the dictation with Claude Haiku,
  *   2. matches each item to a Weinstein part number from the Catalog tab of the "Weinstein Orders" sheet
  *      (filled from your HCP price book and/or Weinstein order-history CSVs — see setup),
- *   3. after the tech confirms, logs the order, emails it (to the office while testing; to the branch once
- *      they've agreed to take email orders), adds a private note on the HCP job, and hands the page a
- *      ready-to-send text for the counter plus a Quick Pad list for the SupplyZone app.
+ *   3. after the tech confirms, logs the order, emails it, places it on the Weinstein web store
+ *      (WEINSTEIN_MODE: fills the cart, or submits it and gets the order #), adds a private note on the
+ *      HCP job, and hands the page a ready-to-send text for the counter plus a Quick Pad list as backup.
  *
- * Why this shape: Hajoca/Weinstein publish no ordering API and HCP has no Hajoca integration. The
- * West Chester counter says "call or text us at 610-436-0880", and the web store takes a pasted
- * part-number list (Quickpad) or a CSV upload. So the script produces exactly those — and keeps a
- * record so the weekly Weinstein CSV → HCP upload has a "PO # <job>" to match against.
+ * Why this shape: Hajoca/Weinstein publish no ordering API and HCP has no Hajoca integration. Their web
+ * store (Epicor Eclipse) is a plain form site, so the script drives it the way a person would — and keeps
+ * a record so the weekly Weinstein CSV → HCP upload has a "PO # <job>" to match against. The counter's
+ * own channel ("call or text 610-436-0880") stays as the fallback when the store is down.
  *
  * ───────────── ONE-TIME SETUP ─────────────
  *  1. script.google.com → New project "HCP Order" → paste this file (owner: golden.rule.calendar@gmail.com).
@@ -28,6 +28,8 @@
  *       ORDER_CC          = optional, comma-separated (office inbox).
  *       ORDER_EMAIL       = "on" (default) or "off" — turn off to log + text only.
  *       SHOP_ADDRESS      = "1331 Pottstown Pike, West Chester, PA 19380"   (delivery-to-shop address)
+ *       WEINSTEIN_USER / WEINSTEIN_PASS / WEINSTEIN_MODE — direct submit to the web store; see the
+ *                           "Weinstein web store" section below. MODE off (default) → cart → submit.
  *  4. Run setupSheet() → creates the "Weinstein Orders" spreadsheet (Catalog + Log tabs) and saves its ID.
  *  5. Fill the Catalog — either/both:
  *       • run importCatalogFromHcpPriceBook()  → pulls every HCP price-book material that has a part number.
@@ -91,7 +93,7 @@ function jsonOut_(o) {
 
 function woInit_(who) {
   return { who: who, today: woToday_(), catalog: woCatalog_().length, shop_address: props_().getProperty('SHOP_ADDRESS') || '',
-           email_on: woEmailOn_(), email_to: props_().getProperty('ORDER_TO') || '' };
+           email_on: woEmailOn_(), email_to: props_().getProperty('ORDER_TO') || '', weinstein: weinMode_() };
 }
 
 function woEmailOn_() {
@@ -446,29 +448,324 @@ function woPlaceLocked_(p, who) {
     } catch (e) { console.warn('email failed: ' + e.message); emailed = 'FAILED: ' + e.message; }
   }
 
-  // 3. Private note on the HCP job
+  // 3. Weinstein web store — fill the cart or submit the order (WEINSTEIN_MODE), unless it's off.
+  const mode = weinMode_();
+  let wein = null;
+  if (mode !== 'off') {
+    try {
+      wein = weinOrder_(mode, lines, { who: who, poText: poText, fulfillment: fulfillment, needed: needed, notes: notes,
+        requiredDate: woRequiredDate_(needed, now, tz), deliverAddr: fulfillment === 'delivery' ? deliverAddr : '' });
+    } catch (e) {
+      console.warn('weinstein failed: ' + e.message);
+      wein = { mode: mode, ok: false, error: e.message, cart_url: WEIN.CART_URL };
+    }
+  }
+  const weinLine = !wein ? '' : wein.ok ? (wein.mode === 'submit' ? `Weinstein order ${wein.order_no}` : 'in Weinstein cart') : `Weinstein FAILED: ${wein.error}`;
+
+  // 4. Private note on the HCP job
   let noted = false;
   if (job) {
     try {
-      hcp_('post', `/jobs/${job.id}/notes`, { content: `Material ordered from Weinstein (voice, ${who}) — ${poText}, ${fulfillment}${needed ? ', needed ' + needed : ''}:\n` + lines.map(lineText).join('\n') + `\nOrder ${orderId}` });
+      hcp_('post', `/jobs/${job.id}/notes`, { content: `Material ordered from Weinstein (voice, ${who}) — ${poText}, ${fulfillment}${needed ? ', needed ' + needed : ''}:\n` + lines.map(lineText).join('\n') + `\nOrder ${orderId}` + (weinLine ? ` — ${weinLine}` : '') });
       noted = true;
     } catch (e) { console.warn('note failed: ' + e.message); }
   }
   try {
     const sh = woSheet_('Log');
-    if (sh && logged) { const r = sh.getLastRow(); sh.getRange(r, 9).setValue(emailed || 'off'); sh.getRange(r, 10).setValue(noted ? 'yes' : (job ? 'failed' : 'no job')); }
+    if (sh && logged) { const r = sh.getLastRow(); sh.getRange(r, 9).setValue(emailed || 'off'); sh.getRange(r, 10).setValue(noted ? 'yes' : (job ? 'failed' : 'no job')); if (weinLine) sh.getRange(r, 12).setValue('placed · ' + weinLine); }
   } catch (_) {}
 
-  console.log(`order ✅ ${orderId} ${poText} by ${who}: ${lines.length} line(s); email=${emailed || 'off'}; note=${noted}`);
+  console.log(`order ✅ ${orderId} ${poText} by ${who}: ${lines.length} line(s); email=${emailed || 'off'}; note=${noted}` + (weinLine ? '; ' + weinLine : ''));
   const msg = [`✅ Order ${orderId} recorded — ${poText}.`,
-    emailed && emailed.indexOf('FAILED') !== 0 ? `Emailed to ${emailed}.` : emailed ? '⚠️ Email failed — text the counter.' : 'Email is off — text the counter.',
+    wein && wein.ok ? '✅ ' + wein.note : wein ? `⚠️ Couldn't send it to the Weinstein web store (${wein.error}) — text the counter instead.` : '',
+    wein && wein.ok && wein.unmatched.length ? `⚠️ Not on the web order (no exact part #): ${wein.unmatched.join('; ')} — listed in the order's instructions; mention it at the counter.` : '',
+    emailed && emailed.indexOf('FAILED') !== 0 ? `Emailed to ${emailed}.` : emailed ? '⚠️ Email failed.' : (!wein ? 'Email is off — text the counter.' : ''),
     noted ? `Note added to job ${jobNum}.` : '',
-    noPart.length ? `⚠️ ${noPart.length} line(s) have no part number — the counter will match them.` : ''].filter(Boolean).join('\n');
-  return { ok: true, message: msg, order_id: orderId, sms_text: smsText, quickpad: quickpad, csv: csv, lines: lines.length };
+    noPart.length && !(wein && wein.ok) ? `⚠️ ${noPart.length} line(s) have no part number — the counter will match them.` : ''].filter(Boolean).join('\n');
+  return { ok: true, message: msg, order_id: orderId, sms_text: smsText, quickpad: quickpad, csv: csv, lines: lines.length, weinstein: wein };
+}
+
+/** "tomorrow" / "Thursday" / "10/16" in the needed-by text → MM/dd/yyyy for the store's Required Date; otherwise today. */
+function woRequiredDate_(needed, now, tz) {
+  const s = String(needed || '').toLowerCase();
+  let d = new Date(now.getTime());
+  const md = s.match(/\b(\d{1,2})\/(\d{1,2})(?:\/(\d{2,4}))?\b/);
+  if (md) {
+    const y = md[3] ? (md[3].length === 2 ? 2000 + Number(md[3]) : Number(md[3])) : Number(Utilities.formatDate(now, tz, 'yyyy'));
+    return `${String(md[1]).padStart(2, '0')}/${String(md[2]).padStart(2, '0')}/${y}`;
+  }
+  if (/tomorrow/.test(s)) d = new Date(d.getTime() + 86400000);
+  else {
+    const days = ['sunday', 'monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday'];
+    const want = days.findIndex(n => s.indexOf(n) !== -1 || s.indexOf(n.slice(0, 3)) !== -1 && new RegExp('\\b' + n.slice(0, 3) + '\\b').test(s));
+    if (want >= 0) { const today = days.indexOf(Utilities.formatDate(now, tz, 'EEEE').toLowerCase()); let ahead = (want - today + 7) % 7; if (ahead === 0) ahead = 7; d = new Date(d.getTime() + ahead * 86400000); }
+  }
+  return Utilities.formatDate(d, tz, 'MM/dd/yyyy');
 }
 
 function woCsv_(s) { s = String(s || ''); return /[",\n]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s; }
 function woHtml_(s) { return String(s || '').replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c])); }
+
+/* ───────────── Weinstein web store — direct submit ─────────────
+ *
+ * shop.weinsteinwestchester.com is Epicor Eclipse Web Order Entry: plain HTML forms, one endpoint
+ * (/eclipse.ecl), the session identified by a TRACKNO value that every request must carry (plus an SID
+ * cookie). The script does exactly what a person does, in order:
+ *   log in → Quickpad (".partnumber" + qty; exact matches drop straight into the cart) → cart →
+ *   Standard Checkout (shipping form: PO #, ordered by, ship via, required date, instructions) → submit.
+ * "Express Checkout" (submits with no form) is never used.
+ *
+ * Script Properties:
+ *   WEINSTEIN_USER / WEINSTEIN_PASS = web-store login. Best: a dedicated user made on the site under
+ *                                     My Account → Edit Users, so the script's cart never collides with a person's.
+ *   WEINSTEIN_MODE  = "off" (default — text/email only)
+ *                     "cart"   log in and fill the cart; the office opens the site → My Cart → Standard Checkout
+ *                     "submit" hands-off: submits the order and returns the Weinstein order #
+ *   WEINSTEIN_CONFIRM_EMAIL = extra order-confirmation email (optional; defaults to ORDER_TO)
+ *   WEINSTEIN_PHONE         = phone for the "Ordered By" block (default: company phone)
+ */
+const WEIN = {
+  BASE: 'https://shop.weinsteinwestchester.com', PATH: '/eclipse.ecl', WEBCO: 'W411R', BRANCH: '51',
+  SHIPVIA: { pickup: 'PKS PICKUP SOLAR', delivery: 'OT OUR TRUCK' },
+  BATCH: 10,            // Quickpad rows per POST
+  UA: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0 Safari/537.36 GoldenRuleVoiceOrder/1.0',
+  CART_URL: 'https://shop.weinsteinwestchester.com/eclipse.ecl?PROCID=H2.DISP.MAIN&DISP.ID=H2.DISP.ORDER.REVIEW',
+};
+
+function weinMode_() {
+  const m = String(props_().getProperty('WEINSTEIN_MODE') || 'off').trim().toLowerCase();
+  return m === 'submit' || m === 'cart' ? m : 'off';
+}
+
+/**
+ * Places `lines` on the web store. Returns { mode, ok, order_no, added, unmatched, subtotal, cart_url, note }.
+ * Throws only for login / site errors (the caller turns that into a "text the counter instead" message).
+ */
+function weinOrder_(mode, lines, info) {
+  const s = weinLogin_();
+  // Start clean: a half-finished earlier run (or a saved cart) must not ride along.
+  let cart = weinCart_(s);
+  if (cart.lines.length) { weinEmptyCart_(s); cart = weinCart_(s); if (cart.lines.length) throw new Error('could not empty the Weinstein cart'); }
+
+  // Quickpad in batches of 10 — only lines with a part number; exact code matches go into the cart.
+  const added = [], unmatched = [];
+  const coded = lines.filter(l => l.part);
+  for (let i = 0; i < coded.length; i += WEIN.BATCH) {
+    const batch = coded.slice(i, i + WEIN.BATCH);
+    const payload = { PROCID: 'H2.PROC.MAIN', TRACKNO: s.trackno };
+    for (let r = 1; r <= WEIN.BATCH; r++) { const l = batch[r - 1]; payload['PN' + r] = l ? '.' + l.part : ''; payload['QTY' + r] = l ? String(l.qty) : ''; }
+    payload.SUBMIT = 'Continue';
+    const html = weinFetch_(s, 'post', '', payload);
+    batch.forEach(l => {
+      // "There was 1 result for .350380 - … You have entered a quantity of 2 -- It has automatically been added to your cart"
+      // (a miss reads "There were 17 results for 350380" — no dot, and never "added"); don't run into the next item's block.
+      const re = new RegExp('was 1 result for \\.' + weinRe_(l.part) + '\\b(?:(?!results? for)[\\s\\S]){0,800}?automatically been added to your cart', 'i');
+      if (re.test(html)) added.push(l); else unmatched.push(l);
+    });
+  }
+  lines.filter(l => !l.part).forEach(l => unmatched.push(l));
+  cart = weinCart_(s);
+  if (!cart.lines.length) throw new Error('nothing landed in the Weinstein cart (' + unmatched.length + ' line(s) had no exact part-number match)');
+
+  const shipInst = weinShipInst_(info, unmatched);
+  if (mode === 'cart') {
+    // Leave it in the cart with the PO + who/when in the order comment, for the office to check out.
+    try { weinReviewPost_(s, cart, { UPDATE: '', 'GET.CMT': (info.poText + ' — ' + shipInst).slice(0, 250) }); } catch (e) { console.warn('cart comment: ' + e.message); }
+    return { mode: mode, ok: true, order_no: '', added: added.length, unmatched: unmatched.map(l => l.desc), subtotal: cart.subtotal, cart_url: WEIN.CART_URL,
+             note: 'In the Weinstein cart (' + cart.lines.length + ' line(s), $' + cart.subtotal + ') — log in to the web store → My Cart → Standard Checkout.' };
+  }
+
+  // Standard checkout → shipping form (prefilled with the account defaults) → override → submit.
+  const shipHtml = weinReviewPost_(s, cart, { STANDARD: '' });
+  const form = weinForm_(shipHtml, 'ShipToForm');
+  if (!form || !('PON' in form.fields)) throw new Error('checkout page did not show the shipping form');
+  const f = form.fields;
+  f.TRACKNO = s.trackno;
+  f.PON = info.poText;
+  f.ORDBY = String(info.who || f.ORDBY || '').slice(0, 30);
+  f.PHONE = props_().getProperty('WEINSTEIN_PHONE') || WO.COMPANY_PHONE;
+  f.CONFEMAIL = props_().getProperty('WEINSTEIN_CONFIRM_EMAIL') || props_().getProperty('ORDER_TO') || f.CONFEMAIL || '';
+  f.SHIPVIA = info.fulfillment === 'delivery' ? WEIN.SHIPVIA.delivery : WEIN.SHIPVIA.pickup;
+  f.REQUIREDDATE = info.requiredDate;
+  f.SHIPINST = shipInst;
+  if (info.fulfillment === 'delivery' && info.deliverAddr) {
+    const a = weinSplitAddr_(info.deliverAddr);
+    if (a) { f.ADDR1 = a.street; f.ADDR2 = a.street2 || ''; f.CITY = a.city; f.ST = a.state; f.ZIP = a.zip; }
+    else f.SHIPINST = ('DELIVER TO: ' + info.deliverAddr + '. ' + shipInst).slice(0, 300);
+  }
+  const done = weinFetch_(s, 'post', '', f);
+  const text = weinText_(done);
+  const err = text.match(/error processing your request|please correct|is required|invalid/i);
+  const orderNo = weinOrderNo_(text);
+  if (!orderNo && err) throw new Error('site said: ' + text.slice(Math.max(0, err.index - 80), err.index + 120));
+  const after = weinCart_(s);
+  if (!orderNo && after.lines.length) throw new Error('order did not go through — the cart still has ' + after.lines.length + ' line(s). Page said: ' + text.slice(0, 200));
+  return { mode: mode, ok: true, order_no: orderNo || '(submitted — no order # on the page)', added: added.length, unmatched: unmatched.map(l => l.desc), subtotal: cart.subtotal, cart_url: '',
+           note: 'Submitted to Weinstein' + (orderNo ? ' — order ' + orderNo : '') + ' (' + cart.lines.length + ' line(s), $' + cart.subtotal + ', ' + (info.fulfillment === 'delivery' ? 'delivery' : 'pickup West Chester') + ').',
+           page: text.slice(0, 400) };
+}
+
+function weinLogin_() {
+  const user = props_().getProperty('WEINSTEIN_USER'), pass = props_().getProperty('WEINSTEIN_PASS');
+  if (!user || !pass) throw new Error('WEINSTEIN_USER / WEINSTEIN_PASS are not set in Script Properties');
+  const s = { cookies: {}, trackno: '' };
+  weinFetch_(s, 'get', 'PROCID=H2.DISP.MAIN');
+  if (!s.trackno) throw new Error('Weinstein site gave no session (TRACKNO)');
+  let html = weinFetch_(s, 'post', '', { TRACKNO: s.trackno, DISPID: 'IGNORE', WEBCO: WEIN.WEBCO, RETAIL: '1', PROCID: 'H2.PROC.AUTH', BROWSER: WEIN.UA, D1: user, D2: pass });
+  if (!weinLoggedIn_(html)) html = weinFetch_(s, 'get', 'PROCID=H2.DISP.MAIN&TRACKNO=' + s.trackno);
+  if (!weinLoggedIn_(html)) {
+    const why = weinText_(html).match(/(invalid|incorrect|not recognized|locked|disabled)[^.]{0,80}/i);
+    throw new Error('Weinstein login failed' + (why ? ' — ' + why[0] : ' — check WEINSTEIN_USER / WEINSTEIN_PASS'));
+  }
+  const who = weinText_(html).match(/(?:Welcome|Logged in as)[,:]?\s+([^|\n]{2,60})/i);
+  s.user = who ? who[1].trim() : user;
+  return s;
+}
+function weinLoggedIn_(html) { return /H2\.DISP\.LOGOFF/.test(html); }
+
+/** One request, always carrying the session (cookies + TRACKNO); follows redirects by hand; refreshes TRACKNO. */
+function weinFetch_(s, method, query, payload) {
+  const headers = { 'User-Agent': WEIN.UA, Accept: 'text/html,application/xhtml+xml,*/*;q=0.8', 'Accept-Language': 'en-US,en;q=0.9' };
+  if (Object.keys(s.cookies).length) headers.Cookie = Object.keys(s.cookies).map(k => k + '=' + s.cookies[k]).join('; ');
+  let url = WEIN.BASE + WEIN.PATH + (query ? '?' + query : '');
+  const opts = { method: method, headers: headers, muteHttpExceptions: true, followRedirects: false };
+  if (payload) opts.payload = payload;   // object → application/x-www-form-urlencoded
+  let res = UrlFetchApp.fetch(url, opts);
+  weinCookies_(s, res);
+  for (let hop = 0; hop < 3; hop++) {
+    const code = res.getResponseCode();
+    if ([301, 302, 303, 307].indexOf(code) === -1) break;
+    const h = res.getAllHeaders ? res.getAllHeaders() : res.getHeaders();
+    let loc = h.Location || h.location; if (!loc) break;
+    if (!/^https?:/i.test(loc)) loc = WEIN.BASE + (loc[0] === '/' ? '' : '/') + loc;
+    headers.Cookie = Object.keys(s.cookies).map(k => k + '=' + s.cookies[k]).join('; ');
+    res = UrlFetchApp.fetch(loc, { method: 'get', headers: headers, muteHttpExceptions: true, followRedirects: false });
+    weinCookies_(s, res);
+  }
+  if (res.getResponseCode() >= 400) throw new Error('Weinstein site → HTTP ' + res.getResponseCode());
+  const html = res.getContentText();
+  const m = html.match(/name=["']TRACKNO["'][^>]*value=["']([^"']+)["']/i) || html.match(/value=["']([^"']+)["'][^>]*name=["']TRACKNO["']/i);
+  if (m) s.trackno = m[1];
+  return html;
+}
+function weinCookies_(s, res) {
+  const h = res.getAllHeaders ? res.getAllHeaders() : res.getHeaders();
+  let sc = h['Set-Cookie'] || h['set-cookie'];
+  if (!sc) return;
+  if (!Array.isArray(sc)) sc = [sc];
+  sc.forEach(c => { const kv = String(c).split(';')[0]; const i = kv.indexOf('='); if (i > 0) s.cookies[kv.slice(0, i).trim()] = kv.slice(i + 1).trim(); });
+}
+
+/** Cart page → { lines:[{n, part, qty, cmt}], subtotal, form } */
+function weinCart_(s) {
+  const html = weinFetch_(s, 'get', 'PROCID=H2.DISP.MAIN&DISP.ID=H2.DISP.ORDER.REVIEW&MSOURCE=NavButton&TRACKNO=' + s.trackno);
+  const form = weinForm_(html, 'review_form');
+  const lines = [];
+  if (form) Object.keys(form.fields).forEach(k => {
+    const m = k.match(/^PN(\d+)$/);
+    if (m && form.fields[k]) lines.push({ n: Number(m[1]), part: form.fields[k], qty: Number(form.fields['QTY' + m[1]] || 0), cmt: form.fields['CMT' + m[1]] || '' });
+  });
+  lines.sort((a, b) => a.n - b.n);
+  const sub = weinText_(html).match(/Cart Subtotal:\s*\$\s*([\d,]+\.\d\d)/i);
+  return { lines: lines, subtotal: sub ? sub[1] : '0.00', form: form };
+}
+/** POSTs the cart form (all current lines) plus `extra` (e.g. {STANDARD:''}, {EMPTY:''}, {UPDATE:'', 'GET.CMT':…}). */
+function weinReviewPost_(s, cart, extra) {
+  if (!cart.form) throw new Error('cart form not found');
+  const f = Object.assign({}, cart.form.fields, extra);
+  f.TRACKNO = s.trackno;
+  return weinFetch_(s, 'post', '', f);
+}
+function weinEmptyCart_(s) {
+  const cart = weinCart_(s);
+  if (!cart.lines.length) return;
+  const confirm = weinReviewPost_(s, cart, { EMPTY: '' });            // site asks "Confirm or Cancel Deletion"
+  const form = weinForm_(confirm, 'review_form');
+  if (form && /DELETE/i.test(form.buttons.join(','))) { const f = Object.assign({}, form.fields, { DELETE: '', TRACKNO: s.trackno }); weinFetch_(s, 'post', '', f); }
+}
+
+function weinShipInst_(info, unmatched) {
+  const bits = ['Voice order by ' + info.who + ' (Golden Rule Plumbing)', info.fulfillment === 'delivery' ? 'DELIVERY' : 'PICKUP'];
+  if (info.needed) bits.push('Needed: ' + info.needed);
+  if (info.notes) bits.push(info.notes);
+  if (unmatched.length) bits.push('ALSO NEED (no part #): ' + unmatched.map(l => l.qty + ' x ' + l.desc).join('; '));
+  return bits.join('. ').slice(0, 300);
+}
+function weinSplitAddr_(str) {
+  const m = String(str || '').match(/^(.+?),\s*(?:(.+?),\s*)?([^,]+?),\s*([A-Za-z]{2})\s+(\d{5})(?:-\d{4})?$/);
+  if (!m) return null;
+  return { street: m[1].trim(), street2: m[2] ? m[2].trim() : '', city: m[3].trim(), state: m[4].toUpperCase(), zip: m[5] };
+}
+function weinOrderNo_(text) {
+  const m = text.match(/\bS\d{6,9}(?:\.\d{3})?\b/) || text.match(/Order\s*(?:Number|No\.?|#)\s*[:\-]?\s*([A-Z]?\d{5,}(?:\.\d{3})?)/i);
+  return m ? (m[1] || m[0]) : '';
+}
+
+/** Parses one <form name=…> (or id) into { fields:{name:value}, buttons:[names] } — hidden/text/select/textarea/checked only. */
+function weinForm_(html, name) {
+  const open = new RegExp('<form\\b[^>]*(?:name|id)=["\']' + weinRe_(name) + '["\'][^>]*>', 'i').exec(html);
+  if (!open) return null;
+  const rest = html.slice(open.index + open[0].length);
+  const end = rest.search(/<\/form>/i);
+  const body = end >= 0 ? rest.slice(0, end) : rest;
+  const fields = {}, buttons = [];
+  const attr = (tag, a) => { const m = tag.match(new RegExp('\\b' + a + '\\s*=\\s*(?:"([^"]*)"|\'([^\']*)\'|([^\\s>]+))', 'i')); return m ? weinUnesc_(m[1] != null ? m[1] : m[2] != null ? m[2] : m[3]) : null; };
+  (body.match(/<input\b[^>]*>/gi) || []).forEach(tag => {
+    const n = attr(tag, 'name'); if (!n) return;
+    const t = (attr(tag, 'type') || 'text').toLowerCase();
+    if (t === 'submit' || t === 'button' || t === 'image' || t === 'file') return;
+    if ((t === 'checkbox' || t === 'radio') && !/\bchecked\b/i.test(tag)) return;
+    fields[n] = attr(tag, 'value') || '';
+  });
+  (body.match(/<select\b[^>]*>[\s\S]*?<\/select>/gi) || []).forEach(sel => {
+    const n = attr(sel, 'name'); if (!n) return;
+    const opts = sel.match(/<option\b[^>]*>/gi) || [];
+    const pick = opts.find(o => /\bselected\b/i.test(o)) || opts[0];
+    fields[n] = pick ? (attr(pick, 'value') != null ? attr(pick, 'value') : '') : '';
+  });
+  (body.match(/<textarea\b[^>]*>[\s\S]*?<\/textarea>/gi) || []).forEach(ta => {
+    const n = attr(ta, 'name'); if (!n) return;
+    fields[n] = weinUnesc_(ta.replace(/^<textarea\b[^>]*>/i, '').replace(/<\/textarea>$/i, ''));
+  });
+  (body.match(/<button\b[^>]*>/gi) || []).forEach(b => { const n = attr(b, 'name'); if (n) buttons.push(n); });
+  return { fields: fields, buttons: buttons };
+}
+function weinText_(html) {
+  return String(html || '').replace(/<script[\s\S]*?<\/script>/gi, ' ').replace(/<style[\s\S]*?<\/style>/gi, ' ').replace(/<[^>]+>/g, ' ').replace(/&nbsp;/g, ' ').replace(/\s+/g, ' ');
+}
+function weinUnesc_(s) { return String(s == null ? '' : s).replace(/&amp;/g, '&').replace(/&quot;/g, '"').replace(/&#39;/g, "'").replace(/&lt;/g, '<').replace(/&gt;/g, '>'); }
+function weinRe_(s) { return String(s).replace(/[.*+?^${}()|[\]\\]/g, '\\$&'); }
+
+/* ───────────── Weinstein checks (run from the editor) ───────────── */
+
+/** Logs in, reports who/mode/cart. Changes nothing. */
+function verifyWeinstein() {
+  console.log('WEINSTEIN_MODE = ' + weinMode_() + (weinMode_() === 'off' ? '  (orders are text/email only; set "cart" or "submit")' : ''));
+  const s = weinLogin_();
+  console.log('✅ Logged in to shop.weinsteinwestchester.com as ' + s.user + ' (session ' + s.trackno.slice(0, 4) + '…)');
+  const cart = weinCart_(s);
+  console.log(cart.lines.length ? '🛒 Cart already has ' + cart.lines.length + ' line(s), $' + cart.subtotal + ': ' + cart.lines.map(l => l.part + ' x' + l.qty).join(', ') + ' — the script empties the cart before each order.' : '🛒 Cart is empty.');
+}
+
+/** Puts one cheap item (3/4 PEX elbow, $0.99) in the Weinstein cart and leaves it there — nothing is ordered. */
+function testWeinsteinCart() {
+  const r = weinOrder_('cart', [{ qty: 1, part: '350380', desc: '3/4 PEX CRIMP 90 ELBOW', note: '' }, { qty: 1, part: '', desc: 'something with no part number', note: '' }],
+    { who: 'TJ Lasco', poText: 'TEST - IGNORE', fulfillment: 'pickup', needed: 'no rush', notes: 'voice-tool test', requiredDate: Utilities.formatDate(new Date(), woTz_(), 'MM/dd/yyyy'), deliverAddr: '' });
+  console.log(JSON.stringify(r, null, 1));
+  console.log('Now open ' + WEIN.CART_URL + ' → you should see 1 line. Empty the cart when done.');
+}
+
+/**
+ * REAL ORDER. Submits one 3/4 PEX elbow ($0.99, pickup) with PO "TEST - VOICE TOOL" so you can see the
+ * order # come back and confirm with the counter. Flip the guard to true, run once, flip it back.
+ */
+const I_REALLY_WANT_TO_SUBMIT_A_TEST_ORDER = false;
+function testWeinsteinSubmit() {
+  if (!I_REALLY_WANT_TO_SUBMIT_A_TEST_ORDER) throw new Error('Set I_REALLY_WANT_TO_SUBMIT_A_TEST_ORDER = true first (it places a real $0.99 order).');
+  const r = weinOrder_('submit', [{ qty: 1, part: '350380', desc: '3/4 PEX CRIMP 90 ELBOW', note: '' }],
+    { who: 'TJ Lasco', poText: 'TEST - VOICE TOOL', fulfillment: 'pickup', needed: 'no rush — test order, call 610-701-3371 with questions', notes: '', requiredDate: Utilities.formatDate(new Date(), woTz_(), 'MM/dd/yyyy'), deliverAddr: '' });
+  console.log(JSON.stringify(r, null, 1));
+}
 
 /* ───────────── dates, Claude ───────────── */
 
