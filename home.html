@@ -109,7 +109,7 @@
       icon: "M7 2h2v2h6V2h2v2h3v18H4V4h3zm-1 7v11h12V9zm2 2h3v3H8zm5 0h3v3h-3z" },
     { key: "estimate", href: "estimate.html", name: "Estimate",       desc: "Describe the options — get a draft estimate.",
       icon: "M6 2h9l5 5v15H6zm8 1.5V8h4.5zM8 11h8v2H8zm0 4h8v2H8zm0-8h4v2H8z" },
-    { key: "order",    href: "order.html",    name: "Order Material", desc: "Say the parts — text or email Weinstein.",
+    { key: "order",    href: "order.html",    name: "Order Material", desc: "Work in progress — not usable yet.", wip: true,
       icon: "M3 4h2l3 10h10l3-7H7.4M9 18a1.5 1.5 0 100 3 1.5 1.5 0 000-3zm8 0a1.5 1.5 0 100 3 1.5 1.5 0 000-3z" }
   ];
 
@@ -123,6 +123,7 @@
       var ic = el("div", "ic"); ic.innerHTML = '<svg viewBox="0 0 24 24"><path d="' + t.icon + '"/></svg>'; a.appendChild(ic);
       a.appendChild(el("b", null, t.name)); a.appendChild(el("span", null, t.desc));
       if (!on) a.appendChild(el("div", "badge", "Not connected"));
+      else if (t.wip) { a.classList.add("off"); a.appendChild(el("div", "badge", "Work in progress")); }
       else if (t.key === "notes") { var q = queued(); if (q) a.appendChild(el("div", "badge", q + " waiting to send")); }
       box.appendChild(a);
     });

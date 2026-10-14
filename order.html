@@ -83,6 +83,10 @@
   <a class="nav" href="home.html">All tools →</a>
 </header>
 
+<div class="card" id="wipCard" style="border-color:#e0a800;background:var(--warn-bg);color:var(--warn-ink)">
+  <b>🚧 Work in progress — not usable yet</b>
+  <div style="margin-top:6px;font-size:15px">Ordering from Weinstein by voice is still being set up. For now, call or text the counter at <a href="sms:6104360880">610-436-0880</a> like usual.</div>
+</div>
 <div class="card hidden" id="codeCard">
   <label for="code">Your access code</label>
   <input id="code" inputmode="numeric" autocomplete="off" placeholder="8-digit code">
@@ -151,7 +155,7 @@
     <input id="notes" autocomplete="off" placeholder="e.g. Bradford White if you have it, call when ready">
   </div>
 
-  <button class="btn go" id="submit">Place order</button>
+  <button class="btn go" id="submit" disabled title="Not usable yet">Place order (not usable yet)</button>
   <div class="status" id="submitMsg"></div>
 </div>
 
@@ -210,7 +214,9 @@
       put(KEY, code);
       S.who = r.who || ""; S.today = r.today || ""; S.shop = r.shop_address || ""; S.emailOn = !!r.email_on; S.emailTo = r.email_to || ""; S.catalog = r.catalog || 0;
       S.wein = r.weinstein === "submit" || r.weinstein === "cart" ? r.weinstein : "";
-      $("submit").textContent = S.wein === "submit" ? "Place order with Weinstein" : S.wein === "cart" ? "Put it in the Weinstein cart" : "Place order";
+      var WIP = true;   // work in progress — flip to false when the Weinstein direct submit is cleared for use
+      $("submit").textContent = WIP ? "Place order (not usable yet)" : S.wein === "submit" ? "Place order with Weinstein" : S.wein === "cart" ? "Put it in the Weinstein cart" : "Place order";
+      $("submit").disabled = WIP;
       show($("codeCard"), false); show($("app"), true); say("codeMsg", "");
     });
   }
@@ -300,7 +306,7 @@
 
   function openReview(r) {
     var req = r.request || {};
-    S.reqId = ""; S.result = null; say("submitMsg", ""); $("submit").disabled = false;
+    S.reqId = ""; S.result = null; say("submitMsg", ""); $("submit").disabled = /not usable/.test($("submit").textContent);
     setFor(req.stock ? "truck" : "job");
     $("jobNum").value = req.job_number || "";
     showJob(r.job || null, r.job_error || "");
@@ -436,7 +442,7 @@
   $("again").onclick = function () {
     S.job = null; S.result = null; S.reqId = "";
     $("heard").value = ""; $("items").innerHTML = ""; $("jobNum").value = ""; $("needed").value = ""; $("notes").value = ""; $("delAddr").value = "";
-    say("talkMsg", ""); say("submitMsg", ""); $("submit").disabled = false;
+    say("talkMsg", ""); say("submitMsg", ""); $("submit").disabled = /not usable/.test($("submit").textContent);
     show($("reviewCard"), false); show($("doneCard"), false);
     window.scrollTo({ top: 0, behavior: "smooth" });
   };
