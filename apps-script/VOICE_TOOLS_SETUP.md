@@ -1,4 +1,13 @@
-# Golden Rule voice tools — morning setup & test guide
+# Golden Rule voice tools — setup & test guide
+
+> **Status (2026-10-14, 12:50 PM):** all three Apps Script projects are created, configured, authorized and
+> deployed; `config.js` on the `voice-tools` branch has all five URLs. `verifyAccess()` passed on real HCP for
+> all three (schedule/dispatch writes work with the Company key; time round-trips exactly; price book is
+> searchable). The Weinstein Orders sheet exists with 443 parts from the HCP price book. Remaining: merge the
+> `voice-tools` branch, update `HCP_API_KEY` in the HCP Lead Alert project and `D:\Job_Uploads\config.json`,
+> delete `D:\tech-notes\apps-script\secrets.txt`, test on a phone. The step-by-step below is kept for
+> reference / rebuilding.
+
 
 Built overnight 2026-10-14. Three new voice tools plus a home page, each its own Apps Script project
 (same pattern as Job Notes and New Job). Everything was exercised end to end against a fake HCP and a
