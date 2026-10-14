@@ -1,0 +1,14 @@
+/* Golden Rule voice tools — one place for every Apps Script web-app URL.
+ * Each tool is its own Apps Script project. After you deploy one (Deploy → Web app → /exec URL),
+ * paste the URL here. A tool with an empty URL shows as "not connected yet" on the home page.
+ * Pages that still have an inline ENDPOINT fall back to it when the entry here is empty. */
+window.GR_ENDPOINTS = {
+  notes:    "https://script.google.com/macros/s/AKfycbzmZAs9GmVh6srwcwMabNf2LKEjMH1lumMvy5vlB1AKVbMMjQnGfTmN0z67UpTQc4JC_w/exec",
+  newJob:   "https://script.google.com/macros/s/AKfycbzEWKwytSekz0nzDibpQRIpVN3EVKD3tn_kM20YF_EBcMuIaqL2jZCEcyptUoiAs6Vrgw/exec",
+  dispatch: "",
+  estimate: "",
+  order:    ""
+};
+
+/* Counter texting for the Order tool (the West Chester branch says "call or text" this number). */
+window.GR_COUNTER = { name: "Weinstein West Chester", sms: "6104360880" };

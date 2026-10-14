@@ -1,0 +1,11 @@
+{
+  "name": "Golden Rule Tools",
+  "short_name": "Golden Rule",
+  "start_url": "home.html",
+  "display": "standalone",
+  "background_color": "#14365c",
+  "theme_color": "#14365c",
+  "icons": [
+    { "src": "icon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any" }
+  ]
+}

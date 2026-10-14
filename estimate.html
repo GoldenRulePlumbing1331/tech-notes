@@ -1,0 +1,584 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#14365c">
+<meta name="robots" content="noindex">
+<title>Estimate</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='14' fill='%2314365c'/%3E%3Crect x='25' y='12' width='14' height='26' rx='7' fill='%23f2b632'/%3E%3Cpath d='M18 32a14 14 0 0 0 28 0' stroke='%23f2b632' stroke-width='4' fill='none'/%3E%3Crect x='30' y='46' width='4' height='8' fill='%23f2b632'/%3E%3C/svg%3E">
+<style>
+  :root {
+    --bg: #f3f4f6; --card: #ffffff; --ink: #14181f; --muted: #5d6573; --line: #d5d9e0; --soft: #eef1f5;
+    --brand: #14365c; --accent: #f2b632; --ok-bg: #e4f4e8; --ok-ink: #14532d;
+    --err-bg: #fde8e8; --err-ink: #7f1d1d; --warn-bg: #fff4d6; --warn-ink: #6b4a00; --rec: #c62828;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root { --bg: #0f1216; --card: #191d23; --ink: #eef1f5; --muted: #9aa3b0; --line: #2e343d; --soft: #222831;
+      --ok-bg: #12301d; --ok-ink: #b9f0c9; --err-bg: #3a1515; --err-ink: #ffc9c9; --warn-bg: #3a2e10; --warn-ink: #ffe3a1; }
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; background: var(--bg); color: var(--ink); }
+  body { font: 17px/1.45 -apple-system, "Segoe UI", Roboto, Arial, sans-serif;
+         padding: 16px 16px calc(24px + env(safe-area-inset-bottom)); max-width: 560px; margin: 0 auto; }
+  header { display: flex; align-items: center; gap: 10px; margin: 4px 0 16px; }
+  header .dot { width: 34px; height: 34px; border-radius: 9px; background: var(--brand);
+                display: grid; place-items: center; color: var(--accent); font-weight: 800; flex: none; text-decoration: none; }
+  h1 { font-size: 21px; margin: 0; flex: 1; }
+  header a.nav { font-size: 15px; font-weight: 600; color: var(--brand); text-decoration: none; white-space: nowrap; }
+  @media (prefers-color-scheme: dark) { header a.nav { color: var(--accent); } }
+  h2 { font-size: 15px; text-transform: uppercase; letter-spacing: .06em; color: var(--muted); margin: 0 0 10px; }
+  .card { background: var(--card); border: 1px solid var(--line); border-radius: 14px; padding: 14px; margin-bottom: 14px; }
+  .hidden { display: none !important; }
+  label { display: block; font-weight: 650; margin-bottom: 6px; }
+  input, textarea, select { width: 100%; font: inherit; color: var(--ink); background: var(--card);
+                    border: 1px solid var(--line); border-radius: 10px; padding: 11px 12px; }
+  input.missing { border-color: var(--rec); background: var(--err-bg); }
+  textarea { min-height: 110px; resize: vertical; }
+  textarea.desc { min-height: 90px; font-size: 15px; }
+  .seg { display: flex; gap: 6px; margin-bottom: 12px; }
+  .seg button { flex: 1; padding: 11px 6px; font: 600 15px/1.2 inherit; font-family: inherit; border-radius: 10px;
+                border: 1px solid var(--line); background: var(--card); color: var(--ink); }
+  .seg button[aria-pressed="true"] { background: var(--brand); color: #fff; border-color: var(--brand); }
+  .hint { font-size: 14px; color: var(--muted); margin-top: 8px; }
+  .mic { border: 0; border-radius: 12px; background: var(--brand); color: #fff; cursor: pointer;
+         width: 100%; height: 68px; font: 650 19px/1 inherit; font-family: inherit;
+         display: flex; justify-content: center; align-items: center; gap: 10px; }
+  .mic svg { width: 26px; height: 26px; }
+  .mic.rec { background: var(--rec); animation: pulse 1.2s infinite; }
+  @keyframes pulse { 50% { opacity: .75; } }
+  #heard { margin-top: 10px; min-height: 130px; }
+  .btn { width: 100%; padding: 13px; border-radius: 12px; font: 700 16px/1 inherit; font-family: inherit;
+         border: 1px solid var(--line); background: var(--soft); color: var(--ink); margin-top: 10px; cursor: pointer; }
+  .btn:disabled { opacity: .55; }
+  .btn.sm { width: auto; padding: 9px 12px; font-size: 14px; margin: 0; }
+  #submit { padding: 18px; border: 0; background: var(--accent); color: #1a1300; font-size: 19px; font-weight: 800; }
+  .status { display: none; white-space: pre-wrap; border-radius: 12px; padding: 12px 14px; margin-top: 12px; font-size: 16px; }
+  .status.ok { display: block; background: var(--ok-bg); color: var(--ok-ink); }
+  .status.err { display: block; background: var(--err-bg); color: var(--err-ink); }
+  .status.warn { display: block; background: var(--warn-bg); color: var(--warn-ink); }
+  .status.busy { display: block; background: var(--soft); color: var(--muted); }
+  .match { display: block; width: 100%; text-align: left; font: inherit; color: var(--ink); background: var(--card);
+           border: 1px solid var(--line); border-radius: 12px; padding: 12px; margin-bottom: 8px; cursor: pointer; }
+  .match:active { background: var(--soft); }
+  .match b { display: block; font-size: 18px; }
+  .match span { display: block; font-size: 15px; color: var(--muted); }
+  .match .tag { display: inline-block; font-size: 12px; font-weight: 700; color: var(--ok-ink); background: var(--ok-bg);
+                border-radius: 6px; padding: 1px 6px; margin-left: 6px; vertical-align: middle; }
+  .row { display: flex; gap: 8px; }
+  .row > * { min-width: 0; }
+  dl { display: grid; grid-template-columns: max-content 1fr; gap: 8px 14px; margin: 0; }
+  dt { color: var(--muted); font-size: 15px; }
+  dd { margin: 0; font-weight: 600; overflow-wrap: anywhere; }
+  dd.none { color: var(--warn-ink); font-style: italic; }
+  .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+  .grid .full { grid-column: 1 / -1; }
+  .grid > div { min-width: 0; }
+  input[type="date"], input[type="time"] { min-width: 0; -webkit-appearance: none; appearance: none; min-height: 46px; }
+  .grid label { font-size: 14px; margin-bottom: 4px; }
+  .choice { display: flex; gap: 10px; align-items: flex-start; padding: 10px; border: 1px solid var(--line);
+            border-radius: 10px; margin-top: 8px; font-weight: 500; cursor: pointer; }
+  .choice input { width: 20px; height: 20px; margin: 2px 0 0; flex: none; }
+  .sub { margin-top: 16px; padding-top: 14px; border-top: 1px solid var(--line); }
+  .link { background: none; border: 0; padding: 0; font: inherit; font-size: 15px; color: var(--brand); text-decoration: underline; cursor: pointer; }
+  @media (prefers-color-scheme: dark) { .link { color: var(--accent); } }
+  .shows { font-size: 15px; color: var(--muted); margin-top: 8px; }
+  .shows b { color: var(--ink); }
+  /* options editor */
+  .opt { border: 2px solid var(--brand); border-radius: 12px; padding: 12px; margin-top: 12px; }
+  .opt .head { display: flex; gap: 8px; align-items: center; margin-bottom: 8px; }
+  .opt .head input { font-weight: 700; font-size: 17px; }
+  .li { background: var(--soft); border-radius: 10px; padding: 10px; margin-top: 8px; }
+  .li .top { display: flex; gap: 6px; align-items: center; }
+  .li .top input { font-weight: 600; }
+  .li .nums { display: grid; grid-template-columns: 1fr 1.4fr 1.2fr; gap: 6px; margin-top: 6px; }
+  .li .nums label { font-size: 12px; color: var(--muted); margin-bottom: 2px; }
+  .li input.price.needs { border-color: var(--rec); background: var(--err-bg); }
+  .pb { margin-top: 6px; }
+  .pb select { font-size: 14px; padding: 8px 10px; }
+  .x { flex: none; width: 40px; height: 44px; border-radius: 10px; border: 1px solid var(--line); background: var(--card); color: var(--muted); font: 700 18px/1 inherit; cursor: pointer; }
+  .total { text-align: right; font-weight: 700; margin-top: 8px; }
+  .acts { display: flex; gap: 8px; margin-top: 8px; flex-wrap: wrap; }
+  footer { text-align: center; font-size: 13px; color: var(--muted); margin-top: 18px; }
+  footer a { color: inherit; }
+</style>
+</head>
+<body>
+<header>
+  <a class="dot" href="home.html" aria-label="All tools">GR</a>
+  <h1>Estimate</h1>
+  <a class="nav" href="home.html">All tools →</a>
+</header>
+
+<div class="card hidden" id="codeCard">
+  <label for="code">Your access code</label>
+  <input id="code" inputmode="numeric" autocomplete="off" placeholder="8-digit code">
+  <button class="btn" id="codeGo">Continue</button>
+  <div class="status" id="codeMsg"></div>
+</div>
+
+<div id="app" class="hidden">
+
+<!-- 1. Talk -->
+<div class="card">
+  <div class="seg" role="group" aria-label="Customer type">
+    <button data-mode="auto" aria-pressed="true">Find for me</button>
+    <button data-mode="repeat" aria-pressed="false">Repeat</button>
+    <button data-mode="new" aria-pressed="false">New</button>
+  </div>
+  <button class="mic" id="micMain">
+    <svg viewBox="0 0 24 24" fill="currentColor"><path d="M12 15a3 3 0 0 0 3-3V6a3 3 0 0 0-6 0v6a3 3 0 0 0 3 3zm5-3a5 5 0 0 1-10 0H5a7 7 0 0 0 6 6.92V21h2v-2.08A7 7 0 0 0 19 12h-2z"/></svg>
+    <span id="micMainLabel">Tap to talk</span>
+  </button>
+  <div class="hint" id="modeHint"></div>
+  <textarea id="heard" placeholder="Who the customer is, what you found, and each option. “Option one… option two…” You can fix the text before drafting."></textarea>
+  <button class="btn" id="lookup">Draft it</button>
+  <div class="status" id="talkMsg"></div>
+</div>
+
+<!-- 2. Matches -->
+<div class="card hidden" id="matchCard">
+  <h2 id="matchTitle">Pick the customer</h2>
+  <div id="matchList"></div>
+  <div class="row" style="margin-top:6px">
+    <input id="searchBox" placeholder="Search name, phone, or address" autocomplete="off" enterkeyhint="search">
+    <button class="btn" id="searchGo" style="width:auto;margin:0;padding:0 16px">Search</button>
+  </div>
+  <button class="btn" id="goNew">None of these — new customer</button>
+</div>
+
+<!-- 3. Confirm -->
+<div class="card hidden" id="confirmCard">
+  <h2>Review before creating</h2>
+  <div class="status" id="dupeMsg"></div>
+  <div id="dupeList"></div>
+
+  <div id="custExisting" class="hidden">
+    <dl>
+      <dt>Name</dt><dd id="cName"></dd>
+      <dt>Phone</dt><dd id="cPhone"></dd>
+      <dt>Email</dt><dd id="cEmail"></dd>
+    </dl>
+    <div class="sub" style="margin-top:12px">
+      <label>Address</label>
+      <div id="addrChoices"></div>
+      <div id="newAddrWrap" class="hidden"></div>
+    </div>
+    <div style="margin-top:10px"><button class="link" id="changeCust">Change customer</button></div>
+  </div>
+
+  <div id="custNew" class="hidden">
+    <div class="grid" id="newFields">
+      <div><label for="nFirst">First name</label><input id="nFirst" autocomplete="off" autocapitalize="words"></div>
+      <div><label for="nLast">Last name</label><input id="nLast" autocomplete="off" autocapitalize="words"></div>
+      <div class="full"><label for="nCompany">Company (optional)</label><input id="nCompany" autocomplete="off"></div>
+      <div><label for="nPhone">Mobile phone</label><input id="nPhone" inputmode="tel" autocomplete="off"></div>
+      <div><label for="nEmail">Email</label><input id="nEmail" inputmode="email" autocomplete="off" autocapitalize="off" placeholder="None"></div>
+    </div>
+    <div class="shows">Display name: <b id="nDisplay">—</b></div>
+    <div class="sub"><label>Service address</label><div id="newCustAddr"></div></div>
+  </div>
+
+  <!-- options -->
+  <div class="sub">
+    <label>Options</label>
+    <div class="status" id="pbMsg"></div>
+    <div id="options"></div>
+    <div class="acts"><button class="btn sm" id="addOpt">+ Add option</button></div>
+  </div>
+
+  <div class="sub">
+    <label for="eMsg">Message to the customer (optional)</label>
+    <textarea id="eMsg" class="desc" placeholder="Shown at the top of the estimate."></textarea>
+    <div class="grid" style="margin-top:12px">
+      <div class="full"><label for="jType">Job type</label><select id="jType"><option value="">— None —</option></select></div>
+      <div class="full"><label for="jUnit">Business unit</label><select id="jUnit"><option value="">— None —</option></select></div>
+      <div class="full"><label for="jEmp">Estimator</label><select id="jEmp"><option value="">Unassigned</option></select></div>
+      <div><label for="vDate">Visit date (optional)</label><input id="vDate" type="date"></div>
+      <div><label for="vTime">Visit time</label><input id="vTime" type="time" step="900"></div>
+    </div>
+    <div class="hint">The estimate is created as a draft. Nothing goes to the customer until it’s sent from HCP.</div>
+  </div>
+
+  <button class="btn" id="submit">Create draft estimate</button>
+  <div class="status" id="submitMsg"></div>
+  <button class="btn hidden" id="again">Start another estimate</button>
+</div>
+
+</div>
+
+<footer><a href="#" id="forget">Not you? Change code</a></footer>
+
+<script src="config.js"></script>
+<script>
+(function () {
+  var ENDPOINT = (window.GR_ENDPOINTS && window.GR_ENDPOINTS.estimate) || "";
+  var KEY = "grTechCode";
+  var OLD_KEYS = ["grNewJobCode", "grEstimateCode"];
+  function $(id) { return document.getElementById(id); }
+  function get(k) { try { return localStorage.getItem(k) || ""; } catch (e) { return ""; } }
+  function put(k, v) { try { localStorage.setItem(k, v); } catch (e) {} }
+  function drop(k) { try { localStorage.removeItem(k); } catch (e) {} }
+  function show(el, on) { el.classList.toggle("hidden", !on); }
+  function say(id, text, kind) { var m = $(id); m.textContent = text || ""; m.className = "status" + (text ? " " + (kind || "ok") : ""); }
+  function el(tag, cls, text) { var e = document.createElement(tag); if (cls) e.className = cls; if (text != null) e.textContent = text; return e; }
+  function money(c) { return "$" + (Number(c || 0) / 100).toFixed(2); }
+  function recent(text) { try { var r = JSON.parse(get("grRecent") || "[]"); r.unshift({ tool: "Estimate", text: text, at: Date.now() }); put("grRecent", JSON.stringify(r.slice(0, 20))); } catch (e) {} }
+
+  var S = { code: "", mode: "auto", fields: null, est: null, cust: null, isNew: false, addr: "", me: "", today: "", usualUnit: {}, pb: true, reqId: "" };
+
+  // ---------- server ----------
+  function api(action, data) {
+    data = data || {}; data.action = action; data.token = S.code;
+    if (ENDPOINT.indexOf("https://") !== 0) return Promise.resolve({ ok: false, error: "Estimate isn't connected yet. Add its URL to config.js." });
+    return fetch(ENDPOINT, { method: "POST", headers: { "Content-Type": "text/plain" }, body: JSON.stringify(data) })
+      .then(function (r) { return r.json(); })
+      .catch(function () { return { ok: false, error: "Couldn't reach the server. Check your signal and try again.", net: true }; })
+      .then(function (r) {
+        if (!r.ok && action !== "init" && /access code|Too many wrong/.test(r.error || "")) { drop(KEY); S.code = ""; showCode(r.error); }
+        return r;
+      });
+  }
+
+  // ---------- access code ----------
+  function showCode(msg) { show($("codeCard"), true); show($("app"), false); say("codeMsg", msg, "err"); }
+  function start(code, quiet) {
+    S.code = code; say("codeMsg", "Checking…", "busy");
+    api("init").then(function (r) {
+      if (!r.ok) { if (quiet) { S.code = ""; showCode(""); } else showCode(r.error); return; }
+      put(KEY, code);
+      S.me = r.me || ""; S.today = r.today || ""; S.usualUnit = r.usual_unit || {}; S.pb = r.price_book !== false;
+      var sel = $("jEmp");
+      (r.employees || []).forEach(function (e) { var o = el("option", null, e.name); o.value = e.id; sel.appendChild(o); });
+      sel.value = S.me;
+      [["jType", r.job_types], ["jUnit", r.business_units]].forEach(function (d) { (d[1] || []).forEach(function (x) { var o = el("option", null, x.name); o.value = x.id; $(d[0]).appendChild(o); }); });
+      if (S.today) $("vDate").min = S.today;
+      show($("codeCard"), false); show($("app"), true); say("codeMsg", "");
+    });
+  }
+  $("codeGo").onclick = function () { var c = $("code").value.trim(); if (c) start(c); };
+  $("code").onkeydown = function (e) { if (e.key === "Enter") $("codeGo").click(); };
+  $("forget").onclick = function (e) { e.preventDefault(); drop(KEY); S.code = ""; $("code").value = ""; showCode(""); };
+  (function boot() {
+    if (get(KEY)) return start(get(KEY));
+    for (var i = 0; i < OLD_KEYS.length; i++) if (get(OLD_KEYS[i])) return start(get(OLD_KEYS[i]), true);
+    showCode("");
+  })();
+
+  // ---------- mode ----------
+  var HINTS = {
+    auto: "Say who the customer is (name, phone, or address), what you found, and each option. We’ll look them up and write it up.",
+    repeat: "Say their name, phone, or address, then what you found and each option.",
+    "new": "Say first and last name, phone, email, address, then what you found and each option. Skips the lookup."
+  };
+  function setMode(m) {
+    S.mode = m;
+    Array.prototype.forEach.call(document.querySelectorAll(".seg button"), function (b) { b.setAttribute("aria-pressed", b.dataset.mode === m); });
+    $("modeHint").textContent = HINTS[m];
+  }
+  Array.prototype.forEach.call(document.querySelectorAll(".seg button"), function (b) { b.onclick = function () { setMode(b.dataset.mode); }; });
+  setMode("auto");
+
+  // ---------- speech ----------
+  var SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+  if (!SR) { show($("micMain"), false); $("heard").placeholder = "Voice input isn't supported in this browser. Use Chrome, or the microphone on your keyboard."; }
+  var active = null;
+  function stopAll(cb) { if (!active) { if (cb) cb(); return; } if (cb) active.after.push(cb); active.keep = false; try { active.rec.stop(); } catch (e) {} }
+  function listen(btn, opts) {
+    if (active && active.btn === btn) { stopAll(); return; }
+    stopAll();
+    var state = { btn: btn, keep: true, rec: null, lastHeard: Date.now(), after: [] };
+    var base = opts.base();
+    function begin() {
+      var rec = new SR();
+      rec.lang = "en-US"; rec.continuous = false; rec.interimResults = true; rec.maxAlternatives = 1;
+      state.rec = rec;
+      rec.onresult = function (ev) { var r = ev.results[ev.results.length - 1]; var text = r[0].transcript.trim(); state.lastHeard = Date.now(); opts.onText(base, r.isFinal ? text + " " : "", r.isFinal ? "" : text); };
+      rec.onerror = function (ev) { if (ev.error === "not-allowed" || ev.error === "service-not-allowed") { state.keep = false; say("talkMsg", "❌ Microphone is blocked. Allow microphone access for this site in your browser settings.", "err"); } };
+      rec.onend = function () { base = opts.base(); var idle = Date.now() - state.lastHeard > 20000; if (state.keep && !idle && active === state) { try { begin(); } catch (e) { finish(); } } else finish(); };
+      rec.start();
+    }
+    function finish() { btn.classList.remove("rec"); opts.label(false); if (active === state) active = null; var cbs = state.after; state.after = []; cbs.forEach(function (f) { f(); }); if (opts.done) opts.done(); }
+    active = state; btn.classList.add("rec"); opts.label(true);
+    try { begin(); } catch (e) { finish(); }
+  }
+  $("micMain").onclick = function () {
+    listen($("micMain"), {
+      base: function () { var v = $("heard").value.trim(); return v ? v + " " : ""; },
+      onText: function (base, fin, interim) { $("heard").value = (base + fin + interim).replace(/\s+/g, " ").trimStart(); },
+      label: function (on) { $("micMainLabel").textContent = on ? "Listening… tap when done" : "Tap to talk"; }
+      // No auto-draft on stop: estimates are long, the tech taps "Draft it" when finished.
+    });
+  };
+
+  // ---------- step 1: parse + lookup ----------
+  $("lookup").onclick = function () { stopAll(runParse); };
+  var busy = false;
+  function runParse() {
+    var text = $("heard").value.trim();
+    if (busy) return;
+    if (!text) { say("talkMsg", "Tap the mic and describe the customer and the options.", "err"); return; }
+    busy = true; $("lookup").disabled = true;
+    say("talkMsg", "Drafting the write-up and looking up the customer… (10–20 seconds)", "busy");
+    show($("matchCard"), false); show($("confirmCard"), false);
+    api("parse", { text: text, mode: S.mode }).then(function (r) {
+      busy = false; $("lookup").disabled = false;
+      if (!r.ok) { say("talkMsg", "❌ " + r.error, "err"); return; }
+      S.fields = r.fields || {}; S.est = r.estimate || { options: [] };
+      fillEstimate(S.est);
+      if (S.mode === "new") { say("talkMsg", ""); openNew(r.dupes || []); return; }
+      var m = r.matches || [];
+      if (m.length) { say("talkMsg", ""); renderMatches(m, m.length === 1 ? "Is this the customer?" : "Pick the customer"); }
+      else if (S.mode === "auto") { say("talkMsg", "No existing customer found — set up as a new customer below.", "warn"); openNew([]); }
+      else { say("talkMsg", "No match found. Try saying their phone number, or switch to New.", "warn"); renderMatches([], "No match found"); }
+    });
+  }
+
+  // ---------- options editor ----------
+  function fillEstimate(est) {
+    $("eMsg").value = est.message || "";
+    $("jType").value = est.job_type_id || ""; if ($("jType").value !== (est.job_type_id || "")) $("jType").value = "";
+    $("jUnit").value = est.business_unit_id || ($("jType").value && S.usualUnit[$("jType").value]) || "";
+    $("vDate").value = est.visit_date || ""; $("vTime").value = est.visit_time || "";
+    say("pbMsg", S.pb ? "" : "Price book not reachable — type each price.", "warn");
+    var box = $("options"); box.innerHTML = "";
+    (est.options || []).forEach(function (o) { box.appendChild(optionBlock(o)); });
+    if (!box.children.length) box.appendChild(optionBlock({ name: "Option 1", line_items: [{ name: "", description: "", quantity: 1 }] }));
+    renumber();
+  }
+  $("jType").onchange = function () { var u = S.usualUnit[$("jType").value]; if (u && !$("jUnit").value) $("jUnit").value = u; };
+
+  function optionBlock(o) {
+    var w = el("div", "opt");
+    var head = el("div", "head");
+    var name = el("input"); name.value = o.name || ""; name.placeholder = "Option heading"; name.className = "oname"; name.autocomplete = "off";
+    var x = el("button", "x", "×"); x.title = "Remove option"; x.onclick = function () { if ($("options").children.length > 1 && confirm("Remove this option?")) { w.remove(); renumber(); } };
+    head.appendChild(name); head.appendChild(x); w.appendChild(head);
+    var lines = el("div", "lines"); w.appendChild(lines);
+    (o.line_items || []).forEach(function (li) { lines.appendChild(lineBlock(li)); });
+    var acts = el("div", "acts");
+    var add = el("button", "btn sm", "+ Add line"); add.onclick = function () { lines.appendChild(lineBlock({ name: "", description: "", quantity: 1 })); };
+    var rw = el("button", "btn sm", "✨ Rewrite wording"); rw.onclick = function () { rewrite(w, rw); };
+    var tot = el("div", "total", "Total: $0.00");
+    acts.appendChild(add); acts.appendChild(rw); w.appendChild(acts); w.appendChild(tot);
+    w.addEventListener("input", function () { updateTotal(w); });
+    updateTotal(w);
+    return w;
+  }
+  function lineBlock(li) {
+    var w = el("div", "li");
+    var top = el("div", "top");
+    var name = el("input"); name.value = li.name || ""; name.placeholder = "Line item name"; name.className = "lname"; name.autocomplete = "off";
+    var x = el("button", "x", "×"); x.title = "Remove line"; x.onclick = function () { var opt = w.closest(".opt"); w.remove(); updateTotal(opt); };
+    top.appendChild(name); top.appendChild(x); w.appendChild(top);
+    var d = el("textarea", "desc ldesc"); d.value = li.description || ""; d.placeholder = "What’s included — the customer reads this."; w.appendChild(d);
+    var nums = el("div", "nums");
+    nums.appendChild(field("Qty", "lqty", li.quantity || 1, "decimal"));
+    var priceF = field("Price ($)", "lprice price", li.unit_price ? (li.unit_price / 100).toFixed(2) : "", "decimal");
+    nums.appendChild(priceF);
+    nums.appendChild(field("Cost ($)", "lcost", li.unit_cost ? (li.unit_cost / 100).toFixed(2) : "", "decimal"));
+    w.appendChild(nums);
+    var priceIn = priceF.querySelector("input");
+    function flag() { priceIn.classList.toggle("needs", !(parseFloat(priceIn.value) > 0)); }
+    priceIn.addEventListener("input", flag); flag();
+    // price book candidates
+    var pb = el("div", "pb");
+    var sel = el("select"); sel.className = "lpb";
+    function fillSel(cands) {
+      sel.innerHTML = "";
+      sel.appendChild(el("option", null, cands.length ? "Price book: pick to fill price" : (S.pb ? "Price book: no match — type the price" : "Price book unavailable"))).value = "";
+      cands.forEach(function (c) { var o = el("option", null, c.name + " — " + money(c.price)); o.value = c.uuid; o.dataset.price = c.price; o.dataset.cost = c.cost; o.dataset.name = c.name; o.dataset.desc = c.description || ""; sel.appendChild(o); });
+      if (li.price_book_uuid) sel.value = li.price_book_uuid;
+    }
+    fillSel(li.candidates || []);
+    sel.onchange = function () {
+      var o = sel.options[sel.selectedIndex]; if (!o || !o.value) return;
+      priceIn.value = (Number(o.dataset.price) / 100).toFixed(2);
+      w.querySelector(".lcost").value = (Number(o.dataset.cost) / 100).toFixed(2);
+      if (!name.value.trim()) name.value = o.dataset.name;
+      if (!d.value.trim() && o.dataset.desc) d.value = o.dataset.desc;
+      flag(); updateTotal(w.closest(".opt"));
+    };
+    var srch = el("button", "btn sm", "Search book"); srch.style.marginTop = "6px";
+    srch.onclick = function () {
+      var q = prompt("Search the price book for:", name.value.trim()); if (!q) return;
+      srch.disabled = true;
+      api("price", { q: q }).then(function (r) { srch.disabled = false; if (r.ok) fillSel(r.candidates || []); else alert(r.error); });
+    };
+    pb.appendChild(sel); if (S.pb) pb.appendChild(srch); w.appendChild(pb);
+    return w;
+  }
+  function field(label, cls, value, mode) {
+    var b = el("div"); var l = el("label", null, label); var i = el("input"); i.className = cls; i.value = value; i.inputMode = mode || "text"; i.autocomplete = "off";
+    b.appendChild(l); b.appendChild(i); return b;
+  }
+  function cents(v) { var n = parseFloat(String(v).replace(/[^0-9.]/g, "")); return isNaN(n) ? 0 : Math.round(n * 100); }
+  function readOption(w) {
+    return {
+      name: w.querySelector(".oname").value.trim(),
+      line_items: [].map.call(w.querySelectorAll(".li"), function (l) {
+        var sel = l.querySelector(".lpb");
+        return { name: l.querySelector(".lname").value.trim(), description: l.querySelector(".ldesc").value.trim(),
+                 quantity: parseFloat(l.querySelector(".lqty").value) || 1, unit_price: cents(l.querySelector(".lprice").value),
+                 unit_cost: cents(l.querySelector(".lcost").value), price_book_uuid: sel ? sel.value : "",
+                 candidates: sel ? [].map.call(sel.options, function (o) { return o.value ? { uuid: o.value, name: o.dataset.name, price: Number(o.dataset.price), cost: Number(o.dataset.cost), description: o.dataset.desc } : null; }).filter(Boolean) : [] };
+      })
+    };
+  }
+  function updateTotal(w) {
+    if (!w) return;
+    var o = readOption(w);
+    var t = o.line_items.reduce(function (s, li) { return s + li.unit_price * li.quantity; }, 0);
+    w.querySelector(".total").textContent = "Total: " + money(t);
+  }
+  function renumber() { [].forEach.call($("options").children, function (w, i) { var n = w.querySelector(".oname"); if (!n.value.trim() || /^Option \d+$/.test(n.value.trim())) n.value = "Option " + (i + 1); }); }
+  $("addOpt").onclick = function () { $("options").appendChild(optionBlock({ name: "", line_items: [{ name: "", description: "", quantity: 1 }] })); renumber(); };
+  function rewrite(w, btn) {
+    var o = readOption(w);
+    if (!o.line_items.some(function (li) { return li.name || li.description; })) { alert("Add some text to rewrite first."); return; }
+    btn.disabled = true; btn.textContent = "Rewriting…";
+    api("rewrite", { option: o }).then(function (r) {
+      btn.disabled = false; btn.textContent = "✨ Rewrite wording";
+      if (!r.ok) { alert(r.error); return; }
+      var fresh = optionBlock(r.option); w.replaceWith(fresh); renumber();
+    });
+  }
+
+  // ---------- step 2: matches ----------
+  function matchButton(c, best, onPick) {
+    var b = el("button", "match");
+    var name = el("b", null, c.display_name);
+    if (best) name.appendChild(el("span", "tag", "Best match"));
+    b.appendChild(name);
+    var sub = [];
+    if (c.display_name !== [c.first_name, c.last_name].filter(Boolean).join(" ") && (c.first_name || c.last_name)) sub.push([c.first_name, c.last_name].filter(Boolean).join(" "));
+    if (c.phones.length) sub.push(c.phones[0].text);
+    b.appendChild(el("span", null, sub.join(" · ") || "No phone on file"));
+    b.appendChild(el("span", null, c.addresses.length ? c.addresses[0].text + (c.addresses.length > 1 ? "  (+" + (c.addresses.length - 1) + " more)" : "") : "No address on file"));
+    b.onclick = function () { onPick(c); };
+    return b;
+  }
+  function renderMatches(list, title) {
+    $("matchTitle").textContent = title;
+    var box = $("matchList"); box.innerHTML = "";
+    list.forEach(function (c, i) { box.appendChild(matchButton(c, i === 0 && list.length > 1 && c.score >= 3 && c.score > (list[1].score || 0), openExisting)); });
+    show($("matchCard"), true); show($("confirmCard"), false);
+    $("matchCard").scrollIntoView({ behavior: "smooth", block: "start" });
+  }
+  $("searchGo").onclick = function () {
+    var q = $("searchBox").value.trim(); if (!q) return;
+    $("searchGo").disabled = true;
+    api("search", { q: q }).then(function (r) {
+      $("searchGo").disabled = false;
+      if (!r.ok) { $("matchTitle").textContent = "❌ " + r.error; return; }
+      renderMatches(r.matches || [], (r.matches || []).length ? "Pick the customer" : "No match for “" + q + "”");
+    });
+  };
+  $("searchBox").onkeydown = function (e) { if (e.key === "Enter") $("searchGo").click(); };
+  $("goNew").onclick = function () { openNew([]); };
+  $("changeCust").onclick = function () { show($("confirmCard"), false); show($("matchCard"), true); $("matchCard").scrollIntoView({ behavior: "smooth" }); };
+
+  // ---------- step 3: confirm ----------
+  function resetSubmit() { say("submitMsg", ""); $("submit").disabled = false; show($("submit"), true); show($("again"), false); S.reqId = ""; }
+  function addressForm(prefix, f) {
+    var wrap = el("div", "grid");
+    [["Street", "Street", "full", f.street], ["Apt / unit", "Unit", "full", f.street_line_2], ["City", "City", "", f.city], ["State", "State", "", f.state || "PA"], ["ZIP", "Zip", "", f.zip]].forEach(function (d) {
+      var box = el("div", d[2]); var lab = el("label", null, d[0]); lab.htmlFor = prefix + d[1];
+      var inp = el("input"); inp.id = prefix + d[1]; inp.value = d[3] || ""; inp.autocomplete = "off"; if (d[1] === "Zip") inp.inputMode = "numeric";
+      inp.oninput = function () { inp.classList.remove("missing"); };
+      box.appendChild(lab); box.appendChild(inp); wrap.appendChild(box);
+    });
+    return wrap;
+  }
+  function readAddress(prefix) { function v(k) { return $(prefix + k).value.trim(); } return { street: v("Street"), street_line_2: v("Unit"), city: v("City"), state: v("State"), zip: v("Zip") }; }
+  function sameStreet(a, spoken) {
+    if (!spoken) return false;
+    var num = (spoken.match(/^\s*(\d+)/) || [])[1]; var word = spoken.replace(/^\s*\d+\s*/, "").toLowerCase().split(/\s+/)[0]; var s = (a.street || "").toLowerCase();
+    return (!num || s.indexOf(num) === 0) && !!word && s.indexOf(word) !== -1;
+  }
+  function openExisting(c) {
+    S.cust = c; S.isNew = false; resetSubmit();
+    show($("custExisting"), true); show($("custNew"), false);
+    say("dupeMsg", ""); $("dupeList").innerHTML = "";
+    $("cName").textContent = c.display_name;
+    $("cPhone").textContent = c.phones.length ? c.phones.map(function (p) { return p.text + (c.phones.length > 1 ? " (" + p.label + ")" : ""); }).join(", ") : "No phone on file";
+    $("cPhone").className = c.phones.length ? "" : "none";
+    $("cEmail").textContent = c.email || "No email on file"; $("cEmail").className = c.email ? "" : "none";
+    var f = S.fields || {};
+    var box = $("addrChoices"); box.innerHTML = "";
+    var match = c.addresses.filter(function (a) { return sameStreet(a, f.street); })[0];
+    var spokenNew = f.street && !match;
+    S.addr = match ? match.id : spokenNew ? "new" : (c.addresses[0] ? c.addresses[0].id : "new");
+    function choice(value, text) {
+      var lab = el("label", "choice"); var r = el("input"); r.type = "radio"; r.name = "addr"; r.value = value; r.checked = S.addr === value;
+      r.onchange = function () { S.addr = value; show($("newAddrWrap"), value === "new"); };
+      lab.appendChild(r); lab.appendChild(el("span", null, text)); box.appendChild(lab);
+    }
+    c.addresses.forEach(function (a) { choice(a.id, a.text + (a.type === "billing" ? " (billing)" : "")); });
+    choice("new", spokenNew ? "New address (not on file yet) — add below" : "Add a new address");
+    var w = $("newAddrWrap"); w.innerHTML = ""; w.appendChild(addressForm("xa", spokenNew ? f : {})); show(w, S.addr === "new");
+    show($("matchCard"), $("matchList").children.length > 0); show($("confirmCard"), true);
+    $("confirmCard").scrollIntoView({ behavior: "smooth", block: "start" });
+  }
+  function updateDisplay() { var name = [$("nFirst").value.trim(), $("nLast").value.trim()].filter(Boolean).join(" "); $("nDisplay").textContent = $("nCompany").value.trim() || name || "—"; }
+  ["nFirst", "nLast", "nCompany"].forEach(function (id) { $(id).oninput = function () { $(id).classList.remove("missing"); updateDisplay(); }; });
+  function openNew(dupes) {
+    S.cust = null; S.isNew = true; S.addr = "new"; resetSubmit();
+    var f = S.fields || {};
+    show($("custExisting"), false); show($("custNew"), true);
+    $("nFirst").value = f.first_name || ""; $("nLast").value = f.last_name || ""; $("nCompany").value = f.company || "";
+    $("nPhone").value = f.phone ? fmtPhone(f.phone) : ""; $("nEmail").value = f.email || ""; updateDisplay();
+    var a = $("newCustAddr"); a.innerHTML = ""; a.appendChild(addressForm("na", f));
+    var dl = $("dupeList"); dl.innerHTML = "";
+    if (dupes.length) { say("dupeMsg", "Heads up: this phone or email is already on file. Tap the customer to use them instead.", "warn"); dupes.forEach(function (c) { dl.appendChild(matchButton(c, false, openExisting)); }); }
+    else say("dupeMsg", "");
+    show($("matchCard"), false); show($("confirmCard"), true);
+    $("confirmCard").scrollIntoView({ behavior: "smooth", block: "start" });
+  }
+  function fmtPhone(d) { d = String(d).replace(/\D/g, ""); return d.length === 10 ? "(" + d.slice(0, 3) + ") " + d.slice(3, 6) + "-" + d.slice(6) : d; }
+
+  // ---------- submit ----------
+  $("submit").onclick = function () { stopAll(submit); };
+  function need(ids) { var miss = ids.filter(function (id) { var e = $(id); var bad = !e.value.trim(); e.classList.toggle("missing", bad); return bad; }); return miss.length === 0; }
+  function submit() {
+    if ($("submit").disabled) return;
+    var options = [].map.call($("options").children, readOption).map(function (o) { o.line_items = o.line_items.filter(function (li) { return li.name; }); return o; }).filter(function (o) { return o.line_items.length; });
+    if (!options.length) { say("submitMsg", "❌ Add at least one option with a named line item.", "err"); return; }
+    var unpriced = []; options.forEach(function (o) { o.line_items.forEach(function (li) { if (!(li.unit_price > 0)) unpriced.push(o.name + " › " + li.name); }); });
+    if (unpriced.length && !confirm("These lines have no price:\n" + unpriced.join("\n") + "\n\nCreate the draft anyway? (You can price it in HCP.)")) return;
+    var data = { estimate: { options: options, message: $("eMsg").value.trim(), job_type_id: $("jType").value, business_unit_id: $("jUnit").value,
+                             employee_id: $("jEmp").value, visit_date: $("vDate").value, visit_time: $("vTime").value, arrival: 0 } };
+    if (data.estimate.visit_time && !data.estimate.visit_date) { say("submitMsg", "❌ Pick a date for that visit time.", "err"); return; }
+    if (S.isNew) {
+      if (!$("nFirst").value.trim() && !$("nLast").value.trim()) { need(["nFirst", "nLast"]); say("submitMsg", "❌ Add the customer's name.", "err"); return; }
+      if (!need(["naStreet", "naCity", "naZip"])) { say("submitMsg", "❌ Fill in the street, city, and ZIP.", "err"); return; }
+      data.customer = { first_name: $("nFirst").value.trim(), last_name: $("nLast").value.trim(), company: $("nCompany").value.trim(), phone: $("nPhone").value.trim(), email: $("nEmail").value.trim() };
+      data.address = readAddress("na");
+    } else {
+      data.customer_id = S.cust.id;
+      if (S.addr === "new") { if (!need(["xaStreet", "xaCity", "xaZip"])) { say("submitMsg", "❌ Fill in the street, city, and ZIP.", "err"); return; } data.address = readAddress("xa"); }
+      else data.address_id = S.addr;
+    }
+    if (!S.reqId) S.reqId = Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
+    data.req_id = S.reqId;
+    var b = $("submit"); b.disabled = true; b.textContent = "Creating…"; say("submitMsg", "");
+    api("create", data).then(function (r) {
+      b.textContent = "Create draft estimate";
+      if (r.ok) { say("submitMsg", r.message, "ok"); show(b, false); show($("again"), true); recent(r.message.split("\n").slice(0, 2).join(" — ")); return; }
+      b.disabled = false; if (!r.net) S.reqId = "";
+      if (r.created_customer) { var keepAddr = S.isNew ? readAddress("na") : null; openExisting(r.created_customer);
+        if (keepAddr && S.addr === "new") { ["Street", "Unit", "City", "State", "Zip"].forEach(function (k, i) { $("xa" + k).value = [keepAddr.street, keepAddr.street_line_2, keepAddr.city, keepAddr.state, keepAddr.zip][i] || ""; }); } }
+      say("submitMsg", "❌ " + r.error, "err");
+    });
+  }
+  $("again").onclick = function () {
+    S.fields = null; S.est = null; S.cust = null; resetSubmit();
+    $("heard").value = ""; $("eMsg").value = ""; $("vDate").value = ""; $("vTime").value = ""; $("jEmp").value = S.me; $("searchBox").value = "";
+    $("jType").value = ""; $("jUnit").value = ""; $("options").innerHTML = "";
+    say("talkMsg", ""); show($("matchCard"), false); show($("confirmCard"), false);
+    window.scrollTo({ top: 0, behavior: "smooth" });
+  };
+})();
+</script>
+</body>
+</html>

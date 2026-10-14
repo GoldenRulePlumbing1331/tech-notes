@@ -1,0 +1,424 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#14365c">
+<meta name="robots" content="noindex">
+<title>Order Material</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='14' fill='%2314365c'/%3E%3Crect x='25' y='12' width='14' height='26' rx='7' fill='%23f2b632'/%3E%3Cpath d='M18 32a14 14 0 0 0 28 0' stroke='%23f2b632' stroke-width='4' fill='none'/%3E%3Crect x='30' y='46' width='4' height='8' fill='%23f2b632'/%3E%3C/svg%3E">
+<style>
+  :root {
+    --bg: #f3f4f6; --card: #ffffff; --ink: #14181f; --muted: #5d6573; --line: #d5d9e0; --soft: #eef1f5;
+    --brand: #14365c; --accent: #f2b632; --ok-bg: #e4f4e8; --ok-ink: #14532d;
+    --err-bg: #fde8e8; --err-ink: #7f1d1d; --warn-bg: #fff4d6; --warn-ink: #6b4a00; --rec: #c62828;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root { --bg: #0f1216; --card: #191d23; --ink: #eef1f5; --muted: #9aa3b0; --line: #2e343d; --soft: #222831;
+      --ok-bg: #12301d; --ok-ink: #b9f0c9; --err-bg: #3a1515; --err-ink: #ffc9c9; --warn-bg: #3a2e10; --warn-ink: #ffe3a1; }
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; background: var(--bg); color: var(--ink); }
+  body { font: 17px/1.45 -apple-system, "Segoe UI", Roboto, Arial, sans-serif;
+         padding: 16px 16px calc(24px + env(safe-area-inset-bottom)); max-width: 560px; margin: 0 auto; }
+  header { display: flex; align-items: center; gap: 10px; margin: 4px 0 16px; }
+  header .dot { width: 34px; height: 34px; border-radius: 9px; background: var(--brand);
+                display: grid; place-items: center; color: var(--accent); font-weight: 800; flex: none; text-decoration: none; }
+  h1 { font-size: 21px; margin: 0; flex: 1; }
+  header a.nav { font-size: 15px; font-weight: 600; color: var(--brand); text-decoration: none; white-space: nowrap; }
+  @media (prefers-color-scheme: dark) { header a.nav { color: var(--accent); } }
+  h2 { font-size: 15px; text-transform: uppercase; letter-spacing: .06em; color: var(--muted); margin: 0 0 10px; }
+  .card { background: var(--card); border: 1px solid var(--line); border-radius: 14px; padding: 14px; margin-bottom: 14px; }
+  .hidden { display: none !important; }
+  label { display: block; font-weight: 650; margin-bottom: 6px; }
+  input, textarea, select { width: 100%; font: inherit; color: var(--ink); background: var(--card);
+                    border: 1px solid var(--line); border-radius: 10px; padding: 11px 12px; }
+  textarea { min-height: 110px; resize: vertical; }
+  .seg { display: flex; gap: 6px; margin-top: 8px; }
+  .seg button { flex: 1; padding: 11px 6px; font: 600 15px/1.2 inherit; font-family: inherit; border-radius: 10px;
+                border: 1px solid var(--line); background: var(--card); color: var(--ink); }
+  .seg button[aria-pressed="true"] { background: var(--brand); color: #fff; border-color: var(--brand); }
+  .hint { font-size: 14px; color: var(--muted); margin-top: 8px; }
+  .mic { border: 0; border-radius: 12px; background: var(--brand); color: #fff; cursor: pointer;
+         width: 100%; height: 68px; font: 650 19px/1 inherit; font-family: inherit;
+         display: flex; justify-content: center; align-items: center; gap: 10px; }
+  .mic svg { width: 26px; height: 26px; }
+  .mic.rec { background: var(--rec); animation: pulse 1.2s infinite; }
+  @keyframes pulse { 50% { opacity: .75; } }
+  .btn { width: 100%; padding: 13px; border-radius: 12px; font: 700 16px/1 inherit; font-family: inherit;
+         border: 1px solid var(--line); background: var(--soft); color: var(--ink); margin-top: 10px; cursor: pointer; }
+  .btn:disabled { opacity: .55; }
+  .btn.sm { width: auto; padding: 9px 12px; font-size: 14px; margin: 0; }
+  .btn.go { padding: 18px; border: 0; background: var(--accent); color: #1a1300; font-size: 19px; font-weight: 800; }
+  .btn.primary { background: var(--brand); color: #fff; border-color: var(--brand); }
+  a.btn { display: block; text-align: center; text-decoration: none; }
+  .status { display: none; white-space: pre-wrap; border-radius: 12px; padding: 12px 14px; margin-top: 12px; font-size: 16px; }
+  .status.ok { display: block; background: var(--ok-bg); color: var(--ok-ink); }
+  .status.err { display: block; background: var(--err-bg); color: var(--err-ink); }
+  .status.warn { display: block; background: var(--warn-bg); color: var(--warn-ink); }
+  .status.busy { display: block; background: var(--soft); color: var(--muted); }
+  .row { display: flex; gap: 8px; align-items: flex-end; }
+  .row > * { min-width: 0; }
+  .sub { margin-top: 16px; padding-top: 14px; border-top: 1px solid var(--line); }
+  .jobbox { background: var(--soft); border-radius: 10px; padding: 10px 12px; margin-top: 8px; font-size: 15px; }
+  .jobbox b { font-size: 16px; }
+  .item { background: var(--soft); border-radius: 10px; padding: 10px; margin-top: 8px; }
+  .item .top { display: grid; grid-template-columns: 64px 1fr 40px; gap: 6px; align-items: center; }
+  .item .top input.qty { text-align: center; font-weight: 700; }
+  .item .part { margin-top: 6px; }
+  .item .part select { font-size: 14px; padding: 8px 10px; }
+  .item .part select.none { border-color: var(--warn-ink); background: var(--warn-bg); color: var(--warn-ink); }
+  .item .note { margin-top: 6px; font-size: 14px; padding: 8px 10px; }
+  .x { width: 40px; height: 44px; border-radius: 10px; border: 1px solid var(--line); background: var(--card); color: var(--muted); font: 700 18px/1 inherit; cursor: pointer; }
+  .acts { display: flex; gap: 8px; margin-top: 10px; flex-wrap: wrap; }
+  pre { white-space: pre-wrap; background: var(--soft); border-radius: 10px; padding: 10px 12px; font: 14px/1.4 ui-monospace, Menlo, Consolas, monospace; margin: 8px 0 0; }
+  footer { text-align: center; font-size: 13px; color: var(--muted); margin-top: 18px; }
+  footer a { color: inherit; }
+</style>
+</head>
+<body>
+<header>
+  <a class="dot" href="home.html" aria-label="All tools">GR</a>
+  <h1>Order Material</h1>
+  <a class="nav" href="home.html">All tools →</a>
+</header>
+
+<div class="card hidden" id="codeCard">
+  <label for="code">Your access code</label>
+  <input id="code" inputmode="numeric" autocomplete="off" placeholder="8-digit code">
+  <button class="btn" id="codeGo">Continue</button>
+  <div class="status" id="codeMsg"></div>
+</div>
+
+<div id="app" class="hidden">
+
+<!-- 1. Talk -->
+<div class="card">
+  <button class="mic" id="micMain">
+    <svg viewBox="0 0 24 24" fill="currentColor"><path d="M12 15a3 3 0 0 0 3-3V6a3 3 0 0 0-6 0v6a3 3 0 0 0 3 3zm5-3a5 5 0 0 1-10 0H5a7 7 0 0 0 6 6.92V21h2v-2.08A7 7 0 0 0 19 12h-2z"/></svg>
+    <span id="micMainLabel">Tap to talk</span>
+  </button>
+  <div class="hint">Say the job number, pickup or delivery, and the items with quantities. “Job 49370, pickup this afternoon: two 3/4 PEX elbows, a box of half-inch copper 90s, one 50 gallon gas water heater.” Say “truck stock” instead of a job for stock.</div>
+  <textarea id="heard" placeholder="What you say shows up here. You can fix it before building the order."></textarea>
+  <button class="btn" id="build">Build order</button>
+  <div class="status" id="talkMsg"></div>
+</div>
+
+<!-- 2. Review -->
+<div class="card hidden" id="reviewCard">
+  <h2>Check the order</h2>
+  <div class="seg" role="group" aria-label="For">
+    <button data-for="job" aria-pressed="true">For a job</button>
+    <button data-for="truck" aria-pressed="false">Truck stock</button>
+    <button data-for="shop" aria-pressed="false">Shop stock</button>
+  </div>
+  <div id="jobWrap" style="margin-top:10px">
+    <div class="row">
+      <div style="flex:1"><label for="jobNum" style="font-size:14px">Job number</label><input id="jobNum" inputmode="numeric" autocomplete="off" placeholder="e.g. 49370" enterkeyhint="search"></div>
+      <button class="btn" id="jobGo" style="width:auto;margin:0;padding:0 16px;height:46px">Find</button>
+    </div>
+    <div class="jobbox hidden" id="jobBox"></div>
+    <div class="status" id="jobMsg"></div>
+  </div>
+
+  <div class="sub">
+    <label>Pickup or delivery</label>
+    <div class="seg" role="group" aria-label="Fulfillment">
+      <button data-ful="pickup" aria-pressed="true">Pickup</button>
+      <button data-ful="delivery" aria-pressed="false">Delivery</button>
+    </div>
+    <div id="delWrap" class="hidden" style="margin-top:8px">
+      <div class="seg"><button data-to="job" aria-pressed="true">To the job</button><button data-to="shop" aria-pressed="false">To the shop</button></div>
+      <input id="delAddr" autocomplete="off" placeholder="Delivery address" style="margin-top:8px">
+    </div>
+    <div class="row" style="margin-top:10px">
+      <div style="flex:1"><label for="needed" style="font-size:14px">Needed</label><input id="needed" autocomplete="off" placeholder="e.g. today by 2, tomorrow first thing"></div>
+    </div>
+  </div>
+
+  <div class="sub">
+    <label>Items</label>
+    <div class="status" id="catMsg"></div>
+    <div id="items"></div>
+    <div class="acts">
+      <button class="btn sm" id="addItem">+ Add item</button>
+      <button class="btn sm" id="micItem">🎤 Say another item</button>
+    </div>
+  </div>
+
+  <div class="sub">
+    <label for="notes">Note for the counter (optional)</label>
+    <input id="notes" autocomplete="off" placeholder="e.g. Bradford White if you have it, call when ready">
+  </div>
+
+  <button class="btn go" id="submit">Place order</button>
+  <div class="status" id="submitMsg"></div>
+</div>
+
+<!-- 3. Done -->
+<div class="card hidden" id="doneCard">
+  <h2>Send it to Weinstein</h2>
+  <div class="hint" id="doneHint"></div>
+  <a class="btn primary" id="smsBtn" href="#">💬 Text the counter</a>
+  <button class="btn" id="copyQp">Copy Quick Pad list (SupplyZone app)</button>
+  <button class="btn" id="copyTxt">Copy order text</button>
+  <pre id="orderText"></pre>
+  <button class="btn" id="again">Another order</button>
+</div>
+
+</div>
+
+<footer><a href="#" id="forget">Not you? Change code</a></footer>
+
+<script src="config.js"></script>
+<script>
+(function () {
+  var ENDPOINT = (window.GR_ENDPOINTS && window.GR_ENDPOINTS.order) || "";
+  var COUNTER = window.GR_COUNTER || { name: "Weinstein West Chester", sms: "6104360880" };
+  var KEY = "grTechCode";
+  var OLD_KEYS = ["grNewJobCode", "grOrderCode"];
+  function $(id) { return document.getElementById(id); }
+  function get(k) { try { return localStorage.getItem(k) || ""; } catch (e) { return ""; } }
+  function put(k, v) { try { localStorage.setItem(k, v); } catch (e) {} }
+  function drop(k) { try { localStorage.removeItem(k); } catch (e) {} }
+  function show(el, on) { el.classList.toggle("hidden", !on); }
+  function say(id, text, kind) { var m = $(id); m.textContent = text || ""; m.className = "status" + (text ? " " + (kind || "ok") : ""); }
+  function el(tag, cls, text) { var e = document.createElement(tag); if (cls) e.className = cls; if (text != null) e.textContent = text; return e; }
+  function recent(text) { try { var r = JSON.parse(get("grRecent") || "[]"); r.unshift({ tool: "Order", text: text, at: Date.now() }); put("grRecent", JSON.stringify(r.slice(0, 20))); } catch (e) {} }
+  function seg(groupSel, attr, value) { Array.prototype.forEach.call(document.querySelectorAll(groupSel + " button"), function (b) { b.setAttribute("aria-pressed", b.dataset[attr] === value); }); }
+
+  var S = { code: "", who: "", today: "", shop: "", emailOn: false, emailTo: "", catalog: 0, forWhat: "job", ful: "pickup", to: "job", job: null, reqId: "", result: null };
+
+  // ---------- server ----------
+  function api(action, data) {
+    data = data || {}; data.action = action; data.token = S.code;
+    if (ENDPOINT.indexOf("https://") !== 0) return Promise.resolve({ ok: false, error: "Order isn't connected yet. Add its URL to config.js." });
+    return fetch(ENDPOINT, { method: "POST", headers: { "Content-Type": "text/plain" }, body: JSON.stringify(data) })
+      .then(function (r) { return r.json(); })
+      .catch(function () { return { ok: false, error: "Couldn't reach the server. Check your signal and try again.", net: true }; })
+      .then(function (r) { if (!r.ok && action !== "init" && /access code|Too many wrong/.test(r.error || "")) { drop(KEY); S.code = ""; showCode(r.error); } return r; });
+  }
+
+  // ---------- access code ----------
+  function showCode(msg) { show($("codeCard"), true); show($("app"), false); say("codeMsg", msg, "err"); }
+  function start(code, quiet) {
+    S.code = code; say("codeMsg", "Checking…", "busy");
+    api("init").then(function (r) {
+      if (!r.ok) { if (quiet) { S.code = ""; showCode(""); } else showCode(r.error); return; }
+      put(KEY, code);
+      S.who = r.who || ""; S.today = r.today || ""; S.shop = r.shop_address || ""; S.emailOn = !!r.email_on; S.emailTo = r.email_to || ""; S.catalog = r.catalog || 0;
+      show($("codeCard"), false); show($("app"), true); say("codeMsg", "");
+    });
+  }
+  $("codeGo").onclick = function () { var c = $("code").value.trim(); if (c) start(c); };
+  $("code").onkeydown = function (e) { if (e.key === "Enter") $("codeGo").click(); };
+  $("forget").onclick = function (e) { e.preventDefault(); drop(KEY); S.code = ""; $("code").value = ""; showCode(""); };
+  (function boot() {
+    if (get(KEY)) return start(get(KEY));
+    for (var i = 0; i < OLD_KEYS.length; i++) if (get(OLD_KEYS[i])) return start(get(OLD_KEYS[i]), true);
+    showCode("");
+  })();
+
+  // ---------- speech ----------
+  var SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+  if (!SR) { show($("micMain"), false); show($("micItem"), false); $("heard").placeholder = "Voice input isn't supported in this browser. Use Chrome, or the microphone on your keyboard."; }
+  var active = null;
+  function stopAll(cb) { if (!active) { if (cb) cb(); return; } if (cb) active.after.push(cb); active.keep = false; try { active.rec.stop(); } catch (e) {} }
+  function listen(btn, opts) {
+    if (active && active.btn === btn) { stopAll(); return; }
+    stopAll();
+    var state = { btn: btn, keep: true, rec: null, lastHeard: Date.now(), after: [] };
+    var base = opts.base();
+    function begin() {
+      var rec = new SR();
+      rec.lang = "en-US"; rec.continuous = false; rec.interimResults = true; rec.maxAlternatives = 1;
+      state.rec = rec;
+      rec.onresult = function (ev) { var r = ev.results[ev.results.length - 1]; var text = r[0].transcript.trim(); state.lastHeard = Date.now(); opts.onText(base, r.isFinal ? text + " " : "", r.isFinal ? "" : text); };
+      rec.onerror = function (ev) { if (ev.error === "not-allowed" || ev.error === "service-not-allowed") { state.keep = false; say("talkMsg", "❌ Microphone is blocked. Allow microphone access for this site in your browser settings.", "err"); } };
+      rec.onend = function () { base = opts.base(); var idle = Date.now() - state.lastHeard > 20000; if (state.keep && !idle && active === state) { try { begin(); } catch (e) { finish(); } } else finish(); };
+      rec.start();
+    }
+    function finish() { btn.classList.remove("rec"); opts.label(false); if (active === state) active = null; var cbs = state.after; state.after = []; cbs.forEach(function (f) { f(); }); if (opts.done) opts.done(); }
+    active = state; btn.classList.add("rec"); opts.label(true);
+    try { begin(); } catch (e) { finish(); }
+  }
+  $("micMain").onclick = function () {
+    listen($("micMain"), {
+      base: function () { var v = $("heard").value.trim(); return v ? v + " " : ""; },
+      onText: function (base, fin, interim) { $("heard").value = (base + fin + interim).replace(/\s+/g, " ").trimStart(); },
+      label: function (on) { $("micMainLabel").textContent = on ? "Listening… tap when done" : "Tap to talk"; },
+      done: function () { if ($("heard").value.trim()) runParse(); }
+    });
+  };
+  var extra = "";
+  $("micItem").onclick = function () {
+    extra = "";
+    listen($("micItem"), {
+      base: function () { return ""; },
+      onText: function (base, fin, interim) { extra = (extra + fin).replace(/\s+/g, " "); $("micItem").textContent = "🎤 " + (extra + interim).trim(); },
+      label: function (on) { if (!on) $("micItem").textContent = "🎤 Say another item"; },
+      done: function () { var t = extra.trim(); if (!t) return; addItemFromText(t); }
+    });
+  };
+  function addItemFromText(t) {
+    var q = (t.match(/^(\d+)\s+/) || [])[1];
+    var row = itemBlock({ qty: q ? Number(q) : 1, spoken: t, search: t.replace(/^\d+\s+/, ""), candidates: [], part: "" });
+    $("items").appendChild(row);
+    var sel = row.querySelector("select");
+    api("match", { q: t.replace(/^\d+\s+/, "") }).then(function (r) { if (r.ok) fillSel(sel, r.candidates || [], (r.candidates || [])[0] && r.candidates[0].score >= 0.9 ? r.candidates[0].part : ""); });
+  }
+
+  // ---------- parse ----------
+  var busy = false;
+  $("build").onclick = function () { stopAll(runParse); };
+  function runParse() {
+    var text = $("heard").value.trim();
+    if (busy) return;
+    if (!text) { say("talkMsg", "Tap the mic and say the job number and the items.", "err"); return; }
+    busy = true; $("build").disabled = true;
+    say("talkMsg", "Matching part numbers…", "busy");
+    show($("reviewCard"), false); show($("doneCard"), false);
+    api("parse", { text: text }).then(function (r) {
+      busy = false; $("build").disabled = false;
+      if (!r.ok) { say("talkMsg", "❌ " + r.error, "err"); return; }
+      say("talkMsg", "");
+      openReview(r);
+    });
+  }
+
+  // ---------- review ----------
+  function setFor(v) { S.forWhat = v; seg(".seg[aria-label='For']", "for", v); show($("jobWrap"), v === "job"); }
+  function setFul(v) { S.ful = v; seg(".seg[aria-label='Fulfillment']", "ful", v); show($("delWrap"), v === "delivery"); }
+  function setTo(v) { S.to = v; seg("#delWrap .seg", "to", v); $("delAddr").value = v === "shop" ? S.shop : (S.job ? S.job.address : ""); }
+  Array.prototype.forEach.call(document.querySelectorAll(".seg[aria-label='For'] button"), function (b) { b.onclick = function () { setFor(b.dataset.for); }; });
+  Array.prototype.forEach.call(document.querySelectorAll(".seg[aria-label='Fulfillment'] button"), function (b) { b.onclick = function () { setFul(b.dataset.ful); }; });
+  Array.prototype.forEach.call(document.querySelectorAll("#delWrap .seg button"), function (b) { b.onclick = function () { setTo(b.dataset.to); }; });
+
+  function openReview(r) {
+    var req = r.request || {};
+    S.reqId = ""; S.result = null; say("submitMsg", ""); $("submit").disabled = false;
+    setFor(req.stock ? "truck" : "job");
+    $("jobNum").value = req.job_number || "";
+    showJob(r.job || null, r.job_error || "");
+    setFul(req.fulfillment === "delivery" ? "delivery" : "pickup");
+    setTo(req.deliver_to === "shop" ? "shop" : "job");
+    $("needed").value = req.needed_by || "";
+    $("notes").value = req.notes || "";
+    say("catMsg", r.catalog ? "" : "The parts catalog is empty — items go to the counter by description only.", "warn");
+    var box = $("items"); box.innerHTML = "";
+    (r.items || []).forEach(function (it) { box.appendChild(itemBlock(it)); });
+    show($("reviewCard"), true);
+    $("reviewCard").scrollIntoView({ behavior: "smooth", block: "start" });
+  }
+  function showJob(job, err) {
+    S.job = job;
+    var b = $("jobBox"); b.innerHTML = "";
+    if (job) {
+      b.appendChild(el("b", null, "#" + job.number + " · " + job.customer));
+      b.appendChild(el("div", null, job.address || "No address"));
+      if (job.description) b.appendChild(el("div", null, job.description));
+      say("jobMsg", "");
+      if (S.to === "job") $("delAddr").value = job.address || "";
+    } else say("jobMsg", err || "", "warn");
+    show(b, !!job);
+  }
+  $("jobGo").onclick = function () {
+    var n = $("jobNum").value.trim(); if (!n) return;
+    $("jobGo").disabled = true; say("jobMsg", "Finding job " + n + "…", "busy");
+    api("job", { number: n }).then(function (r) { $("jobGo").disabled = false; if (r.ok) showJob(r.job, ""); else showJob(null, "❌ " + r.error); });
+  };
+  $("jobNum").onkeydown = function (e) { if (e.key === "Enter") $("jobGo").click(); };
+
+  function fillSel(sel, cands, chosen) {
+    sel.innerHTML = "";
+    sel.appendChild(el("option", null, "No part number — counter will match")).value = "";
+    cands.forEach(function (c) { var o = el("option", null, c.part + " · " + c.desc + (c.uom ? " [" + c.uom + "]" : "")); o.value = c.part; o.dataset.desc = c.desc; sel.appendChild(o); });
+    sel.appendChild(el("option", null, "Search the catalog…")).value = "__search";
+    sel.value = chosen && cands.some(function (c) { return c.part === chosen; }) ? chosen : "";
+    sel.classList.toggle("none", !sel.value);
+  }
+  function itemBlock(it) {
+    var w = el("div", "item");
+    var top = el("div", "top");
+    var qty = el("input", "qty"); qty.inputMode = "decimal"; qty.value = it.qty || 1; qty.autocomplete = "off";
+    var desc = el("input", "desc"); desc.value = it.spoken || it.search || ""; desc.placeholder = "Item"; desc.autocomplete = "off";
+    var x = el("button", "x", "×"); x.onclick = function () { w.remove(); };
+    top.appendChild(qty); top.appendChild(desc); top.appendChild(x); w.appendChild(top);
+    var pw = el("div", "part"); var sel = el("select"); pw.appendChild(sel); w.appendChild(pw);
+    fillSel(sel, it.candidates || [], it.part || "");
+    sel.onchange = function () {
+      if (sel.value === "__search") {
+        var q = prompt("Search the catalog for:", desc.value.trim()); sel.value = ""; sel.classList.add("none");
+        if (!q) return;
+        api("match", { q: q }).then(function (r) { if (r.ok) fillSel(sel, r.candidates || [], ""); else alert(r.error); });
+        return;
+      }
+      sel.classList.toggle("none", !sel.value);
+    };
+    var note = el("input", "note"); note.placeholder = "Note (brand, color, length…)"; note.value = it.note || ""; note.autocomplete = "off"; w.appendChild(note);
+    return w;
+  }
+  $("addItem").onclick = function () { var t = prompt("Item (e.g. 2 3/4 PEX elbows):"); if (t && t.trim()) addItemFromText(t.trim()); };
+
+  function readItems() {
+    return [].map.call($("items").children, function (w) {
+      var sel = w.querySelector("select"); var o = sel.options[sel.selectedIndex];
+      var desc = w.querySelector(".desc").value.trim();
+      return { qty: parseFloat(w.querySelector(".qty").value) || 1, spoken: desc, part: sel.value && sel.value !== "__search" ? sel.value : "",
+               desc: sel.value && sel.value !== "__search" && o ? o.dataset.desc : desc, note: w.querySelector(".note").value.trim() };
+    }).filter(function (i) { return i.desc; });
+  }
+
+  // ---------- place ----------
+  $("submit").onclick = function () { stopAll(submit); };
+  function submit() {
+    if ($("submit").disabled) return;
+    var items = readItems();
+    if (!items.length) { say("submitMsg", "❌ Add at least one item.", "err"); return; }
+    var stock = S.forWhat !== "job";
+    var jobNum = $("jobNum").value.trim();
+    if (!stock && !jobNum) { say("submitMsg", "❌ Enter the job number, or switch to truck/shop stock.", "err"); $("jobNum").focus(); return; }
+    var noPart = items.filter(function (i) { return !i.part; }).length;
+    if (noPart && S.catalog && !confirm(noPart + " item(s) have no part number. The counter will have to match them. Place the order anyway?")) return;
+    var order = { items: items, stock: stock, stock_kind: S.forWhat, job_number: stock ? "" : jobNum, fulfillment: S.ful, deliver_to: S.to,
+                  deliver_address: $("delAddr").value.trim(), needed_by: $("needed").value.trim(), notes: $("notes").value.trim() };
+    if (!S.reqId) S.reqId = Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
+    var b = $("submit"); b.disabled = true; b.textContent = "Placing…"; say("submitMsg", "");
+    api("place", { req_id: S.reqId, order: order }).then(function (r) {
+      b.textContent = "Place order";
+      if (!r.ok) { b.disabled = false; if (!r.net) S.reqId = ""; say("submitMsg", "❌ " + r.error, "err"); return; }
+      S.result = r;
+      say("submitMsg", r.message, "ok");
+      recent((order.stock ? order.stock_kind + " stock" : "Job " + order.job_number) + " — " + r.lines + " item(s)");
+      openDone(r);
+    });
+  }
+  function openDone(r) {
+    var ios = /iPhone|iPad|iPod/i.test(navigator.userAgent);
+    $("smsBtn").href = "sms:" + COUNTER.sms + (ios ? "&" : "?") + "body=" + encodeURIComponent(r.sms_text);
+    $("smsBtn").textContent = "💬 Text the counter (" + COUNTER.name + ")";
+    $("doneHint").textContent = (S.emailOn ? "A copy was emailed to " + S.emailTo + ". " : "") + "Texting is the branch's own ordering channel — tap below, check the message, send.";
+    $("orderText").textContent = r.sms_text;
+    show($("copyQp"), !!r.quickpad);
+    show($("doneCard"), true);
+    $("doneCard").scrollIntoView({ behavior: "smooth", block: "start" });
+  }
+  function copy(text, btn, label) {
+    function done() { btn.textContent = "✅ Copied"; setTimeout(function () { btn.textContent = label; }, 1500); }
+    if (navigator.clipboard && navigator.clipboard.writeText) navigator.clipboard.writeText(text).then(done, function () { fallback(); });
+    else fallback();
+    function fallback() { var t = el("textarea"); t.value = text; document.body.appendChild(t); t.select(); try { document.execCommand("copy"); done(); } catch (e) {} t.remove(); }
+  }
+  $("copyQp").onclick = function () { if (S.result) copy(S.result.quickpad, $("copyQp"), "Copy Quick Pad list (SupplyZone app)"); };
+  $("copyTxt").onclick = function () { if (S.result) copy(S.result.sms_text, $("copyTxt"), "Copy order text"); };
+  $("again").onclick = function () {
+    S.job = null; S.result = null; S.reqId = "";
+    $("heard").value = ""; $("items").innerHTML = ""; $("jobNum").value = ""; $("needed").value = ""; $("notes").value = ""; $("delAddr").value = "";
+    say("talkMsg", ""); say("submitMsg", ""); $("submit").disabled = false;
+    show($("reviewCard"), false); show($("doneCard"), false);
+    window.scrollTo({ top: 0, behavior: "smooth" });
+  };
+})();
+</script>
+</body>
+</html>

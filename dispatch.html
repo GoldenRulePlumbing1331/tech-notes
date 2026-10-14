@@ -1,0 +1,446 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#14365c">
+<meta name="robots" content="noindex">
+<title>Dispatch</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='14' fill='%2314365c'/%3E%3Crect x='25' y='12' width='14' height='26' rx='7' fill='%23f2b632'/%3E%3Cpath d='M18 32a14 14 0 0 0 28 0' stroke='%23f2b632' stroke-width='4' fill='none'/%3E%3Crect x='30' y='46' width='4' height='8' fill='%23f2b632'/%3E%3C/svg%3E">
+<style>
+  :root {
+    --bg: #f3f4f6; --card: #ffffff; --ink: #14181f; --muted: #5d6573; --line: #d5d9e0; --soft: #eef1f5;
+    --brand: #14365c; --accent: #f2b632; --ok-bg: #e4f4e8; --ok-ink: #14532d;
+    --err-bg: #fde8e8; --err-ink: #7f1d1d; --warn-bg: #fff4d6; --warn-ink: #6b4a00; --rec: #c62828;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root { --bg: #0f1216; --card: #191d23; --ink: #eef1f5; --muted: #9aa3b0; --line: #2e343d; --soft: #222831;
+      --ok-bg: #12301d; --ok-ink: #b9f0c9; --err-bg: #3a1515; --err-ink: #ffc9c9; --warn-bg: #3a2e10; --warn-ink: #ffe3a1; }
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; background: var(--bg); color: var(--ink); }
+  body { font: 17px/1.45 -apple-system, "Segoe UI", Roboto, Arial, sans-serif;
+         padding: 16px 16px calc(24px + env(safe-area-inset-bottom)); max-width: 560px; margin: 0 auto; }
+  header { display: flex; align-items: center; gap: 10px; margin: 4px 0 16px; }
+  header .dot { width: 34px; height: 34px; border-radius: 9px; background: var(--brand);
+                display: grid; place-items: center; color: var(--accent); font-weight: 800; flex: none; text-decoration: none; }
+  h1 { font-size: 21px; margin: 0; flex: 1; }
+  header a.nav { font-size: 15px; font-weight: 600; color: var(--brand); text-decoration: none; white-space: nowrap; }
+  @media (prefers-color-scheme: dark) { header a.nav { color: var(--accent); } }
+  h2 { font-size: 15px; text-transform: uppercase; letter-spacing: .06em; color: var(--muted); margin: 0 0 10px; }
+  .card { background: var(--card); border: 1px solid var(--line); border-radius: 14px; padding: 14px; margin-bottom: 14px; }
+  .hidden { display: none !important; }
+  label { display: block; font-weight: 650; margin-bottom: 6px; }
+  input, textarea, select { width: 100%; font: inherit; color: var(--ink); background: var(--card);
+                    border: 1px solid var(--line); border-radius: 10px; padding: 11px 12px; }
+  input.missing { border-color: var(--rec); background: var(--err-bg); }
+  textarea { min-height: 96px; resize: vertical; }
+  .hint { font-size: 14px; color: var(--muted); margin-top: 8px; }
+  .mic { border: 0; border-radius: 12px; background: var(--brand); color: #fff; cursor: pointer;
+         width: 100%; height: 68px; font: 650 19px/1 inherit; font-family: inherit;
+         display: flex; justify-content: center; align-items: center; gap: 10px; }
+  .mic svg { width: 26px; height: 26px; }
+  .mic.rec { background: var(--rec); animation: pulse 1.2s infinite; }
+  @keyframes pulse { 50% { opacity: .75; } }
+  .btn { width: 100%; padding: 13px; border-radius: 12px; font: 700 16px/1 inherit; font-family: inherit;
+         border: 1px solid var(--line); background: var(--soft); color: var(--ink); margin-top: 10px; cursor: pointer; }
+  .btn:disabled { opacity: .55; }
+  .btn.danger { color: var(--err-ink); background: var(--err-bg); border-color: transparent; }
+  #submit { padding: 18px; border: 0; background: var(--accent); color: #1a1300; font-size: 19px; font-weight: 800; }
+  .status { display: none; white-space: pre-wrap; border-radius: 12px; padding: 12px 14px; margin-top: 12px; font-size: 16px; }
+  .status.ok { display: block; background: var(--ok-bg); color: var(--ok-ink); }
+  .status.err { display: block; background: var(--err-bg); color: var(--err-ink); }
+  .status.warn { display: block; background: var(--warn-bg); color: var(--warn-ink); }
+  .status.busy { display: block; background: var(--soft); color: var(--muted); }
+  .row { display: flex; gap: 8px; align-items: flex-end; }
+  .row > * { min-width: 0; }
+  .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+  .grid .full { grid-column: 1 / -1; }
+  .grid > div { min-width: 0; }
+  .grid label { font-size: 14px; margin-bottom: 4px; }
+  input[type="date"], input[type="time"] { min-width: 0; -webkit-appearance: none; appearance: none; min-height: 46px; }
+  .job { display: block; width: 100%; text-align: left; font: inherit; color: var(--ink); background: var(--card);
+         border: 1px solid var(--line); border-radius: 12px; padding: 12px; margin-bottom: 8px; cursor: pointer; }
+  .job:active { background: var(--soft); }
+  .job b { display: block; font-size: 18px; }
+  .job span { display: block; font-size: 15px; color: var(--muted); }
+  .job .t { font-weight: 700; color: var(--ink); }
+  .now { background: var(--soft); border-radius: 12px; padding: 12px; margin-bottom: 12px; }
+  .now b { font-size: 18px; }
+  .now div { font-size: 15px; color: var(--muted); }
+  .now .when { color: var(--ink); font-weight: 650; font-size: 16px; }
+  .crew { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; }
+  .crew label { display: flex; gap: 8px; align-items: center; padding: 9px 10px; border: 1px solid var(--line);
+                border-radius: 10px; font-weight: 500; font-size: 15px; margin: 0; cursor: pointer; }
+  .crew input { width: 20px; height: 20px; margin: 0; flex: none; }
+  .crew label.on { background: var(--brand); color: #fff; border-color: var(--brand); }
+  .sw { display: flex; gap: 10px; align-items: center; padding: 10px 0; font-weight: 500; }
+  .sw input { width: 22px; height: 22px; margin: 0; }
+  .sub { margin-top: 16px; padding-top: 14px; border-top: 1px solid var(--line); }
+  .link { background: none; border: 0; padding: 0; font: inherit; font-size: 15px; color: var(--brand); text-decoration: underline; cursor: pointer; }
+  @media (prefers-color-scheme: dark) { .link { color: var(--accent); } }
+  footer { text-align: center; font-size: 13px; color: var(--muted); margin-top: 18px; }
+  footer a { color: inherit; }
+</style>
+</head>
+<body>
+<header>
+  <a class="dot" href="home.html" aria-label="All tools">GR</a>
+  <h1>Dispatch</h1>
+  <a class="nav" href="home.html">All tools →</a>
+</header>
+
+<div class="card hidden" id="codeCard">
+  <label for="code">Your access code</label>
+  <input id="code" inputmode="numeric" autocomplete="off" placeholder="8-digit code">
+  <button class="btn" id="codeGo">Continue</button>
+  <div class="status" id="codeMsg"></div>
+</div>
+
+<div id="app" class="hidden">
+
+<!-- 1. Talk -->
+<div class="card">
+  <button class="mic" id="micMain">
+    <svg viewBox="0 0 24 24" fill="currentColor"><path d="M12 15a3 3 0 0 0 3-3V6a3 3 0 0 0-6 0v6a3 3 0 0 0 3 3zm5-3a5 5 0 0 1-10 0H5a7 7 0 0 0 6 6.92V21h2v-2.08A7 7 0 0 0 19 12h-2z"/></svg>
+    <span id="micMainLabel">Tap to talk</span>
+  </button>
+  <div class="hint">Say the job number and the change. “Move 49370 to Thursday at 9, give it to Mike.” · “Add Dave to 49370.” · “Take 49370 off the schedule.” · “What does Mike have tomorrow?”</div>
+  <textarea id="heard" placeholder="What you say shows up here. You can fix it before sending."></textarea>
+  <button class="btn" id="go">Go</button>
+  <div class="status" id="talkMsg"></div>
+  <div class="sub">
+    <div class="row">
+      <div style="flex:1"><label for="jobNum" style="font-size:14px">Or type a job number</label><input id="jobNum" inputmode="numeric" autocomplete="off" placeholder="e.g. 49370" enterkeyhint="search"></div>
+      <button class="btn" id="jobGo" style="width:auto;margin:0;padding:0 16px;height:46px">Find</button>
+    </div>
+  </div>
+</div>
+
+<!-- 2. Pick job (segments) -->
+<div class="card hidden" id="pickCard">
+  <h2 id="pickTitle">Which one?</h2>
+  <div id="pickList"></div>
+</div>
+
+<!-- 3. Change -->
+<div class="card hidden" id="changeCard">
+  <h2>Confirm the change</h2>
+  <div class="now" id="now"></div>
+  <div class="status" id="apptMsg"></div>
+  <div id="apptWrap" class="hidden">
+    <label for="appt">Which appointment to move</label>
+    <select id="appt"></select>
+  </div>
+  <div class="grid" style="margin-top:4px">
+    <div><label for="cDate">New date</label><input id="cDate" type="date"></div>
+    <div><label for="cTime">Start time</label><input id="cTime" type="time" step="900"></div>
+    <div><label for="cDur">Length</label>
+      <select id="cDur">
+        <option value="30">30 min</option><option value="60">1 hour</option><option value="90">1.5 hours</option>
+        <option value="120">2 hours</option><option value="180">3 hours</option><option value="240">4 hours</option>
+        <option value="300">5 hours</option><option value="360">6 hours</option><option value="480">8 hours</option>
+      </select></div>
+    <div><label for="cArr">Arrival window</label>
+      <select id="cArr">
+        <option value="0">None</option><option value="60">1 hour</option><option value="120">2 hours</option>
+        <option value="180">3 hours</option><option value="240">4 hours</option>
+      </select></div>
+  </div>
+  <div class="hint">Leave the date blank to keep the current time and only change the crew.</div>
+  <div class="sub">
+    <label>Crew</label>
+    <div class="crew" id="crew"></div>
+  </div>
+  <div class="sub">
+    <label class="sw"><input type="checkbox" id="notifyCust"> Text/email the customer about the new time</label>
+    <label class="sw"><input type="checkbox" id="notifyPro" checked> Notify the tech(s) in HCP</label>
+    <label for="cNote" style="margin-top:6px">Note (optional)</label>
+    <input id="cNote" autocomplete="off" placeholder="e.g. customer asked for after 9">
+  </div>
+  <button class="btn" id="submit">Update job</button>
+  <button class="btn danger" id="unsched">Take off the schedule</button>
+  <div class="status" id="submitMsg"></div>
+  <button class="btn hidden" id="again">Another change</button>
+</div>
+
+<!-- 4. Board -->
+<div class="card" id="boardCard">
+  <h2>Board</h2>
+  <div class="row">
+    <div style="flex:1"><label for="bDate" style="font-size:14px">Day</label><input id="bDate" type="date"></div>
+    <div style="flex:1"><label for="bEmp" style="font-size:14px">Tech</label><select id="bEmp"><option value="">Everyone</option></select></div>
+    <button class="btn" id="bGo" style="width:auto;margin:0;padding:0 14px;height:46px">Show</button>
+  </div>
+  <div id="boardList" style="margin-top:12px"></div>
+  <div class="hint" id="boardHint">Tap a job on the board to move it.</div>
+</div>
+
+</div>
+
+<footer><a href="#" id="forget">Not you? Change code</a></footer>
+
+<script src="config.js"></script>
+<script>
+(function () {
+  var ENDPOINT = (window.GR_ENDPOINTS && window.GR_ENDPOINTS.dispatch) || "";
+  var KEY = "grTechCode";                      // shared across all Golden Rule voice pages
+  var OLD_KEYS = ["grNewJobCode", "grDispatchCode"];
+  function $(id) { return document.getElementById(id); }
+  function get(k) { try { return localStorage.getItem(k) || ""; } catch (e) { return ""; } }
+  function put(k, v) { try { localStorage.setItem(k, v); } catch (e) {} }
+  function drop(k) { try { localStorage.removeItem(k); } catch (e) {} }
+  function show(el, on) { el.classList.toggle("hidden", !on); }
+  function say(id, text, kind) { var m = $(id); m.textContent = text || ""; m.className = "status" + (text ? " " + (kind || "ok") : ""); }
+  function el(tag, cls, text) { var e = document.createElement(tag); if (cls) e.className = cls; if (text != null) e.textContent = text; return e; }
+  function recent(text) {
+    try { var r = JSON.parse(get("grRecent") || "[]"); r.unshift({ tool: "Dispatch", text: text, at: Date.now() }); put("grRecent", JSON.stringify(r.slice(0, 20))); } catch (e) {}
+  }
+
+  var S = { code: "", emps: [], me: "", today: "", job: null, req: null, canDispatch: true, reqId: "" };
+
+  // ---------- server ----------
+  function api(action, data) {
+    data = data || {}; data.action = action; data.token = S.code;
+    if (ENDPOINT.indexOf("https://") !== 0) return Promise.resolve({ ok: false, error: "Dispatch isn't connected yet. Add its URL to config.js." });
+    return fetch(ENDPOINT, { method: "POST", headers: { "Content-Type": "text/plain" }, body: JSON.stringify(data) })
+      .then(function (r) { return r.json(); })
+      .catch(function () { return { ok: false, error: "Couldn't reach the server. Check your signal and try again.", net: true }; })
+      .then(function (r) {
+        if (!r.ok && /access code|Too many wrong/.test(r.error || "")) { if (action !== "init") { drop(KEY); S.code = ""; showCode(r.error); } }
+        return r;
+      });
+  }
+
+  // ---------- access code ----------
+  function showCode(msg) { show($("codeCard"), true); show($("app"), false); say("codeMsg", msg, "err"); }
+  function start(code, quiet) {
+    S.code = code;
+    say("codeMsg", "Checking…", "busy");
+    api("init").then(function (r) {
+      if (!r.ok) { if (quiet) { S.code = ""; showCode(""); } else showCode(r.error); return; }
+      put(KEY, code);
+      S.me = r.me || ""; S.today = r.today || ""; S.emps = r.employees || []; S.canDispatch = r.can_dispatch !== false;
+      var sel = $("bEmp"); sel.innerHTML = ""; sel.appendChild(el("option", null, "Everyone")).value = "";
+      S.emps.forEach(function (e) { var o = el("option", null, e.name); o.value = e.id; sel.appendChild(o); });
+      if (S.today) { $("bDate").value = S.today; $("cDate").min = S.today; }
+      show($("codeCard"), false); show($("app"), true); say("codeMsg", "");
+      if (!S.canDispatch) say("talkMsg", "Your code can view the board but not move jobs.", "warn");
+      loadBoard();
+    });
+  }
+  $("codeGo").onclick = function () { var c = $("code").value.trim(); if (c) start(c); };
+  $("code").onkeydown = function (e) { if (e.key === "Enter") $("codeGo").click(); };
+  $("forget").onclick = function (e) { e.preventDefault(); drop(KEY); S.code = ""; $("code").value = ""; showCode(""); };
+  (function boot() {
+    if (get(KEY)) return start(get(KEY));
+    for (var i = 0; i < OLD_KEYS.length; i++) if (get(OLD_KEYS[i])) return start(get(OLD_KEYS[i]), true);
+    showCode("");
+  })();
+
+  // ---------- speech ----------
+  var SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+  if (!SR) { show($("micMain"), false); $("heard").placeholder = "Voice input isn't supported in this browser. Use Chrome, or the microphone on your keyboard."; }
+  var active = null;
+  function stopAll(cb) { if (!active) { if (cb) cb(); return; } if (cb) active.after.push(cb); active.keep = false; try { active.rec.stop(); } catch (e) {} }
+  function listen(btn, opts) {
+    if (active && active.btn === btn) { stopAll(); return; }
+    stopAll();
+    var state = { btn: btn, keep: true, rec: null, lastHeard: Date.now(), after: [] };
+    var base = opts.base();
+    function begin() {
+      var rec = new SR();
+      rec.lang = "en-US"; rec.continuous = false; rec.interimResults = true; rec.maxAlternatives = 1;
+      state.rec = rec;
+      rec.onresult = function (ev) {
+        var r = ev.results[ev.results.length - 1]; var text = r[0].transcript.trim();
+        state.lastHeard = Date.now();
+        opts.onText(base, r.isFinal ? text + " " : "", r.isFinal ? "" : text);
+      };
+      rec.onerror = function (ev) {
+        if (ev.error === "not-allowed" || ev.error === "service-not-allowed") { state.keep = false; say("talkMsg", "❌ Microphone is blocked. Allow microphone access for this site in your browser settings.", "err"); }
+      };
+      rec.onend = function () {
+        base = opts.base();
+        var idle = Date.now() - state.lastHeard > 20000;
+        if (state.keep && !idle && active === state) { try { begin(); } catch (e) { finish(); } } else finish();
+      };
+      rec.start();
+    }
+    function finish() {
+      btn.classList.remove("rec"); opts.label(false);
+      if (active === state) active = null;
+      var cbs = state.after; state.after = []; cbs.forEach(function (f) { f(); });
+      if (opts.done) opts.done();
+    }
+    active = state; btn.classList.add("rec"); opts.label(true);
+    try { begin(); } catch (e) { finish(); }
+  }
+  $("micMain").onclick = function () {
+    listen($("micMain"), {
+      base: function () { var v = $("heard").value.trim(); return v ? v + " " : ""; },
+      onText: function (base, fin, interim) { $("heard").value = (base + fin + interim).replace(/\s+/g, " ").trimStart(); },
+      label: function (on) { $("micMainLabel").textContent = on ? "Listening… tap when done" : "Tap to talk"; },
+      done: function () { if ($("heard").value.trim()) runParse(); }
+    });
+  };
+
+  // ---------- parse ----------
+  var busy = false;
+  $("go").onclick = function () { stopAll(runParse); };
+  function runParse() {
+    var text = $("heard").value.trim();
+    if (busy) return;
+    if (!text) { say("talkMsg", "Tap the mic and say the job number and what should change.", "err"); return; }
+    busy = true; $("go").disabled = true;
+    say("talkMsg", "Working on it…", "busy");
+    show($("pickCard"), false); show($("changeCard"), false);
+    api("parse", { text: text }).then(function (r) {
+      busy = false; $("go").disabled = false;
+      if (!r.ok) { say("talkMsg", "❌ " + r.error, "err"); return; }
+      S.req = r.request || {};
+      if (S.req.action === "board") {
+        say("talkMsg", "");
+        $("bDate").value = r.board_date || S.today; $("bEmp").value = r.board_employee_id || "";
+        renderBoard(r.board || []); $("boardCard").scrollIntoView({ behavior: "smooth" });
+        return;
+      }
+      if (r.error_hint) { say("talkMsg", r.error_hint, "warn"); $("jobNum").focus(); return; }
+      say("talkMsg", "");
+      gotJobs(r.jobs || []);
+    });
+  }
+  $("jobGo").onclick = function () {
+    var n = $("jobNum").value.trim();
+    if (!n) return;
+    $("jobGo").disabled = true; say("talkMsg", "Finding job " + n + "…", "busy");
+    api("job", { number: n }).then(function (r) {
+      $("jobGo").disabled = false;
+      if (!r.ok) { say("talkMsg", "❌ " + r.error, "err"); return; }
+      say("talkMsg", ""); if (!S.req) S.req = { action: "reschedule", employee_ids: [], replace_crew: true };
+      gotJobs(r.jobs || []);
+    });
+  };
+  $("jobNum").onkeydown = function (e) { if (e.key === "Enter") $("jobGo").click(); };
+
+  function gotJobs(jobs) {
+    if (!jobs.length) { say("talkMsg", "No job found with that number.", "warn"); return; }
+    if (jobs.length === 1) { openChange(jobs[0]); return; }
+    var box = $("pickList"); box.innerHTML = "";
+    jobs.forEach(function (j) { box.appendChild(jobButton(j, function () { openChange(j); })); });
+    show($("pickCard"), true); $("pickCard").scrollIntoView({ behavior: "smooth" });
+  }
+  function jobButton(j, onPick) {
+    var b = el("button", "job");
+    b.appendChild(el("b", null, "#" + j.number + " · " + j.customer));
+    var t = el("span", "t", j.when + (j.employees.length ? " · " + j.employees.join(", ") : " · unassigned")); b.appendChild(t);
+    b.appendChild(el("span", null, j.address || "No address"));
+    if (j.description) b.appendChild(el("span", null, j.description.split("\n")[0].slice(0, 90)));
+    b.onclick = onPick;
+    return b;
+  }
+
+  // ---------- change ----------
+  function resetSubmit() { say("submitMsg", ""); $("submit").disabled = false; show($("submit"), true); show($("unsched"), true); show($("again"), false); S.reqId = ""; }
+  function openChange(j) {
+    S.job = j; resetSubmit();
+    var req = S.req || {};
+    var now = $("now"); now.innerHTML = "";
+    now.appendChild(el("b", null, "#" + j.number + " · " + j.customer));
+    now.appendChild(el("div", null, j.address || "No address"));
+    now.appendChild(el("div", "when", j.when + (j.employees.length ? " · " + j.employees.join(", ") : " · unassigned")));
+    if (j.description) now.appendChild(el("div", null, j.description.split("\n")[0].slice(0, 120)));
+
+    show($("apptWrap"), !!j.multi_day);
+    say("apptMsg", j.multi_day ? "Multi-day job: pick which appointment to move." : "", "warn");
+    if (j.multi_day) {
+      var sel = $("appt"); sel.innerHTML = "";
+      j.appointments.forEach(function (a) { var o = el("option", null, a.label); o.value = a.id; sel.appendChild(o); });
+    }
+
+    var wantsTime = req.action === "reschedule" && (req.date || req.time);
+    $("cDate").value = wantsTime ? (req.date || j.date || S.today) : "";
+    $("cTime").value = wantsTime ? (req.time || j.time || "08:00") : "";
+    setSel("cDur", req.duration_min || j.duration_min || 60);
+    setSel("cArr", req.arrival_min != null ? req.arrival_min : j.arrival_min);
+
+    var ids = (req.employee_ids || []).slice();
+    if (!ids.length || req.replace_crew === false) ids = j.employee_ids.concat(ids);
+    var crew = $("crew"); crew.innerHTML = "";
+    S.emps.forEach(function (e) {
+      var lab = el("label"); var cb = el("input"); cb.type = "checkbox"; cb.value = e.id; cb.checked = ids.indexOf(e.id) !== -1;
+      lab.classList.toggle("on", cb.checked);
+      cb.onchange = function () { lab.classList.toggle("on", cb.checked); };
+      lab.appendChild(cb); lab.appendChild(el("span", null, e.name)); crew.appendChild(lab);
+    });
+    $("notifyCust").checked = req.notify_customer === true;
+    $("notifyPro").checked = true;
+    $("cNote").value = req.note || "";
+    if (req.action === "unschedule") say("submitMsg", "You asked to take this job off the schedule. Tap “Take off the schedule” to confirm.", "warn");
+    $("submit").disabled = !S.canDispatch; $("unsched").disabled = !S.canDispatch;
+
+    show($("pickCard"), false); show($("changeCard"), true);
+    $("changeCard").scrollIntoView({ behavior: "smooth", block: "start" });
+  }
+  function setSel(id, v) {
+    var s = $(id); v = String(v);
+    if (![].some.call(s.options, function (o) { return o.value === v; })) { var o = el("option", null, (Number(v) / 60) + " hr"); o.value = v; s.appendChild(o); }
+    s.value = v;
+  }
+  function crewIds() { return [].map.call($("crew").querySelectorAll("input:checked"), function (c) { return c.value; }); }
+
+  $("submit").onclick = function () { stopAll(submit); };
+  function submit() {
+    if ($("submit").disabled || !S.job) return;
+    var change = { date: $("cDate").value, time: $("cTime").value, duration_min: $("cDur").value, arrival_min: $("cArr").value,
+                   employee_ids: crewIds(), notify_customer: $("notifyCust").checked, notify_pro: $("notifyPro").checked,
+                   note: $("cNote").value.trim(), appointment_id: S.job.multi_day ? $("appt").value : "" };
+    if ((change.date && !change.time) || (change.time && !change.date)) { say("submitMsg", "❌ Pick both a date and a start time, or leave both blank.", "err"); return; }
+    if (!change.date && !change.employee_ids.length) { say("submitMsg", "❌ Nothing to change — set a new time or pick a crew.", "err"); return; }
+    if (!change.date) { change.date = ""; change.time = ""; }
+    if (!S.reqId) S.reqId = Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
+    var b = $("submit"); b.disabled = true; b.textContent = "Updating…"; say("submitMsg", "");
+    api("apply", { req_id: S.reqId, job_id: S.job.id, change: change }).then(function (r) {
+      b.textContent = "Update job";
+      if (r.ok) { say("submitMsg", r.message, "ok"); show(b, false); show($("unsched"), false); show($("again"), true); recent(r.message.split("\n").slice(0, 2).join(" — ")); loadBoard(); return; }
+      b.disabled = false; if (!r.net) S.reqId = "";
+      say("submitMsg", "❌ " + r.error, "err");
+    });
+  }
+  $("unsched").onclick = function () {
+    if (!S.job || $("unsched").disabled) return;
+    if (!confirm("Take job #" + S.job.number + " off the schedule?")) return;
+    var b = $("unsched"); b.disabled = true; b.textContent = "Working…"; say("submitMsg", "");
+    api("unschedule", { job_id: S.job.id }).then(function (r) {
+      b.textContent = "Take off the schedule";
+      if (r.ok) { say("submitMsg", r.message, "ok"); show($("submit"), false); show(b, false); show($("again"), true); recent(r.message); loadBoard(); return; }
+      b.disabled = false; say("submitMsg", "❌ " + r.error, "err");
+    });
+  };
+  $("again").onclick = function () {
+    S.job = null; S.req = null; resetSubmit();
+    $("heard").value = ""; $("jobNum").value = ""; say("talkMsg", "");
+    show($("pickCard"), false); show($("changeCard"), false);
+    window.scrollTo({ top: 0, behavior: "smooth" });
+  };
+
+  // ---------- board ----------
+  function loadBoard() {
+    var d = $("bDate").value || S.today, e = $("bEmp").value;
+    $("boardList").textContent = "Loading…";
+    api("board", { date: d, employee_id: e }).then(function (r) {
+      if (!r.ok) { $("boardList").textContent = "❌ " + r.error; return; }
+      renderBoard(r.jobs || []);
+    });
+  }
+  function renderBoard(jobs) {
+    var box = $("boardList"); box.innerHTML = "";
+    if (!jobs.length) { box.appendChild(el("div", "hint", "Nothing scheduled.")); return; }
+    jobs.forEach(function (j) { box.appendChild(jobButton(j, function () { S.req = { action: "reschedule", employee_ids: [], replace_crew: true }; openChange(j); })); });
+  }
+  $("bGo").onclick = loadBoard;
+  $("bEmp").onchange = loadBoard;
+})();
+</script>
+</body>
+</html>
