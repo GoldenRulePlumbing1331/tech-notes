@@ -109,12 +109,14 @@
       icon: "M7 2h2v2h6V2h2v2h3v18H4V4h3zm-1 7v11h12V9zm2 2h3v3H8zm5 0h3v3h-3z" },
     { key: "estimate", href: "estimate.html", name: "Estimate",       desc: "Describe the options — get a draft estimate.",
       icon: "M6 2h9l5 5v15H6zm8 1.5V8h4.5zM8 11h8v2H8zm0 4h8v2H8zm0-8h4v2H8z" },
+    { key: "clock",    href: "clock.html",    name: "Job Clock",      desc: "On my way / Start / Finish — works with no signal.",
+      icon: "M12 2a10 10 0 100 20 10 10 0 000-20zm0 2a8 8 0 110 16 8 8 0 010-16zm-1 3h2v5.6l3.5 2.1-1 1.7L11 13.4z" },
     { key: "order",    href: "order.html",    name: "Order Material", desc: "Work in progress — not usable yet.", wip: true,
       icon: "M3 4h2l3 10h10l3-7H7.4M9 18a1.5 1.5 0 100 3 1.5 1.5 0 000-3zm8 0a1.5 1.5 0 100 3 1.5 1.5 0 000-3z" }
   ];
 
   // Job Notes saved with no signal (index.html's outbox) — shown as a badge so nobody forgets them.
-  function queued() { try { var b = JSON.parse(get("grNotesOutbox") || "[]"); return Array.isArray(b) ? b.length : 0; } catch (e) { return 0; } }
+  function queued(key) { try { var b = JSON.parse(get(key) || "[]"); return Array.isArray(b) ? b.length : 0; } catch (e) { return 0; } }
   function renderTiles() {
     var box = $("tiles"); box.innerHTML = "";
     TOOLS.forEach(function (t) {
@@ -124,7 +126,7 @@
       a.appendChild(el("b", null, t.name)); a.appendChild(el("span", null, t.desc));
       if (!on) a.appendChild(el("div", "badge", "Not connected"));
       else if (t.wip) { a.classList.add("off"); a.appendChild(el("div", "badge", "Work in progress")); }
-      else if (t.key === "notes") { var q = queued(); if (q) a.appendChild(el("div", "badge", q + " waiting to send")); }
+      else if (t.key === "notes" || t.key === "clock") { var q = queued(t.key === "notes" ? "grNotesOutbox" : "grClockOutbox"); if (q) a.appendChild(el("div", "badge", q + " waiting to send")); }
       box.appendChild(a);
     });
   }

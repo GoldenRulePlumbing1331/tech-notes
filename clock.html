@@ -1,0 +1,278 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#14365c">
+<meta name="robots" content="noindex">
+<title>Job Clock</title>
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="icon" href="icon.svg">
+<style>
+  :root {
+    --bg: #f3f4f6; --card: #ffffff; --ink: #14181f; --muted: #5d6573; --line: #d5d9e0; --soft: #eef1f5;
+    --brand: #14365c; --accent: #f2b632; --ok-bg: #e4f4e8; --ok-ink: #14532d; --wait-bg: #fff4d6; --wait-ink: #6b4a00;
+    --err-bg: #fde8e8; --err-ink: #7f1d1d; --omw: #1d4ed8; --start: #15803d; --finish: #14365c;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root { --bg: #0f1216; --card: #191d23; --ink: #eef1f5; --muted: #9aa3b0; --line: #2e343d; --soft: #232831;
+      --ok-bg: #12301d; --ok-ink: #b9f0c9; --err-bg: #3a1515; --err-ink: #ffc9c9; --wait-bg: #3a2e0f; --wait-ink: #ffe3a3; }
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; background: var(--bg); color: var(--ink); }
+  body { font: 17px/1.45 -apple-system, "Segoe UI", Roboto, Arial, sans-serif; padding: 16px 16px calc(24px + env(safe-area-inset-bottom)); max-width: 560px; margin: 0 auto; }
+  header { display: flex; align-items: center; gap: 10px; margin: 4px 0 16px; }
+  header .dot { width: 34px; height: 34px; border-radius: 9px; background: var(--brand); display: grid; place-items: center; color: var(--accent); font-weight: 800; text-decoration: none; flex: none; }
+  h1 { font-size: 21px; margin: 0; flex: 1; }
+  header a.nav { font-size: 15px; font-weight: 600; color: var(--brand); text-decoration: none; white-space: nowrap; }
+  @media (prefers-color-scheme: dark) { header a.nav { color: var(--accent); } }
+  .card { background: var(--card); border: 1px solid var(--line); border-radius: 14px; padding: 14px; margin-bottom: 14px; }
+  label { display: block; font-weight: 650; margin-bottom: 8px; }
+  .hint { font-size: 14px; color: var(--muted); margin-top: 8px; }
+  input { width: 100%; font: inherit; color: var(--ink); background: var(--card); border: 1px solid var(--line); border-radius: 10px; padding: 12px; }
+  .row { display: flex; gap: 10px; }
+  .btn { width: 100%; padding: 13px; border-radius: 12px; font: 700 16px/1 inherit; font-family: inherit; border: 1px solid var(--line); background: var(--card); color: var(--ink); }
+  .btn.go { background: var(--accent); color: #1a1300; border-color: transparent; font-size: 17px; padding: 14px; }
+  .btn:disabled { opacity: .5; }
+  .hidden { display: none !important; }
+  .status { display: none; white-space: pre-wrap; border-radius: 12px; padding: 12px 14px; margin-top: 12px; font-size: 16px; }
+  .status.ok { display: block; background: var(--ok-bg); color: var(--ok-ink); }
+  .status.err { display: block; background: var(--err-bg); color: var(--err-ink); }
+  .status.wait { display: block; background: var(--wait-bg); color: var(--wait-ink); }
+  .status.busy { display: block; background: var(--soft); color: var(--muted); }
+  .job { display: block; width: 100%; text-align: left; font: inherit; color: var(--ink); background: var(--card); border: 1px solid var(--line); border-radius: 12px; padding: 12px 14px; margin-top: 8px; }
+  .job:active, .job.on { background: var(--soft); }
+  .job.on { border-color: var(--brand); border-width: 2px; }
+  .job b { display: block; font-size: 18px; }
+  .job span { display: block; font-size: 14px; color: var(--muted); }
+  .job .st { font-size: 13px; margin-top: 4px; color: var(--ok-ink); }
+  .big { display: grid; gap: 10px; margin-top: 12px; }
+  .big button { width: 100%; padding: 22px 16px; border: 0; border-radius: 14px; color: #fff; font: 800 20px/1.1 inherit; font-family: inherit; text-align: left; display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+  .big button small { display: block; font-weight: 500; font-size: 14px; opacity: .9; margin-top: 4px; }
+  .big .omw { background: var(--omw); } .big .start { background: var(--start); } .big .finish { background: var(--finish); }
+  .big button.done { opacity: .55; }
+  .big button:active { filter: brightness(1.15); }
+  .ob { border-top: 1px solid var(--line); padding: 10px 0; }
+  .ob:first-child { border-top: 0; padding-top: 2px; }
+  .ob b { display: block; }
+  .ob .st { font-size: 14px; margin-top: 4px; }
+  .ob .st.err { color: var(--err-ink); }
+  .ob .acts { display: flex; gap: 8px; margin-top: 8px; }
+  .ob .acts button { flex: 1; padding: 9px; font-family: inherit; font-size: 14px; font-weight: 600; border-radius: 9px; border: 1px solid var(--line); background: var(--card); color: var(--ink); }
+  footer { text-align: center; font-size: 13px; color: var(--muted); margin-top: 18px; }
+  footer a { color: inherit; }
+</style>
+</head>
+<body>
+<header>
+  <a class="dot" href="home.html" aria-label="All tools">GR</a>
+  <h1>Job Clock</h1>
+  <a class="nav" href="home.html">All tools →</a>
+</header>
+
+<div class="card hidden" id="codeCard">
+  <label for="code">Your access code</label>
+  <input id="code" inputmode="numeric" autocomplete="off" placeholder="8-digit code" enterkeyhint="go">
+  <button class="btn go" id="codeGo" style="margin-top:10px">Continue</button>
+  <div class="status" id="codeMsg"></div>
+</div>
+
+<div id="app" class="hidden">
+  <div class="card">
+    <div class="hint" style="margin-top:0">Press the button the moment it happens — <b>no signal needed</b>. The time is saved on this phone and sent when you're back in range. The office gets the times to enter in HCP; you can still press the real buttons in the HCP app when you have signal.</div>
+  </div>
+
+  <div class="card">
+    <label>Which job?</label>
+    <div class="row">
+      <input id="jobNum" inputmode="numeric" autocomplete="off" placeholder="Job number" enterkeyhint="search">
+      <button class="btn" id="jobGo" style="width:auto;padding:13px 16px">Find</button>
+    </div>
+    <div class="status" id="jobMsg"></div>
+    <div id="today"></div>
+  </div>
+
+  <div class="card hidden" id="clockCard">
+    <label id="jobLabel">Job</label>
+    <div class="hint" id="jobHint" style="margin-top:0"></div>
+    <div class="big">
+      <button class="omw" data-ev="omw">🚗 On my way <small id="omwState"></small></button>
+      <button class="start" data-ev="start">▶️ Start <small id="startState"></small></button>
+      <button class="finish" data-ev="finish">✅ Finish <small id="finishState"></small></button>
+    </div>
+    <div class="status" id="msg"></div>
+  </div>
+
+  <div class="card hidden" id="outboxCard">
+    <label>Waiting to send</label>
+    <div class="hint" style="margin-top:0">Saved on this phone with the time you pressed. They send themselves when signal returns.</div>
+    <div id="outboxList"></div>
+  </div>
+</div>
+
+<footer><a href="#" id="forget">Not you? Change code</a></footer>
+
+<script src="config.js"></script>
+<script>
+(function () {
+  var ENDPOINT = (window.GR_ENDPOINTS && window.GR_ENDPOINTS.clock) || "";
+  var KEY = "grTechCode", OUTBOX = "grClockOutbox", TODAY = "grClockToday";
+  var EV = { omw: "On my way", start: "Start", finish: "Finish" };
+  function $(id) { return document.getElementById(id); }
+  function get(k) { try { return localStorage.getItem(k) || ""; } catch (e) { return ""; } }
+  function put(k, v) { try { localStorage.setItem(k, v); } catch (e) {} }
+  function drop(k) { try { localStorage.removeItem(k); } catch (e) {} }
+  function show(el, on) { el.classList.toggle("hidden", !on); }
+  function say(id, text, kind) { var m = $(id); m.textContent = text || ""; m.className = "status" + (text ? " " + (kind || "ok") : ""); }
+  function el(tag, cls, text) { var e = document.createElement(tag); if (cls) e.className = cls; if (text != null) e.textContent = text; return e; }
+  function tfmt(iso) { return new Date(iso).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" }); }
+  function dfmt(iso) { return new Date(iso).toLocaleString([], { weekday: "short", hour: "numeric", minute: "2-digit" }); }
+  function recent(text) { try { var r = JSON.parse(get("grRecent") || "[]"); r.unshift({ tool: "Job Clock", text: text, at: Date.now() }); put("grRecent", JSON.stringify(r.slice(0, 20))); } catch (e) {} }
+
+  var S = { code: "", who: "", jobs: [], job: null, online: true };
+
+  // ---------- server ----------
+  function post(data, timeoutMs) {
+    data.token = S.code;
+    if (ENDPOINT.indexOf("https://") !== 0) return Promise.resolve({ ok: false, error: "Job Clock isn't connected yet. Add its URL to config.js." });
+    var ctrl = window.AbortController ? new AbortController() : null;
+    var timer = ctrl ? setTimeout(function () { ctrl.abort(); }, timeoutMs || 30000) : null;
+    return fetch(ENDPOINT, { method: "POST", headers: { "Content-Type": "text/plain" }, body: JSON.stringify(data), signal: ctrl ? ctrl.signal : undefined })
+      .then(function (r) { return r.json(); })
+      .then(function (r) { if (timer) clearTimeout(timer); return r; }, function (e) { if (timer) clearTimeout(timer); throw e; });
+  }
+  function api(action, data) {
+    data = data || {}; data.action = action;
+    return post(data).catch(function () { return { ok: false, error: "No signal — couldn't reach the server.", net: true }; })
+      .then(function (r) { if (!r.ok && action !== "init" && /access code|Too many wrong/.test(r.error || "")) { drop(KEY); S.code = ""; showCode(r.error); } return r; });
+  }
+
+  // ---------- access code ----------
+  function showCode(msg) { show($("codeCard"), true); show($("app"), false); say("codeMsg", msg, "err"); }
+  function start(code) {
+    S.code = code; say("codeMsg", "Checking…", "busy");
+    api("init").then(function (r) {
+      if (!r.ok && !r.net) { showCode(r.error); return; }
+      put(KEY, code);
+      show($("codeCard"), false); show($("app"), true); say("codeMsg", "");
+      if (r.ok) { S.who = r.who || ""; S.jobs = r.jobs || []; put("grClockJobs", JSON.stringify({ day: r.today, jobs: S.jobs })); }
+      else { try { var c = JSON.parse(get("grClockJobs") || "null"); if (c && c.day === new Date().toISOString().slice(0, 10)) S.jobs = c.jobs; } catch (e) {} }
+      renderToday(r.ok ? "" : "📶 No signal — showing today's jobs from the last time this page loaded. You can still press the buttons.");
+      renderBox(); flushSoon();
+    });
+  }
+  $("codeGo").onclick = function () { var c = $("code").value.trim(); if (c) start(c); };
+  $("code").onkeydown = function (e) { if (e.key === "Enter") $("codeGo").click(); };
+  $("forget").onclick = function (e) { e.preventDefault(); drop(KEY); S.code = ""; $("code").value = ""; showCode(""); };
+  if (get(KEY)) start(get(KEY)); else showCode("");
+
+  // ---------- today's jobs / pick a job ----------
+  function localStamps(jobKey) { try { return JSON.parse(get(TODAY) || "{}")[jobKey] || {}; } catch (e) { return {}; } }
+  function saveLocal(jobKey, ev, at) { var all = {}; try { all = JSON.parse(get(TODAY) || "{}"); } catch (e) {} if (all.__day !== new Date().toDateString()) all = { __day: new Date().toDateString() }; (all[jobKey] = all[jobKey] || {})[ev] = at; put(TODAY, JSON.stringify(all)); }
+  function stateOf(job, ev) { var loc = localStamps(job.number)[ev]; var hcp = job.hcp && job.hcp[ev]; return loc ? "pressed " + tfmt(loc) : hcp ? "HCP: " + hcp : ""; }
+  function renderToday(note) {
+    var box = $("today"); box.innerHTML = "";
+    if (note !== null) say("jobMsg", note, note ? "wait" : "ok");
+    if (!S.jobs.length) { box.appendChild(el("div", "hint", S.who ? "No jobs on your schedule today — type the job number above." : "")); return; }
+    box.appendChild(el("div", "hint", "Today"));
+    S.jobs.forEach(function (j) {
+      var b = el("button", "job" + (S.job && S.job.number === j.number ? " on" : "")); b.type = "button";
+      b.appendChild(el("b", null, "#" + j.number + " · " + j.customer));
+      b.appendChild(el("span", null, [j.start_text, j.address].filter(Boolean).join(" · ")));
+      var st = ["omw", "start", "finish"].map(function (ev) { var s = stateOf(j, ev); return s ? EV[ev] + " " + s.replace(/^pressed /, "") : ""; }).filter(Boolean).join(" · ");
+      if (st) b.appendChild(el("div", "st", st));
+      b.onclick = function () { pick(j); };
+      box.appendChild(b);
+    });
+  }
+  function pick(j) {
+    S.job = j; $("jobNum").value = j.number;
+    $("jobLabel").textContent = "Job #" + j.number + (j.customer ? " · " + j.customer : "");
+    $("jobHint").textContent = [j.address, j.start_text ? "scheduled " + j.start_text : ""].filter(Boolean).join(" · ");
+    ["omw", "start", "finish"].forEach(function (ev) { var s = stateOf(j, ev); $(ev + "State").textContent = s; document.querySelector('.big [data-ev="' + ev + '"]').classList.toggle("done", !!s); });
+    say("msg", ""); show($("clockCard"), true); renderToday(null);
+    $("clockCard").scrollIntoView({ behavior: "smooth", block: "start" });
+  }
+  $("jobGo").onclick = function () {
+    var n = $("jobNum").value.trim();
+    if (!/^\d+(-\d+)?$/.test(n)) { say("jobMsg", "❌ Type the job number.", "err"); return; }
+    var known = S.jobs.filter(function (j) { return j.number === n; })[0];
+    if (known) { pick(known); return; }
+    say("jobMsg", "Looking up job " + n + "…", "busy");
+    api("job", { number: n }).then(function (r) {
+      if (r.ok) { say("jobMsg", ""); pick(r.job); return; }
+      if (r.net) { say("jobMsg", "📶 No signal — can't look it up, but you can still press the buttons for job " + n + ".", "wait"); pick({ number: n, customer: "", address: "", start_text: "", hcp: {} }); return; }
+      say("jobMsg", "❌ " + r.error, "err");
+    });
+  };
+  $("jobNum").onkeydown = function (e) { if (e.key === "Enter") $("jobGo").click(); };
+
+  // ---------- the press ----------
+  Array.prototype.forEach.call(document.querySelectorAll(".big button"), function (b) {
+    b.onclick = function () {
+      if (!S.job) return;
+      var ev = b.dataset.ev;
+      var prior = localStamps(S.job.number)[ev];
+      if (prior && !confirm(EV[ev] + " was already pressed at " + tfmt(prior) + " for job " + S.job.number + ". Press it again with the time right now?")) return;
+      var at = new Date().toISOString();
+      var item = { id: Date.now().toString(36) + Math.random().toString(36).slice(2, 8), event: ev, at: at, job_id: S.job.id || "", number: S.job.number, customer: S.job.customer || "", tries: 0 };
+      var box = readBox(); box.push(item); writeBox(box);
+      saveLocal(S.job.number, ev, at);
+      $(ev + "State").textContent = "pressed " + tfmt(at); b.classList.add("done");
+      say("msg", "⏱ " + EV[ev] + " " + tfmt(at) + " saved for job " + S.job.number + ". Sending…", "busy");
+      recent(EV[ev] + " — job " + S.job.number + " " + tfmt(at));
+      renderToday("");
+      flushSoon();
+    };
+  });
+
+  // ---------- outbox (same pattern as Job Notes) ----------
+  function readBox() { try { var b = JSON.parse(get(OUTBOX) || "[]"); return Array.isArray(b) ? b : []; } catch (e) { return []; } }
+  function writeBox(b) { put(OUTBOX, JSON.stringify(b)); renderBox(); }
+  function boxUpdate(id, patch) { var b = readBox(); b.forEach(function (x) { if (x.id === id) Object.keys(patch).forEach(function (k) { x[k] = patch[k]; }); }); writeBox(b); }
+  function boxRemove(id) { writeBox(readBox().filter(function (x) { return x.id !== id; })); }
+  var flushing = false, flushTimer = null;
+  function flushSoon() { if (flushTimer) clearTimeout(flushTimer); flushTimer = setTimeout(flush, 800); }
+  function flush(manualId) {
+    if (flushing || !S.code) return;
+    var items = readBox().filter(function (x) { return manualId ? x.id === manualId : !x.err; });
+    if (!items.length) return;
+    flushing = true;
+    var i = 0, sent = 0;
+    (function next() {
+      if (i >= items.length) { flushing = false; if (sent) { var left = readBox().length; say("msg", "✅ " + sent + " press" + (sent > 1 ? "es" : "") + " sent to the office" + (left ? " · " + left + " still waiting" : "") + ".", "ok"); } return; }
+      var item = items[i++];
+      if (!readBox().some(function (x) { return x.id === item.id; })) return next();
+      boxUpdate(item.id, { sending: true });
+      post({ action: "stamp", req_id: item.id, event: item.event, at: item.at, job_id: item.job_id, number: item.number }).then(function (r) {
+        if (r.ok) { boxRemove(item.id); sent++; if (r.job && r.job.number) { var j = S.jobs.filter(function (x) { return x.number === r.job.number; })[0]; if (j) j.hcp = r.job.hcp; } renderToday(""); }
+        else if (/access code|Too many wrong/.test(r.error || "")) { boxUpdate(item.id, { sending: false }); flushing = false; drop(KEY); S.code = ""; showCode(r.error); return; }
+        else boxUpdate(item.id, { sending: false, err: r.error || "unknown error" });
+        next();
+      }).catch(function () {
+        boxUpdate(item.id, { sending: false, tries: (item.tries || 0) + 1, last: Date.now() });
+        flushing = false;
+        if (S.job) say("msg", "📶 No signal — " + readBox().length + " press" + (readBox().length > 1 ? "es" : "") + " saved with the right time. They'll send when you're back in range.", "wait");
+      });
+    })();
+  }
+  function renderBox() {
+    var box = readBox(), card = $("outboxCard"), list = $("outboxList");
+    show(card, box.length > 0); list.innerHTML = "";
+    box.forEach(function (x) {
+      var d = el("div", "ob");
+      d.appendChild(el("b", null, EV[x.event] + " · job " + x.number + " · " + dfmt(x.at)));
+      var st = el("div", "st" + (x.err ? " err" : "")); st.textContent = x.sending ? "Sending…" : x.err ? "❌ " + x.err + " — check the job number, then Send now, or delete it." : "Waiting for signal" + (x.tries ? " · tried " + x.tries + "×" : ""); d.appendChild(st);
+      var acts = el("div", "acts");
+      [["Send now", function () { boxUpdate(x.id, { err: "" }); flush(x.id); }], ["Delete", function () { if (confirm("Delete this " + EV[x.event] + " press for job " + x.number + "?")) boxRemove(x.id); }]]
+        .forEach(function (a) { var bt = el("button", null, a[0]); bt.onclick = a[1]; if (x.sending) bt.disabled = true; acts.appendChild(bt); });
+      d.appendChild(acts); list.appendChild(d);
+    });
+  }
+  window.addEventListener("online", flushSoon);
+  document.addEventListener("visibilitychange", function () { if (!document.hidden) flushSoon(); });
+  setInterval(function () { if (!document.hidden && readBox().some(function (x) { return !x.err; })) flush(); }, 60000);
+})();
+</script>
+</body>
+</html>
