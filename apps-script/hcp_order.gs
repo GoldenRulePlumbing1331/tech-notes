@@ -183,9 +183,12 @@ function woPickWithClaude_(items) {
     choices: it.candidates.map((c, k) => ({ k: k, part: c.part, desc: c.desc + (c.uom ? ' [' + c.uom + ']' : '') })) })).filter(x => x.choices.length);
   if (!payload.length) return;
   const sys = ['You match a plumber\'s requested items to a supplier catalog.',
-    'For each item pick the ONE choice that is the same product (same size, material, fitting type, connection ends).',
-    'Reply with ONLY JSON: {"picks": [{"i": 0, "k": 2}, ...]} — omit an item when no choice is the same product.',
-    'Be strict about size and material; a 3/4" PEX ell is not a 3/4" copper ell and not a 1/2" PEX ell.'].join('\n');
+    'For each item pick the ONE choice that is the SAME product: same size, same material/connection (PEX, copper sweat/CxC,',
+    'ProPress/PP, PVC, CPVC, brass, galvanized, black), same fitting (90 vs 45 vs street vs tee vs coupling), same fuel/voltage.',
+    'Reply with ONLY JSON: {"picks": [{"i": 0, "k": 2}, ...]}.',
+    'OMIT an item when no choice is the same product — a wrong pick is worse than no pick; the counter can match a',
+    'description, but a wrong part number gets pulled and delivered. A 90 is not a 45. Sweat copper is not ProPress.',
+    'A 3/4" PEX ell is not a 3/4" copper ell and not a 1/2" PEX ell. "Natural gas" is not "propane".'].join('\n');
   const raw = woClaude_(sys, JSON.stringify(payload), 600);
   const m = raw && raw.match(/\{[\s\S]*\}/);
   if (!m) return;
@@ -207,7 +210,11 @@ const WO_SYN_ = {
   sharkbite: ['sharkbite', 'shark', 'push'], push: ['push', 'sharkbite'], tee: ['tee'], cap: ['cap'], union: ['union'],
   nipple: ['nipple', 'nip'], brass: ['brass', 'brs'], galvanized: ['galv', 'galvanized'], 'black iron': ['black', 'blk'],
   gallon: ['gal'], gal: ['gal'], electric: ['elec', 'electric'], gas: ['gas', 'nat'], flex: ['flex', 'connector'],
+  propress: ['pp', 'propress', 'press'], pp: ['pp', 'propress', 'press'], press: ['pp', 'propress', 'press'],
+  street: ['street', 'st'], reducing: ['reducing', 'red', 'rdcg'],
 };
+/** Fitting qualifiers that make a different product even when size and material match. */
+const WO_QUALIFIERS_ = [['90'], ['45'], ['street', 'st'], ['tee'], ['drop ear', 'drop']];
 
 function woTokens_(s) {
   s = String(s || '').toLowerCase().replace(/[“”"']/g, '"').replace(/\binch(es)?\b/g, '"').replace(/(\d)\s*"/g, '$1"');
@@ -219,12 +226,21 @@ function woTokens_(s) {
 function woIsSize_(t) { return /^\d+-\d+\/\d+$/.test(t) || /^\d+\/\d+$/.test(t) || /^[1-8]$/.test(t); }
 
 const WO_MATERIALS_ = {
-  pex: ['pex'], copper: ['copper', 'cxc', 'swt', 'cu', 'wrot', 'sweat'], pvc: ['pvc'], cpvc: ['cpvc'], abs: ['abs'],
-  brass: ['brass', 'brs'], galv: ['galv', 'galvanized'], black: ['black', 'blk'], stainless: ['stainless', 'ss'], poly: ['poly', 'pe'],
+  pex: ['pex'], copper: ['copper', 'cxc', 'swt', 'cu', 'wrot', 'sweat'], propress: ['pp', 'propress', 'press'],
+  pvc: ['pvc'], cpvc: ['cpvc'], abs: ['abs'], brass: ['brass', 'brs'], galv: ['galv', 'galvanized'], black: ['black', 'blk'],
+  stainless: ['stainless', 'ss'], poly: ['poly', 'pe'],
 };
+/** Every material/connection family named in the tokens, e.g. ["copper","propress"]. */
 function woMaterial_(toks) {
-  for (const m in WO_MATERIALS_) if (WO_MATERIALS_[m].some(s => toks.indexOf(s) !== -1)) return m;
-  return '';
+  const out = [];
+  for (const m in WO_MATERIALS_) if (WO_MATERIALS_[m].some(s => toks.indexOf(s) !== -1)) out.push(m);
+  return out;
+}
+/** A plain "elbow"/"ell" with no angle is a 90, on both the request and the catalog side. */
+function woImply90_(toks) {
+  const t = toks.slice();
+  if ((t.indexOf('elbow') !== -1 || t.indexOf('ell') !== -1) && t.indexOf('45') === -1 && t.indexOf('90') === -1) t.push('90');
+  return t;
 }
 
 /**
@@ -246,6 +262,7 @@ function woMatch_(q, keywords, limit, catalog) {
   const sizes = toks.filter(woIsSize_);
   const material = woMaterial_(toks);
   const phrase = ' ' + toks.join(' ') + ' ';
+  const qtoks = woImply90_(toks);
   const scored = [];
   for (let i = 0; i < catalog.length; i++) {
     const row = catalog[i];
@@ -263,7 +280,13 @@ function woMatch_(q, keywords, limit, catalog) {
     }
     if (!hits) continue;
     if (sizes.length && !sizes.some(s => row.sizes.indexOf(s) !== -1)) score *= 0.35;   // wrong size
-    if (material && row.material && row.material !== material) score *= 0.4;            // wrong material
+    if (material.length && row.material.length && !material.some(m => row.material.indexOf(m) !== -1)) score *= 0.4;   // wrong material
+    // 90 vs 45 vs street vs tee: the row carries a qualifier the request didn't ask for (or lacks the one it did).
+    for (let q = 0; q < WO_QUALIFIERS_.length; q++) {
+      const inQuery = WO_QUALIFIERS_[q].some(w => qtoks.indexOf(w) !== -1);
+      const inRow = WO_QUALIFIERS_[q].some(w => row.qtoks.indexOf(w) !== -1);
+      if (inQuery !== inRow && (inRow || q < 2)) score *= 0.5;
+    }
     if (hay.indexOf(phrase) !== -1) score += 1;                                          // whole phrase present
     // Tie-break: a row with extra words the query never mentioned ("DROP EAR", "STREET") is a less exact match.
     const extra = Math.max(0, row.ntok - hits);
@@ -307,7 +330,8 @@ function woReadCatalog_() {
     const toks = woTokens_(desc + ' ' + aliases + ' ' + part);
     const hay = ' ' + toks.join(' ') + ' ';
     const descToks = woTokens_(desc).filter(t => t.length > 1 && t !== 'x');
-    out.push({ part: part, desc: desc, uom: String(r[2] || '').trim(), price: Number(r[3]) || 0, hay: hay, sizes: toks.filter(woIsSize_), material: woMaterial_(toks), ntok: descToks.length });
+    out.push({ part: part, desc: desc, uom: String(r[2] || '').trim(), price: Number(r[3]) || 0, hay: hay, sizes: toks.filter(woIsSize_),
+               material: woMaterial_(toks), ntok: descToks.length, qtoks: woImply90_(toks) });
   });
   return out;
 }
