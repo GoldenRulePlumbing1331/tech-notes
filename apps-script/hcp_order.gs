@@ -413,7 +413,9 @@ function woPlaceLocked_(p, who) {
   const smsText = [header, ...lines.map(lineText), notes ? 'Note: ' + notes : '', `— ${who}, Golden Rule Plumbing ${WO.COMPANY_PHONE}`].filter(Boolean).join('\n');
   const quickpad = lines.filter(l => l.part).map(l => `${l.part}\t${l.qty}`).join('\n');
   const noPart = lines.filter(l => !l.part);
-  const csv = 'Part Number,Quantity,Description\n' + lines.map(l => `${woCsv_(l.part)},${l.qty},${woCsv_(l.desc)}`).join('\n');
+  // Hajoca "Upload Order File" default template: Our Part #, Your Part #, UPC, Qty, Description, Your PO#
+  const csv = 'Our Part #,Your Part #,UPC,Qty,Description,Your PO#\n' +
+    lines.map(l => `${woCsv_(l.part)},,,${l.qty},${woCsv_(l.desc + (l.note ? ' - ' + l.note : ''))},${woCsv_(poText)}`).join('\n');
 
   // 1. Log
   let logged = false;
@@ -436,7 +438,7 @@ function woPlaceLocked_(p, who) {
         notes ? '<p>Note: ' + woHtml_(notes) + '</p>' : '',
         noPart.length ? '<p><i>' + noPart.length + ' line(s) have no part number — please match at the counter.</i></p>' : '',
         `<p>Ordered by ${woHtml_(who)} via the Golden Rule voice page · Order ${orderId} · ${WO.COMPANY_PHONE}</p>`,
-        '<p style="color:#666;font-size:12px">Attached: order.csv (Part Number, Quantity) for the web store\'s Upload Order File.</p>'].join('\n');
+        '<p style="color:#666;font-size:12px">Attached: order.csv in Hajoca\'s Upload Order File format (shop.weinsteinwestchester.com → Order Tools → Upload Order File).</p>'].join('\n');
       GmailApp.sendEmail(to, `Golden Rule Plumbing order — ${poText}` + (fulfillment === 'pickup' ? ' — pickup' : ' — delivery') + (needed ? ' — ' + needed : ''),
         smsText + '\n\nOrder ' + orderId, { cc: cc, htmlBody: html, name: 'Golden Rule Plumbing & Contracting',
           attachments: [Utilities.newBlob(csv, 'text/csv', `order_${poText.replace(/[^\w-]+/g, '_')}_${orderId}.csv`)] });
