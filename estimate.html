@@ -179,6 +179,12 @@
     <div class="sub"><label>Service address</label><div id="newCustAddr"></div></div>
   </div>
 
+  <div class="sub hidden" id="targetWrap">
+    <label>Add to an existing estimate?</label>
+    <div class="status" id="targetMsg"></div>
+    <div id="targetChoices"></div>
+  </div>
+
   <!-- options -->
   <div class="sub">
     <label>Options</label>
@@ -187,7 +193,7 @@
     <div class="acts"><button class="btn sm" id="addOpt">+ Add option</button></div>
   </div>
 
-  <div class="sub">
+  <div class="sub" id="estDetails">
     <label for="eMsg">Message to the customer (optional)</label>
     <textarea id="eMsg" class="desc" placeholder="Shown at the top of the estimate."></textarea>
     <div class="grid" style="margin-top:12px">
@@ -225,7 +231,7 @@
   function money(c) { return "$" + (Number(c || 0) / 100).toFixed(2); }
   function recent(text) { try { var r = JSON.parse(get("grRecent") || "[]"); r.unshift({ tool: "Estimate", text: text, at: Date.now() }); put("grRecent", JSON.stringify(r.slice(0, 20))); } catch (e) {} }
 
-  var S = { code: "", mode: "auto", fields: null, est: null, cust: null, isNew: false, addr: "", me: "", today: "", usualUnit: {}, pb: true, reqId: "" };
+  var S = { code: "", mode: "auto", fields: null, est: null, cust: null, isNew: false, addr: "", me: "", today: "", usualUnit: {}, pb: true, reqId: "", target: "new", targetLabel: "" };
 
   // ---------- server ----------
   function api(action, data) {
@@ -479,7 +485,8 @@
   $("changeCust").onclick = function () { show($("confirmCard"), false); show($("matchCard"), true); $("matchCard").scrollIntoView({ behavior: "smooth" }); };
 
   // ---------- step 3: confirm ----------
-  function resetSubmit() { say("submitMsg", ""); $("submit").disabled = false; show($("submit"), true); show($("again"), false); S.reqId = ""; }
+  function resetSubmit() {
+    $("submit").textContent = S.target && S.target !== "new" ? "Add options to " + S.targetLabel : "Create draft estimate"; say("submitMsg", ""); $("submit").disabled = false; show($("submit"), true); show($("again"), false); S.reqId = ""; }
   function addressForm(prefix, f) {
     var wrap = el("div", "grid");
     [["Street", "Street", "full", f.street], ["Apt / unit", "Unit", "full", f.street_line_2], ["City", "City", "", f.city], ["State", "State", "", f.state || "PA"], ["ZIP", "Zip", "", f.zip]].forEach(function (d) {
@@ -517,13 +524,44 @@
     c.addresses.forEach(function (a) { choice(a.id, a.text + (a.type === "billing" ? " (billing)" : "")); });
     choice("new", spokenNew ? "New address (not on file yet) — add below" : "Add a new address");
     var w = $("newAddrWrap"); w.innerHTML = ""; w.appendChild(addressForm("xa", spokenNew ? f : {})); show(w, S.addr === "new");
+    loadTargets(c);
     show($("matchCard"), $("matchList").children.length > 0); show($("confirmCard"), true);
     $("confirmCard").scrollIntoView({ behavior: "smooth", block: "start" });
+  }
+  // Existing open estimates for this customer: default to adding the options to the newest one instead of making another.
+  function setTarget(v, label) {
+    S.target = v; S.targetLabel = label || "";
+    show($("estDetails"), v === "new");
+    $("submit").textContent = v === "new" ? "Create draft estimate" : "Add options to " + label;
+  }
+  function loadTargets(c) {
+    setTarget("new"); show($("targetWrap"), false); $("targetChoices").innerHTML = ""; say("targetMsg", "");
+    var mine = c.id;
+    api("estimates", { customer_id: c.id }).then(function (r) {
+      if (!S.cust || S.cust.id !== mine) return;
+      if (!r.ok || !(r.estimates || []).length) return;
+      var box = $("targetChoices");
+      function choice(value, text, label, checked) {
+        var lab = el("label", "choice"); var rb = el("input"); rb.type = "radio"; rb.name = "target"; rb.value = value; rb.checked = checked;
+        rb.onchange = function () { setTarget(value, label); };
+        lab.appendChild(rb); lab.appendChild(el("span", null, text)); box.appendChild(lab);
+      }
+      r.estimates.forEach(function (e, i) {
+        var label = "Estimate " + (e.number ? "#" + e.number : "");
+        var opts = e.options.length ? e.options.length + " option" + (e.options.length > 1 ? "s" : "") + " (" + e.options.map(function (o) { return "$" + (o.total / 100).toFixed(0); }).join(" / ") + ")" : "no options yet";
+        choice(e.id, label + " — " + [e.created, e.address, opts, e.status].filter(Boolean).join(" · "), label, i === 0);
+      });
+      choice("new", "Create a new estimate", "", false);
+      say("targetMsg", "This customer already has " + (r.estimates.length === 1 ? "an open estimate" : r.estimates.length + " open estimates") + ". New options go onto the one selected.", "warn");
+      show($("targetWrap"), true);
+      setTarget(r.estimates[0].id, "Estimate " + (r.estimates[0].number ? "#" + r.estimates[0].number : ""));
+    });
   }
   function updateDisplay() { var name = [$("nFirst").value.trim(), $("nLast").value.trim()].filter(Boolean).join(" "); $("nDisplay").textContent = $("nCompany").value.trim() || name || "—"; }
   ["nFirst", "nLast", "nCompany"].forEach(function (id) { $(id).oninput = function () { $(id).classList.remove("missing"); updateDisplay(); }; });
   function openNew(dupes) {
     S.cust = null; S.isNew = true; S.addr = "new"; resetSubmit();
+    setTarget("new"); show($("targetWrap"), false); $("targetChoices").innerHTML = "";
     var f = S.fields || {};
     show($("custExisting"), false); show($("custNew"), true);
     $("nFirst").value = f.first_name || ""; $("nLast").value = f.last_name || ""; $("nCompany").value = f.company || "";
@@ -556,14 +594,16 @@
       data.address = readAddress("na");
     } else {
       data.customer_id = S.cust.id;
-      if (S.addr === "new") { if (!need(["xaStreet", "xaCity", "xaZip"])) { say("submitMsg", "❌ Fill in the street, city, and ZIP.", "err"); return; } data.address = readAddress("xa"); }
+      if (S.target && S.target !== "new") data.estimate_id = S.target;
+      else if (S.addr === "new") { if (!need(["xaStreet", "xaCity", "xaZip"])) { say("submitMsg", "❌ Fill in the street, city, and ZIP.", "err"); return; } data.address = readAddress("xa"); }
       else data.address_id = S.addr;
     }
     if (!S.reqId) S.reqId = Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
     data.req_id = S.reqId;
-    var b = $("submit"); b.disabled = true; b.textContent = "Creating…"; say("submitMsg", "");
+    var adding = !!data.estimate_id; var label = adding ? "Add options to " + S.targetLabel : "Create draft estimate";
+    var b = $("submit"); b.disabled = true; b.textContent = adding ? "Adding…" : "Creating…"; say("submitMsg", "");
     api("create", data).then(function (r) {
-      b.textContent = "Create draft estimate";
+      b.textContent = label;
       if (r.ok) { say("submitMsg", r.message, "ok"); show(b, false); show($("again"), true); recent(r.message.split("\n").slice(0, 2).join(" — ")); return; }
       b.disabled = false; if (!r.net) S.reqId = "";
       if (r.created_customer) { var keepAddr = S.isNew ? readAddress("na") : null; openExisting(r.created_customer);
@@ -572,7 +612,7 @@
     });
   }
   $("again").onclick = function () {
-    S.fields = null; S.est = null; S.cust = null; resetSubmit();
+    S.fields = null; S.est = null; S.cust = null; resetSubmit(); setTarget("new"); show($("targetWrap"), false);
     $("heard").value = ""; $("eMsg").value = ""; $("vDate").value = ""; $("vTime").value = ""; $("jEmp").value = S.me; $("searchBox").value = "";
     $("jType").value = ""; $("jUnit").value = ""; $("options").innerHTML = "";
     say("talkMsg", ""); show($("matchCard"), false); show($("confirmCard"), false);

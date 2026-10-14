@@ -32,7 +32,9 @@
  *   search   {q}                                 → customer search
  *   price    {q}                                 → price book candidates for one line
  *   rewrite  {option}                            → Haiku re-writes one option's heading/descriptions from edited text
+ *   estimates {customer_id}            → the customer's open estimates (to add options to instead of making a new one)
  *   create   {req_id, customer_id | customer, address_id | address, estimate} → creates the estimate
+ *            {req_id, estimate_id, estimate}                                  → adds the options to that existing estimate
  */
 
 const ES = {
@@ -75,6 +77,7 @@ function estimateAction_(p) {
       case 'search':  return { ok: true, matches: esSearchText_(p.q) };
       case 'price':   return { ok: true, candidates: esPriceSearch_(p.q) };
       case 'rewrite': return { ok: true, option: esRewrite_(p.option) };
+      case 'estimates': return { ok: true, estimates: esOpenEstimates_(p.customer_id) };
       case 'create':  return esCreate_(p, who);
       default:        throw new Error('Unknown action.');
     }
@@ -380,19 +383,26 @@ function esCreate_(p, who) {
   return result;
 }
 
+/** Open (not canceled/completed) estimates for a customer, newest first — so a tech can add options instead of starting another. */
+function esOpenEstimates_(customerId) {
+  const cid = String(customerId || '').trim();
+  if (!cid) return [];
+  const r = hcp_('get', `/estimates?customer_id=${encodeURIComponent(cid)}&page_size=10&sort_by=created_at&sort_direction=desc`);
+  const tz = esTz_();
+  return (r.estimates || [])
+    .filter(e => ['canceled', 'completed'].indexOf(String(e.work_status || '').toLowerCase()) === -1)
+    .filter(e => !(e.options || []).length || (e.options || []).some(o => !/approved|declined/i.test(String(o.approval_status || ''))))
+    .slice(0, 5)
+    .map(e => ({ id: e.id, number: String(e.estimate_number || ''), status: e.work_status || '',
+      created: e.created_at ? Utilities.formatDate(new Date(e.created_at), tz, 'MMM d') : '',
+      address: esAddrText_(e.address || {}),
+      options: (e.options || []).map(o => ({ name: o.name || '', total: Number(o.total_amount) || 0, approval: o.approval_status || '' })) }));
+}
+
 function esCreateLocked_(p, who) {
+  if (p.estimate_id) return esAddOptions_(p, who);
   const est = p.estimate || {};
-  const options = (est.options || []).map((o, i) => ({
-    name: String(o.name || '').trim().slice(0, 120) || `Option ${i + 1}`,
-    line_items: (o.line_items || []).map(li => ({
-      name: String(li.name || '').trim().slice(0, 120),
-      description: formatSentences_(String(li.description || '').trim().slice(0, 2000)),
-      quantity: Number(li.quantity) > 0 ? Number(li.quantity) : 1,
-      unit_price: Math.round(Number(li.unit_price) || 0),   // cents
-      unit_cost: Math.round(Number(li.unit_cost) || 0),
-    })).filter(li => li.name),
-  })).filter(o => o.line_items.length);
-  if (!options.length) throw new Error('Add at least one option with a line item.');
+  const options = esOptions_(est);
 
   let addr = null;
   if (!p.address_id) {
@@ -470,6 +480,45 @@ function esCreateLocked_(p, who) {
   if (dropped.indexOf('estimate_fields') !== -1) lines.push('⚠️ HCP wouldn’t take the Job Type/Business Unit — set those in HCP.');
   lines.push('Nothing was sent to the customer. Review and send it from HCP.');
   return { ok: true, message: lines.join('\n'), estimate_number: e.estimate_number || '', estimate_id: e.id, dropped: dropped };
+}
+
+/** Adds the reviewed options to an existing estimate (POST /estimates/{id}/options, one per option). */
+function esAddOptions_(p, who) {
+  const est = p.estimate || {};
+  const options = esOptions_(est);
+  const target = hcp_('get', '/estimates/' + encodeURIComponent(p.estimate_id));
+  if (p.customer_id && target.customer && target.customer.id && target.customer.id !== p.customer_id) return { ok: false, error: 'That estimate belongs to a different customer.' };
+  const added = [], errors = [];
+  options.forEach(o => {
+    try { added.push(hcp_('post', `/estimates/${encodeURIComponent(target.id)}/options`, { name: o.name, line_items: o.line_items })); }
+    catch (err) { errors.push(`${o.name}: ${err.message}`); }
+  });
+  if (!added.length) return { ok: false, error: 'Couldn’t add the options: ' + errors.join('; ') };
+  if (added[0] && added[0].id) { try { hcp_('post', `/estimates/${encodeURIComponent(target.id)}/options/${encodeURIComponent(added[0].id)}/notes`, { content: `${added.length} option(s) added by ${who} from the voice page.` }); } catch (_) {} }
+  const total = o => o.line_items.reduce((sum, li) => sum + li.unit_price * li.quantity, 0);
+  const num = target.estimate_number || '';
+  const lines = [`✅ Added ${added.length} option(s) to Estimate ${num}.`];
+  options.forEach((o, i) => { if (i < added.length) lines.push(`${o.name}: $${(total(o) / 100).toFixed(2)}`); });
+  if (errors.length) lines.push('⚠️ Not added — ' + errors.join('; '));
+  lines.push('Nothing was sent to the customer. Review and send it from HCP.');
+  console.log(`estimate ✅ +${added.length} option(s) on ${num || target.id} by ${who}`);
+  return { ok: true, message: lines.join('\n'), estimate_number: num, estimate_id: target.id, added: added.length };
+}
+
+/** Clean the page's options into what HCP takes (prices in cents). */
+function esOptions_(est) {
+  const options = (est.options || []).map((o, i) => ({
+    name: String(o.name || '').trim().slice(0, 120) || `Option ${i + 1}`,
+    line_items: (o.line_items || []).map(li => ({
+      name: String(li.name || '').trim().slice(0, 120),
+      description: formatSentences_(String(li.description || '').trim().slice(0, 2000)),
+      quantity: Number(li.quantity) > 0 ? Number(li.quantity) : 1,
+      unit_price: Math.round(Number(li.unit_price) || 0),   // cents
+      unit_cost: Math.round(Number(li.unit_cost) || 0),
+    })).filter(li => li.name),
+  })).filter(o => o.line_items.length);
+  if (!options.length) throw new Error('Add at least one option with a line item.');
+  return options;
 }
 
 /* ───────────── employees, dates, Claude ───────────── */
