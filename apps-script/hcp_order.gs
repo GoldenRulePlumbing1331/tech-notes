@@ -280,11 +280,12 @@ function woMatch_(q, keywords, limit, catalog) {
     }
     if (!hits) continue;
     if (sizes.length && !sizes.some(s => row.sizes.indexOf(s) !== -1)) score *= 0.35;   // wrong size
-    if (material.length && row.material.length && !material.some(m => row.material.indexOf(m) !== -1)) score *= 0.4;   // wrong material
+    const rowMat = Array.isArray(row.material) ? row.material : [];
+    if (material.length && rowMat.length && !material.some(m => rowMat.indexOf(m) !== -1)) score *= 0.4;   // wrong material
     // 90 vs 45 vs street vs tee: the row carries a qualifier the request didn't ask for (or lacks the one it did).
     for (let q = 0; q < WO_QUALIFIERS_.length; q++) {
       const inQuery = WO_QUALIFIERS_[q].some(w => qtoks.indexOf(w) !== -1);
-      const inRow = WO_QUALIFIERS_[q].some(w => row.qtoks.indexOf(w) !== -1);
+      const inRow = WO_QUALIFIERS_[q].some(w => (row.qtoks || []).indexOf(w) !== -1);
       if (inQuery !== inRow && (inRow || q < 2)) score *= 0.5;
     }
     if (hay.indexOf(phrase) !== -1) score += 1;                                          // whole phrase present
@@ -299,11 +300,11 @@ function woMatch_(q, keywords, limit, catalog) {
 /** Catalog rows from the sheet, cached in chunks (CacheService caps a value at 100 KB). */
 function woCatalog_() {
   const cache = CacheService.getScriptCache();
-  const meta = cache.get('wo_cat_meta');
+  const meta = cache.get('wo_cat2_meta');
   if (meta) {
     try {
       const n = Number(meta); let s = '';
-      for (let i = 0; i < n; i++) { const c = cache.get('wo_cat_' + i); if (c == null) throw new Error('chunk missing'); s += c; }
+      for (let i = 0; i < n; i++) { const c = cache.get('wo_cat2_' + i); if (c == null) throw new Error('chunk missing'); s += c; }
       return JSON.parse(s);
     } catch (_) {}
   }
@@ -311,8 +312,8 @@ function woCatalog_() {
   try {
     const s = JSON.stringify(rows); const size = 90000; const n = Math.ceil(s.length / size) || 1;
     const put = {};
-    for (let i = 0; i < n; i++) put['wo_cat_' + i] = s.slice(i * size, (i + 1) * size);
-    put['wo_cat_meta'] = String(n);
+    for (let i = 0; i < n; i++) put['wo_cat2_' + i] = s.slice(i * size, (i + 1) * size);
+    put['wo_cat2_meta'] = String(n);
     cache.putAll(put, 1800);
   } catch (e) { console.warn('catalog cache skipped: ' + e.message); }
   return rows;
@@ -575,7 +576,7 @@ function importCatalogFromHcpPriceBook() {
     }
   });
   if (rows.length) sh.getRange(sh.getLastRow() + 1, 1, rows.length, 6).setValues(rows);
-  CacheService.getScriptCache().remove('wo_cat_meta');
+  CacheService.getScriptCache().remove('wo_cat2_meta');
   console.log(`✅ Added ${rows.length} material(s) with part numbers to the Catalog.`);
 }
 
@@ -612,7 +613,7 @@ function importCatalogFromCsvFolder() {
   }
   const add = Object.keys(seen).filter(k => !have[k]).map(k => { const s = seen[k]; return [s.part, s.desc, s.uom, s.price, 'Weinstein order history', '']; });
   if (add.length) sh.getRange(sh.getLastRow() + 1, 1, add.length, 6).setValues(add);
-  CacheService.getScriptCache().remove('wo_cat_meta');
+  CacheService.getScriptCache().remove('wo_cat2_meta');
   console.log(`✅ ${nFiles} CSV file(s) read; ${Object.keys(seen).length} product(s) seen; ${add.length} added to the Catalog.`);
 }
 
@@ -637,7 +638,7 @@ function generateTechCodes() {
 
 /** Read-only check: sheet, catalog, HCP jobs, email settings. Sends nothing. */
 function verifyAccess() {
-  CacheService.getScriptCache().remove('wo_cat_meta');
+  CacheService.getScriptCache().remove('wo_cat2_meta');
   const id = props_().getProperty('ORDER_SHEET_ID');
   console.log(id ? `✅ Sheet: https://docs.google.com/spreadsheets/d/${id}` : '❌ No sheet yet — run setupSheet().');
   const cat = woCatalog_();
