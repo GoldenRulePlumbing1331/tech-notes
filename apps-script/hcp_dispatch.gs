@@ -490,9 +490,20 @@ function verifyAccess() {
   console.log(`Time zone: ${dpTz_()} (should be America/New_York)`);
   console.log(props_().getProperty('ANTHROPIC_API_KEY') ? '✅ ANTHROPIC_API_KEY is set.' : '⚠️ ANTHROPIC_API_KEY is not set (requests must be typed into the fields).');
   console.log(`Access codes set up for ${Object.keys(techCodes_()).length} people.`);
-  if (!TEST_JOB_NUMBER) { console.log('⚠️ Set TEST_JOB_NUMBER (a scheduled job) and run again to test the schedule/dispatch WRITE endpoints.'); return; }
-  const jobs = dpJobsByNumber_(TEST_JOB_NUMBER);
-  const j = jobs[0], o = dpJobOut_(j);
+  let j = null;
+  if (TEST_JOB_NUMBER) {
+    j = dpJobsByNumber_(TEST_JOB_NUMBER)[0];
+  } else {
+    // No test job given: use the first single-day scheduled job in the next 7 days.
+    for (let d = 0; d < 7 && !j; d++) {
+      const date = dpFmt_(new Date(Date.now() + d * 86400000), 'yyyy-MM-dd');
+      const pick = dpBoard_(date).filter(b => !b.multi_day && b.scheduled && b.end_time)[0];
+      if (pick) j = hcp_('get', `/jobs/${encodeURIComponent(pick.id)}?expand[]=appointments`);
+    }
+    if (!j) { console.log('⚠️ No scheduled single-day job found in the next 7 days — set TEST_JOB_NUMBER and run again.'); return; }
+    console.log('Using the first scheduled job found for the write test (nothing on it will change).');
+  }
+  const o = dpJobOut_(j);
   console.log(`Job ${o.number}: ${o.customer}, ${o.when}, techs: ${o.employees.join(', ') || 'none'}${o.multi_day ? ' (multi-day)' : ''}`);
   if (!o.scheduled) { console.log('⚠️ That job is unscheduled — pick a scheduled one so the schedule write can be tested.'); return; }
   const techs = o.employee_ids.map(id => ({ employee_id: id }));
