@@ -146,7 +146,7 @@ function weeklyReport() {
     if (!(sent >= since) || !r[7]) return;
     (byJob[r[7]] = byJob[r[7]] || []).push({ row: i + 2, pressed: r[1] instanceof Date ? r[1] : new Date(r[1]), tech: r[2], number: r[3], customer: r[4], event: r[5], note: r[8], jobId: r[7] });
   });
-  const fix = [], ok = [];
+  const fix = [], ok = [], apply = [];
   Object.keys(byJob).forEach(jobId => {
     let job = null;
     try { job = hcp_('get', '/jobs/' + encodeURIComponent(jobId)); } catch (e) { console.warn('job ' + jobId + ': ' + e.message); }
@@ -154,6 +154,19 @@ function weeklyReport() {
     // keep the LAST press per event (a tech can re-press by mistake)
     const last = {};
     byJob[jobId].forEach(s => { const k = ckEventKey_(s.event); if (!last[k] || s.pressed > last[k].pressed) last[k] = s; });
+    // Durations for HCP's "Field tech details" panel (travel = On my way → Start, job = Start → Finish).
+    // Page stamps win; HCP's own timestamp fills a gap. Carried in the email for the Monday Chrome run.
+    const t = k => (last[k] && last[k].pressed) || (ts[CK.HCP_FIELD[k]] ? ckParse_(ts[CK.HCP_FIELD[k]]) : null);
+    const tOmw = t('omw'), tStart = t('start'), tFinish = t('finish');
+    const first = byJob[jobId][0];
+    const emp = ckEmployeeByName_(first.tech);
+    if (job && emp && tStart && (tOmw || tFinish)) {
+      const mins = (a, b) => a && b && b > a ? Math.round((b - a) / 60000) : 0;
+      apply.push({ job: first.number, job_id: jobId, customer: first.customer, tech: first.tech, pro_id: emp.id,
+        travel_min: mins(tOmw, tStart), job_min: mins(tStart, tFinish),
+        edit_url: `https://pro.housecallpro.com/app/jobs/${jobId}/technician_time_tracking_details/edit?job_uuid=${jobId}&pro_uuid=${emp.id}`,
+        source: ['omw', 'start', 'finish'].map(k => k + ':' + (last[k] ? 'page' : ts[CK.HCP_FIELD[k]] ? 'hcp' : 'none')).join(' ') });
+    }
     Object.keys(last).forEach(k => {
       const s = last[k];
       const hcpRaw = ts[CK.HCP_FIELD[k]];
@@ -175,15 +188,21 @@ function weeklyReport() {
   const html = [`<p style="font-family:Arial,sans-serif">Job Clock — week of ${esc(weekOf)}. <b>${fix.length}</b> time(s) to enter or fix in HCP; ${ok.length} already match.</p>`,
     fix.length ? '<table border="1" cellpadding="6" style="border-collapse:collapse;font-family:Arial,sans-serif;font-size:14px"><tr><th>Job</th><th>Customer</th><th>Tech</th><th>Button</th><th>Pressed on the page</th><th>HCP shows</th><th>Action</th><th>Note</th></tr>' +
       fix.map(f => `<tr><td>${esc(f.number)}</td><td>${esc(f.customer)}</td><td>${esc(f.tech)}</td><td>${esc(f.event)}</td><td><b>${esc(f.page)}</b></td><td>${esc(f.hcp)}</td><td>${esc(f.status)}</td><td>${esc(f.note)}</td></tr>`).join('') + '</table>' : '<p style="font-family:Arial,sans-serif">Nothing to fix this week.</p>',
-    `<p style="font-family:Arial,sans-serif;font-size:12px;color:#666">In HCP, open the job → the On my way / Start / Finish times can be edited on the job's timeline. Each job also has a private "⏱" note with the time. Full log: <a href="${sheetUrl}">Job Clock sheet</a>.</p>`].join('\n');
+    `<p style="font-family:Arial,sans-serif;font-size:12px;color:#666">Each job also has a private "⏱" note with the time. Full log: <a href="${sheetUrl}">Job Clock sheet</a>.</p>`,
+    apply.length ? `<h3 style="font-family:Arial,sans-serif;font-size:14px">Field tech details to enter (travel / job time)</h3><table border="1" cellpadding="6" style="border-collapse:collapse;font-family:Arial,sans-serif;font-size:14px"><tr><th>Job</th><th>Tech</th><th>Travel</th><th>Job time</th><th></th></tr>` +
+      apply.map(a => `<tr><td>${esc(a.job)} ${esc(a.customer)}</td><td>${esc(a.tech)}</td><td>${ckHm_(a.travel_min)}</td><td>${ckHm_(a.job_min)}</td><td><a href="${esc(a.edit_url)}">open in HCP</a></td></tr>`).join('') + '</table>' +
+      `<p style="font-family:Arial,sans-serif;font-size:12px;color:#666">To have Claude enter these: open a Claude chat with Chrome connected and run <b>apply-job-clock-times</b>.</p>` +
+      `<pre style="font-size:10px;color:#999">JOBCLOCK-DATA: ${esc(JSON.stringify({ week: weekOf, apply: apply }))}</pre>` : ''].join('\n');
   const text = `Job Clock — week of ${weekOf}: ${fix.length} time(s) to enter or fix in HCP; ${ok.length} already match.\n\n` +
-    fix.map(f => `Job ${f.number} (${f.customer}) — ${f.tech} — ${f.event}: page ${f.page} | HCP ${f.hcp} → ${f.status}${f.note ? ' — ' + f.note : ''}`).join('\n') + `\n\n${sheetUrl}`;
+    fix.map(f => `Job ${f.number} (${f.customer}) — ${f.tech} — ${f.event}: page ${f.page} | HCP ${f.hcp} → ${f.status}${f.note ? ' — ' + f.note : ''}`).join('\n') +
+    (apply.length ? `\n\nField tech details to enter:\n` + apply.map(a => `Job ${a.job} (${a.customer}) — ${a.tech}: travel ${ckHm_(a.travel_min)}, job ${ckHm_(a.job_min)} — ${a.edit_url}`).join('\n') + `\n\nJOBCLOCK-DATA: ${JSON.stringify({ week: weekOf, apply: apply })}` : '') + `\n\n${sheetUrl}`;
   GmailApp.sendEmail(to, `Job Clock — ${fix.length} time${fix.length === 1 ? '' : 's'} to update in HCP (week of ${weekOf})`, text,
     { cc: props_().getProperty('REPORT_CC') || '', htmlBody: html, name: 'Golden Rule Job Clock' });
   const stamp = Utilities.formatDate(new Date(), tz, 'yyyy-MM-dd');
   fix.concat(ok).forEach(f => { try { sh.getRange(f.row, 10).setValue(stamp + (f.status === 'ok' ? ' ok' : ' ' + f.status)); } catch (_) {} });
   console.log(`✅ Report sent to ${to}: ${fix.length} to fix, ${ok.length} ok.`);
 }
+function ckHm_(min) { min = Number(min) || 0; return Math.floor(min / 60) + 'h ' + String(min % 60).padStart(2, '0') + 'm'; }
 function ckEventKey_(label) { return Object.keys(CK.EVENTS).filter(k => CK.EVENTS[k] === label)[0] || 'omw'; }
 
 function installWeeklyTrigger() {
