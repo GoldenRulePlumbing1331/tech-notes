@@ -231,14 +231,18 @@ and 14 browser checks (real CSV parse → plan → untick → apply).
 
 ## New Job — price book line items + duplicate accounts (added 2026-10-16)
 
-- **Line items from the price book.** Haiku now also pulls the billable work out of the dictation ("replace the
-  50-gallon gas water heater", "diagnostic") and the script searches HCP price book services for each one. The
-  confirm card shows them as tick boxes with the price: a clear match is pre-ticked, alternatives sit in a
-  dropdown, quantity is editable, and a search box adds anything else. On Create the job is made first, then
-  `PUT /jobs/{id}/line_items/bulk_update` (append) adds the ticked items linked to the price book entry
-  (`service_item_id` + `service_item_type: organizational`); if HCP rejects the link they're added as plain
-  line items and the message says "(not linked to the price book entry)". Prices come straight from the
-  price book (cents), so what the tech sees is what lands on the job.
+- **Line items from the price book.** The services price book is small (~105 items, checked 2026-10-16), so the
+  script caches the whole list for 6 hours and hands it to Haiku with the dictation; Haiku picks items **by number**
+  from your real names ("50 Gallon, Natural, Atmospheric (BW)", "Kitchen Sink Clog", "Toilet Installation - HO
+  Supplied") plus up to 3 alternatives (other sizes / fuel / who supplies it). The confirm card shows them as tick
+  boxes with the price: only items the tech clearly asked for are pre-ticked; alternatives are in a dropdown;
+  quantity is editable; the search box matches the cached list locally and understands how techs talk ("gas" →
+  Natural/Propane, "gal" → Gallon, "spigot" → Hose Bib, "backed up" → Clog, "HO" → Homeowner). On Create the job is
+  made first, then `PUT /jobs/{id}/line_items/bulk_update` (append) adds the ticked items linked to the price book
+  entry (`service_item_id` + `service_item_type: organizational`); if HCP rejects the link they go on as plain line
+  items and the message says "(not linked to the price book entry)". There is no diagnostic / service-call item in
+  the services price book today, so a "just look at it" visit gets no suggestion — add one in HCP and it shows up
+  within 6 hours (or run `verifyAccess()` to refresh now).
 - **Parent / child accounts.** The public API has no field for HCP's "This customer bills to" link (checked
   2026-10-16 against the 24 Patrick Ave accounts: the customer object only carries `kind`, `tags`, `addresses`).
   What the tool can do: when two or more matches share a phone number or an address, each gets a
@@ -247,7 +251,7 @@ and 14 browser checks (real CSV parse → plan → untick → apply).
   tagged with `CHILD_TAGS` (default *Child, Sub-customer, Sub customer, Tenant*) is ranked last and badged
   "Sub-account". Tag the accounts in HCP once and the voice page will steer to the right one. Script
   properties `PARENT_TAGS` / `CHILD_TAGS` override the defaults.
-- `verifyAccess()` now also checks the price book search. Tests: 6 backend + 9 browser checks.
+- `verifyAccess()` now also refreshes the cached price book and runs a sample search. Tests: 7 backend + 10 browser checks.
 
 ## Things to watch (unverified until the real run)
 

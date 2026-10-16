@@ -92,10 +92,13 @@
   .li .body { flex: 1; min-width: 0; }
   .li .body b { display: block; font-size: 16px; }
   .li .body span { display: block; font-size: 14px; color: var(--muted); }
-  .li .body select { margin-top: 6px; font-size: 14px; min-height: 36px; padding: 6px 8px; width: 100%; }
-  .li .qty { width: 64px; flex: none; text-align: center; min-height: 40px; padding: 6px; }
+  .li { flex-wrap: wrap; }
+  .li .ctl { display: flex; gap: 8px; margin-top: 2px; align-items: center; flex-basis: 100%; padding-left: 32px; }
+  .li .ctl select { flex: 1; min-width: 0; font-size: 14px; min-height: 38px; padding: 6px 8px; }
+  .li .ctl .ql { font-size: 13px; color: var(--muted); flex: none; }
+  .li .qty { width: 64px; flex: none; text-align: center; min-height: 38px; padding: 6px; }
   .li .price { flex: none; font-weight: 700; min-width: 72px; text-align: right; padding-top: 2px; }
-  .li.off .body, .li.off .price { opacity: .5; }
+  .li.off .body, .li.off .price, .li.off .ctl { opacity: .5; }
   .total { display: flex; justify-content: space-between; font-weight: 700; margin-top: 10px; padding-top: 10px; border-top: 1px solid var(--line); }
   footer { text-align: center; font-size: 13px; color: var(--muted); margin-top: 18px; }
   footer a { color: inherit; }
@@ -214,7 +217,7 @@
   <!-- line items from the price book -->
   <div class="sub" id="liSection">
     <label>Line items from the price book</label>
-    <div class="hint" style="margin-top:0" id="liHint">Picked from what you said. Untick anything you don't want on the job, or change the match.</div>
+    <div class="hint" style="margin-top:0" id="liHint">Picked from what you said. Tick what goes on the job, or change the match.</div>
     <div id="liList"></div>
     <div class="total hidden" id="liTotal"><span>Job total</span><span id="liSum">$0.00</span></div>
     <div class="row" style="margin-top:10px">
@@ -580,7 +583,7 @@
     S.items = suggestions.map(function (sg) {
       var cands = sg.candidates || [];
       var pick = cands.filter(function (c) { return c.strong; })[0] || cands[0] || null;
-      return { label: sg.name || sg.search || "", qty: sg.quantity > 0 ? sg.quantity : 1, cands: cands, cand: pick, use: !!(pick && (pick.strong || cands.length === 1)) };
+      return { label: sg.name || sg.search || "", qty: sg.quantity > 0 ? sg.quantity : 1, cands: cands, cand: pick, use: !!(pick && pick.strong) };
     });
     renderItems();
   }
@@ -595,17 +598,22 @@
       body.appendChild(el("b", null, it.cand ? it.cand.name : it.label));
       if (!it.cand) body.appendChild(el("span", null, "Heard “" + it.label + "” — nothing like it in the price book. Search below to add it by hand."));
       else if (it.label && it.label.toLowerCase() !== it.cand.name.toLowerCase()) body.appendChild(el("span", null, "Heard: " + it.label));
+      var ctl = el("div", "ctl");
       if (it.cands.length > 1) {
-        var sel = el("select");
+        var sel = el("select"); sel.title = "Other matches";
         it.cands.forEach(function (c, i) { var o = el("option", null, c.name + " — " + money(c.price)); o.value = String(i); if (c === it.cand) o.selected = true; sel.appendChild(o); });
         sel.onchange = function () { it.cand = it.cands[Number(sel.value)]; it.use = true; renderItems(); };
-        body.appendChild(sel);
+        ctl.appendChild(sel);
+      }
+      if (it.cand) {
+        ctl.appendChild(el("span", "ql", "Qty"));
+        var q = el("input", "qty"); q.type = "number"; q.min = "0.25"; q.step = "0.25"; q.value = String(it.qty); q.inputMode = "decimal"; q.title = "Quantity";
+        q.onchange = function () { it.qty = Number(q.value) > 0 ? Number(q.value) : 1; q.value = String(it.qty); sumItems(); };
+        ctl.appendChild(q);
       }
       row.appendChild(body);
-      var q = el("input", "qty"); q.type = "number"; q.min = "0.25"; q.step = "0.25"; q.value = String(it.qty); q.inputMode = "decimal"; q.title = "Quantity";
-      q.onchange = function () { it.qty = Number(q.value) > 0 ? Number(q.value) : 1; q.value = String(it.qty); sumItems(); };
-      row.appendChild(q);
       row.appendChild(el("div", "price", it.cand ? money(it.cand.price * it.qty) : ""));
+      if (it.cand) row.appendChild(ctl);
       box.appendChild(row);
     });
     sumItems();
@@ -615,7 +623,7 @@
     S.items.forEach(function (it) { if (it.use && it.cand) { n++; sum += it.cand.price * it.qty; } });
     Array.prototype.forEach.call($("liList").querySelectorAll(".li"), function (row, i) { var it = S.items[i]; row.querySelector(".price").textContent = it.cand ? money(it.cand.price * it.qty) : ""; });
     show($("liTotal"), n > 0); $("liSum").textContent = money(sum) + (n ? " · " + n + " line item" + (n === 1 ? "" : "s") : "");
-    $("liHint").textContent = S.items.length ? "Picked from what you said. Untick anything you don't want on the job, or change the match." : "Nothing picked yet — search the price book below to add line items.";
+    $("liHint").textContent = S.items.length ? "Picked from what you said. Ticked = clearly asked for; tick the others if they apply, or change the match." : "Nothing picked yet — search the price book below to add line items.";
   }
   $("liGo").onclick = function () {
     var q = $("liSearch").value.trim();
