@@ -362,15 +362,22 @@ function njPriceSearch_(q) {
   if (hit) return JSON.parse(hit);
   let rows = [];
   try {
-    const r = hcp_('get', `/api/price_book/services?q=${encodeURIComponent(q)}&page_size=${NJ.PRICE_CANDIDATES}`);
+    const r = hcp_('get', `/api/price_book/services?q=${encodeURIComponent(q)}&page_size=${NJ.PRICE_CANDIDATES * 3}`);
     rows = (r.data || []).map(s => ({
       uuid: s.uuid, name: s.name || '', description: String(s.description || '').slice(0, 300),
       price: Number(s.price) || 0, cost: Number(s.cost) || 0, uom: s.unit_of_measure || '', taxable: !!s.taxable, strong: false,
     }));
   } catch (e) { console.warn('price search failed: ' + e.message); }
-  // "strong" = the query words all appear in the item name (safe to pre-tick).
+  // HCP's q search is loose ("water heater" also returns softeners), so rank by how many of the words are in the
+  // name (description counts half). "strong" = every word is in the name (safe to pre-tick).
   const words = q.toLowerCase().split(/\s+/).filter(w => w.length > 2 || /\d/.test(w));   // keep sizes like "50" and "3/4"
-  rows.forEach(c => { const n = c.name.toLowerCase(); c.strong = words.length > 0 && words.every(w => n.indexOf(w) !== -1); });
+  rows.forEach(c => {
+    const n = c.name.toLowerCase(), d = c.description.toLowerCase();
+    c.hits = words.reduce((s, w) => s + (n.indexOf(w) !== -1 ? 1 : d.indexOf(w) !== -1 ? 0.5 : 0), 0);
+    c.strong = words.length > 0 && words.every(w => n.indexOf(w) !== -1);
+  });
+  rows = rows.sort((a, b) => b.hits - a.hits).slice(0, NJ.PRICE_CANDIDATES);
+  rows.forEach(c => { delete c.hits; });
   cache.put(key, JSON.stringify(rows), 1800);
   return rows;
 }
