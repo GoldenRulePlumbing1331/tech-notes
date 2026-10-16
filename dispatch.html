@@ -174,6 +174,7 @@
   </div>
   <div id="boardList" style="margin-top:12px"></div>
   <div class="hint" id="boardHint">Tap a job on the board to move it.</div>
+  <a class="btn" href="board.html" style="display:block;text-align:center;text-decoration:none">Open the full day board →</a>
 </div>
 
 </div>
@@ -227,6 +228,9 @@
       show($("codeCard"), false); show($("app"), true); say("codeMsg", "");
       if (!S.canDispatch) say("talkMsg", "Your code can view the board but not move jobs.", "warn");
       loadBoard();
+      // Opened from the Board page ("Move it"): dispatch.html?job=49370 → that job, ready to change.
+      var wantJob = (/[?&]job=([0-9A-Za-z-]+)/.exec(location.search) || [])[1];
+      if (wantJob && !S.jobOpened) { S.jobOpened = true; $("jobNum").value = wantJob; $("jobGo").click(); }
     });
   }
   $("codeGo").onclick = function () { var c = $("code").value.trim(); if (c) start(c); };

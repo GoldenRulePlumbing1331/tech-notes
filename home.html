@@ -107,6 +107,8 @@
       icon: "M11 5h2v6h6v2h-6v6h-2v-6H5v-2h6z" },
     { key: "dispatch", href: "dispatch.html", name: "Dispatch",       desc: "Move a job, change the crew, see the board.",
       icon: "M7 2h2v2h6V2h2v2h3v18H4V4h3zm-1 7v11h12V9zm2 2h3v3H8zm5 0h3v3h-3z" },
+    { key: "board",    ep: "dispatch", href: "board.html", name: "Board", desc: "Today's schedule by tech — who's where, toggle techs.",
+      icon: "M3 4h18v16H3zm2 2v12h3V6zm5 0v12h4V6zm6 0v12h3V6zM6 8h1v3H6zm5 2h2v4h-2zm6-1h1v5h-1z" },
     { key: "estimate", href: "estimate.html", name: "Estimate",       desc: "Describe the options — get a draft estimate.",
       icon: "M6 2h9l5 5v15H6zm8 1.5V8h4.5zM8 11h8v2H8zm0 4h8v2H8zm0-8h4v2H8z" },
     { key: "clock",    href: "clock.html",    name: "Job Clock",      desc: "On my way / Start / Finish — works with no signal.",
@@ -122,7 +124,8 @@
   function renderTiles() {
     var box = $("tiles"); box.innerHTML = "";
     TOOLS.forEach(function (t) {
-      var on = !!(EP[t.key] && EP[t.key].indexOf("https://") === 0);
+      var ep = EP[t.ep || t.key];
+      var on = !!(ep && ep.indexOf("https://") === 0);
       var a = el("a", "tile" + (on ? "" : " off")); a.href = t.href;
       var ic = el("div", "ic"); ic.innerHTML = '<svg viewBox="0 0 24 24"><path d="' + t.icon + '"/></svg>'; a.appendChild(ic);
       a.appendChild(el("b", null, t.name)); a.appendChild(el("span", null, t.desc));

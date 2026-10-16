@@ -284,6 +284,33 @@ and 14 browser checks (real CSV parse → plan → untick → apply).
   properties `PARENT_TAGS` / `CHILD_TAGS` override the defaults.
 - `verifyAccess()` now also refreshes the cached price book and runs a sample search. Tests: 7 backend + 10 browser checks.
 
+## Board — the day by tech, made for a phone (added 2026-10-16)
+
+`board.html` (tile "Board" on the home page) is a phone-sized version of HCP's desktop Schedule → Day view. It
+uses the **Dispatch** web app (new action `day`), so there's nothing new to set up beyond deploying a new version
+of the Dispatch script.
+
+- **Grid**: one column per tech plus *Unassigned*, with the time down the left and a red line at the current time.
+  Two columns fit across a phone; swipe sideways for the rest (the `⇔ 2/3/4` button fits more). Column headers stay
+  put while you scroll and show the tech's job total, scheduled hours, stops — and, for today, **where they are**
+  from the On my way / Start / Finish buttons: "● At SwoffordMichael · since 9:40", "➜ Driving to …", "Next 1p · …",
+  "✓ All done". All-day items (Emergency Phone, anytime jobs) sit in a strip under the headers.
+- **List**: the same day as one card per tech — easier to read on a small screen.
+- **Tech chips** across the top turn columns on/off (remembered on that phone). "Only…" switches them all off so
+  you can pick one or two; techs with nothing scheduled (office staff) are hidden unless you tap
+  "+ N with nothing scheduled".
+- **Tap anything** for the details: customer, job #, status times, techs, address (opens Maps), phone (tap to call),
+  amount, type, tags, **Open in HCP**, and **Move / reassign**, which opens Dispatch with the job already typed in
+  (`dispatch.html?job=NUMBER`).
+- ‹ › and the date step through days; Today jumps back. Today's board refreshes itself every 2 minutes while it's on
+  screen; ⟳ forces a fresh pull. The last board is saved on the phone, so it opens instantly and still shows (marked
+  "No signal") when there's no reception.
+- Server side: jobs come from `/jobs?expand[]=appointments` (one entry per appointment that day, so multi-day jobs show
+  "Day 2 of 3"; canceled jobs are left off; amounts are HCP cents ÷ 100), estimates from `/estimates`, and events
+  (Emergency Phone, appointments, meetings) from `/events` with the repeat rule worked out (daily/weekly/monthly/yearly,
+  every-N, first-Friday style, until/count). The whole day is cached 60 s so several people watching don't multiply
+  HCP calls.
+
 ## Things to watch (unverified until the real run)
 
 1. Dispatch/schedule writes with a Company key (verifyAccess tells you).

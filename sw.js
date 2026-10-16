@@ -6,7 +6,7 @@
  * Nothing from script.google.com is ever cached — those are the live calls.
  * Bump CACHE when a file is removed or renamed; ordinary edits don't need it. */
 var CACHE = "gr-tools-v3";
-var ASSETS = ["home.html", "index.html", "new-job.html", "dispatch.html", "estimate.html", "order.html", "clock.html", "job-inputs.html",
+var ASSETS = ["home.html", "index.html", "new-job.html", "dispatch.html", "estimate.html", "order.html", "clock.html", "job-inputs.html", "board.html",
               "config.js", "manifest.webmanifest", "icon.svg"];
 var NETWORK_TIMEOUT_MS = 4000;
 

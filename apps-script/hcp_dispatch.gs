@@ -30,6 +30,8 @@
  *   parse   {text}                     → understood request + the job(s) it refers to + proposed change
  *   job     {number}                   → look up a job by number (typed)
  *   board   {date, employee_id}        → read-only list of jobs that day (optionally one tech)
+ *   day     {date}                     → everything on the schedule that day for the Board page (board.html):
+ *                                        jobs (incl. multi-day appointments), estimates and events, per tech
  *   apply   {req_id, job_id, change}   → writes the schedule / crew change to HCP
  *   unschedule {req_id, job_id}        → removes the schedule (job goes back to "needs scheduling")
  */
@@ -64,6 +66,7 @@ function dispatchAction_(p) {
       case 'parse':      return Object.assign({ ok: true }, dpParse_(p.text, who));
       case 'job':        return { ok: true, jobs: dpJobsByNumber_(p.number).map(dpJobOut_) };
       case 'board':      return { ok: true, jobs: dpBoard_(p.date, p.employee_id) };
+      case 'day':        return Object.assign({ ok: true }, dpDay_(p.date, !!p.fresh));
       case 'apply':      mustDispatch_(who); return dpApply_(p, who);
       case 'unschedule': mustDispatch_(who); return dpUnschedule_(p, who);
       default:           throw new Error('Unknown action.');
@@ -271,6 +274,164 @@ function dpBoard_(date, employeeId) {
   return out;
 }
 
+/* ───────────── day board (board.html) ───────────── */
+
+/**
+ * Everything on the schedule for one day, shaped for the Board page: one entry per job appointment / estimate /
+ * event with its techs, times (minutes after midnight), status from the OMW/Start/Finish buttons, and amount.
+ * Cached 60 s so several people watching the board don't multiply HCP calls.
+ */
+function dpDay_(date, fresh) {
+  date = /^\d{4}-\d{2}-\d{2}$/.test(date || '') ? date : dpToday_();
+  const cache = CacheService.getScriptCache(), key = 'dp_day_' + date;
+  if (!fresh) { const hit = cache.get(key); if (hit) { try { return JSON.parse(hit); } catch (_) {} } }
+  const tz = dpTz_();
+  const dayStart = Utilities.parseDate(date + ' 00:00', tz, 'yyyy-MM-dd HH:mm'), dayEnd = new Date(dayStart.getTime() + 86400000);
+  const lookBack = new Date(dayStart.getTime() - 14 * 86400000);   // multi-day jobs that started earlier
+  const mins = d => Math.round((d.getTime() - dayStart.getTime()) / 60000);
+  const hhmm = d => d ? dpFmt_(d, 'h:mm a') : '';
+  const onDay = d => d && d >= dayStart && d < dayEnd;
+  const items = [], warnings = [];
+
+  // Jobs (expanded appointments → one item per appointment that falls on this day)
+  try {
+    const q = `/jobs?page_size=100&expand[]=appointments&scheduled_start_min=${encodeURIComponent(dpIso_(lookBack))}` +
+              `&scheduled_start_max=${encodeURIComponent(dpIso_(dayEnd))}&scheduled_end_min=${encodeURIComponent(dpIso_(dayStart))}`;
+    for (let page = 1; page <= 5; page++) {
+      const r = hcp_('get', q + `&page=${page}`);
+      (r.jobs || []).forEach(j => {
+        if (/canceled/.test(j.work_status || '') || j.deleted_at) return;
+        const s = j.schedule || {}, appts = s.appointments || j.appointments || [];
+        const crew = (j.assigned_employees || []).map(e => e.id);
+        const slots = appts.length
+          ? appts.map(a => ({ start: dpDate_(a.start_time) || (a.start_date ? Utilities.parseDate(a.start_date + ' 08:00', tz, 'yyyy-MM-dd HH:mm') : null),
+                              end: dpDate_(a.end_time), anytime: !!a.anytime, n: appts.length,
+                              emps: (a.dispatched_employees_ids || []).length || appts.length > 1 ? (a.dispatched_employees_ids || []) : crew }))
+          : [{ start: dpDate_(s.scheduled_start), end: dpDate_(s.scheduled_end), emps: (j.assigned_employees || []).map(e => e.id), anytime: !!s.anytime, n: 1 }];
+        slots.forEach((sl, i) => {
+          if (!sl.start || !(onDay(sl.start) || (sl.end && sl.start < dayStart && sl.end > dayStart))) return;
+          items.push(dpDayItem_(j, 'job', sl, i, mins, hhmm, onDay));
+        });
+      });
+      if (!(r.jobs || []).length || page >= (r.total_pages || 0)) break;
+    }
+  } catch (e) { warnings.push('Jobs: ' + e.message); }
+
+  // Estimates with a visit that day
+  try {
+    const r = hcp_('get', `/estimates?page_size=100&scheduled_start_min=${encodeURIComponent(dpIso_(dayStart))}&scheduled_start_max=${encodeURIComponent(dpIso_(dayEnd))}`);
+    (r.estimates || []).forEach(est => {
+      const s = est.schedule || {}, start = dpDate_(s.scheduled_start);
+      if (!onDay(start) || /canceled/.test(est.work_status || '')) return;
+      items.push(dpDayItem_(est, 'estimate', { start: start, end: dpDate_(s.scheduled_end), emps: (est.assigned_employees || []).map(e => e.id), n: 1 }, 0, mins, hhmm, onDay));
+    });
+  } catch (e) { warnings.push('Estimates: ' + e.message); }
+
+  // Events (Emergency Phone, appointments, meetings) incl. simple repeating ones
+  try {
+    for (let page = 1; page <= 4; page++) {
+      const r = hcp_('get', `/events?page=${page}&page_size=100&sort_by=created_at&sort_direction=desc`);
+      (r.events || []).forEach(ev => {
+        const sc = ev.schedule || {}, s0 = dpDate_(sc.start_time), e0 = dpDate_(sc.end_time);
+        if (!s0) return;
+        const hit = dpEventOn_(ev.recurrence_rule, s0, e0, dayStart, dayEnd, tz);
+        if (!hit) return;
+        items.push({ id: ev.id + ':' + date, kind: 'event', number: '', title: ev.name || 'Event', customer: '', note: String(ev.note || '').slice(0, 300),
+          address: [((ev.address || {}).street), ((ev.address || {}).city)].filter(Boolean).join(', '), lat: null, lng: null, phone: '',
+          all_day: !!ev.all_day || (hit.end - hit.start) >= 20 * 3600000, smin: Math.max(0, mins(hit.start)), emin: Math.min(1440, mins(hit.end)),
+          time: hhmm(hit.start) + (hit.end ? '–' + hhmm(hit.end) : ''), employee_ids: [].concat(ev.assigned_employees || []).map(e => (e && e.id) || e).filter(x => typeof x === 'string'),
+          amount: 0, status: 'event', omw: '', started: '', done: '', unit: '', type: '', url: '' });
+      });
+      if (!(r.events || []).length || page >= (r.total_pages || 0)) break;
+    }
+  } catch (e) { warnings.push('Events: ' + e.message); }
+
+  items.sort((a, b) => a.smin - b.smin || String(a.number).localeCompare(String(b.number)));
+  const out = { date: date, label: Utilities.formatDate(dayStart, tz, 'EEE, MMM d'), today: dpToday_(),
+                now_min: date === dpToday_() ? mins(new Date()) : null,
+                techs: dpEmployees_().map(e => ({ id: e.id, name: e.name, short: (e.first || e.name.split(' ')[0]) + (e.last ? ' ' + e.last.charAt(0) + '.' : ''),
+                  initials: ((e.first || '').charAt(0) + (e.last || '').charAt(0)).toUpperCase() || e.name.charAt(0), color: e.color, role: e.role })),
+                items: items, warnings: warnings, loaded_at: dpFmt_(new Date(), 'h:mm a') };
+  try { cache.put(key, JSON.stringify(out), 60); } catch (_) {}
+  return out;
+}
+
+function dpDayItem_(o, kind, sl, i, mins, hhmm, onDay) {
+  // OMW / Start / Finish times only count when they happened on this day (multi-day jobs carry day 1's times).
+  const stamp = s => { const d = dpDate_(s); return d && (!onDay || onDay(d)) ? hhmm(d) : ''; };
+  const c = o.customer || {}, a = o.address || {}, ts = o.work_timestamps || {}, jf = o.job_fields || o.estimate_fields || {};
+  const start = sl.start, end = sl.end || new Date(start.getTime() + DP.DEFAULT_DURATION_MIN * 60000);
+  const display = ((c.last_name || '') + (c.first_name || '')).replace(/\s+/g, '') || c.company || '(no name)';
+  const opt = (o.options || [])[0] || {};
+  return {
+    id: o.id + (sl.n > 1 ? ':' + i : ''), job_id: o.id, kind: kind,
+    number: String(kind === 'job' ? (o.invoice_number || '') : (o.estimate_number || '')),
+    title: String(o.description || (opt.name) || (jf.job_type && jf.job_type.name) || '').split('\n')[0].slice(0, 120),
+    customer: display, full_name: [c.first_name, c.last_name].filter(Boolean).join(' '), company: c.company || '',
+    address: [a.street, a.city].filter(Boolean).join(', '), zip: a.zip || '', lat: a.latitude || null, lng: a.longitude || null,
+    phone: c.mobile_number || c.home_number || c.work_number || '',
+    all_day: !!sl.anytime, smin: Math.max(0, mins(start)), emin: Math.min(1440, Math.max(mins(start) + 30, mins(end))),
+    time: sl.anytime ? 'Anytime' : hhmm(start) + '–' + hhmm(end), day_of: sl.n > 1 ? `Day ${i + 1} of ${sl.n}` : '',
+    employee_ids: sl.emps || [],
+    amount: kind === 'job' ? (Number(o.total_amount) || 0) / 100 : 0,            // HCP amounts are in cents
+    estimate_amount: kind === 'estimate' ? (Number(opt.total_amount) || 0) / 100 : 0,
+    status: o.work_status || '',
+    omw: stamp(ts.on_my_way_at), started: stamp(ts.started_at), done: stamp(ts.completed_at),
+    unit: (jf.business_unit && jf.business_unit.name) || '', type: (jf.job_type && jf.job_type.name) || '',
+    tags: (o.tags || []).map(t => (t && t.name) || t).filter(Boolean).slice(0, 6),
+    url: 'https://pro.housecallpro.com/app/' + (kind === 'job' ? 'jobs/' : 'estimates/') + o.id,
+  };
+}
+
+/**
+ * Does an event (with an optional iCal RRULE) happen on [dayStart, dayEnd)? Returns {start, end} of that day's
+ * occurrence or null. Handles FREQ=DAILY|WEEKLY|MONTHLY|YEARLY with INTERVAL, BYDAY (incl. 1FR / -1MO),
+ * BYMONTHDAY, UNTIL and COUNT — enough for on-call phones, monthly reviews and appointments.
+ */
+function dpEventOn_(rule, s0, e0, dayStart, dayEnd, tz) {
+  const len = e0 && e0 > s0 ? e0 - s0 : 3600000;
+  const at = d => { const t = Utilities.parseDate(Utilities.formatDate(d, tz, 'yyyy-MM-dd') + ' ' + Utilities.formatDate(s0, tz, 'HH:mm'), tz, 'yyyy-MM-dd HH:mm'); return { start: t, end: new Date(t.getTime() + len) }; };
+  if (!rule) return (s0 < dayEnd && new Date(s0.getTime() + len) > dayStart) ? { start: s0, end: new Date(s0.getTime() + len) } : null;
+  const r = {}; String(rule).replace(/^RRULE:/i, '').split(';').forEach(kv => { const p = kv.split('='); if (p[0]) r[p[0].toUpperCase()] = (p[1] || '').toUpperCase(); });
+  const ymd = d => Utilities.formatDate(d, tz, 'yyyy-MM-dd');
+  const day = ymd(dayStart), first = ymd(s0);
+  if (day < first) return null;
+  if (r.UNTIL) { const u = r.UNTIL.replace(/T.*/, ''); if (day > u.slice(0, 4) + '-' + u.slice(4, 6) + '-' + u.slice(6, 8)) return null; }
+  const interval = Math.max(1, Number(r.INTERVAL) || 1);
+  const D = s => { const p = s.split('-').map(Number); return Date.UTC(p[0], p[1] - 1, p[2]); };
+  const daysBetween = Math.round((D(day) - D(first)) / 86400000);
+  const dows = ['SU', 'MO', 'TU', 'WE', 'TH', 'FR', 'SA'];
+  const dt = new Date(D(day)), dow = dows[dt.getUTCDay()], dom = dt.getUTCDate(), month = dt.getUTCMonth();
+  const s0d = new Date(D(first));
+  const byday = (r.BYDAY || '').split(',').filter(Boolean);
+  const nthOk = tok => {   // "1FR", "-1MO", "FR"
+    const m = /^(-?\d)?([A-Z]{2})$/.exec(tok); if (!m || m[2] !== dow) return false;
+    if (!m[1]) return true;
+    const n = Number(m[1]);
+    if (n > 0) return Math.ceil(dom / 7) === n;
+    const dim = new Date(Date.UTC(dt.getUTCFullYear(), month + 1, 0)).getUTCDate();
+    return Math.ceil((dim - dom + 1) / 7) === -n;
+  };
+  let match = false, periodIndex = 0;
+  switch (r.FREQ) {
+    case 'DAILY': periodIndex = daysBetween; match = daysBetween % interval === 0 && (!byday.length || byday.some(nthOk)); break;
+    case 'WEEKLY': {
+      const wk = Math.floor((daysBetween + s0d.getUTCDay()) / 7); periodIndex = wk;
+      match = wk % interval === 0 && (byday.length ? byday.some(t => t.slice(-2) === dow) : dow === dows[s0d.getUTCDay()]); break;
+    }
+    case 'MONTHLY': {
+      const mi = (dt.getUTCFullYear() - s0d.getUTCFullYear()) * 12 + (month - s0d.getUTCMonth()); periodIndex = mi;
+      const bmd = (r.BYMONTHDAY || '').split(',').filter(Boolean).map(Number);
+      match = mi % interval === 0 && (byday.length ? byday.some(nthOk) : bmd.length ? bmd.indexOf(dom) !== -1 : dom === s0d.getUTCDate()); break;
+    }
+    case 'YEARLY': { const yi = dt.getUTCFullYear() - s0d.getUTCFullYear(); periodIndex = yi; match = yi % interval === 0 && month === s0d.getUTCMonth() && dom === s0d.getUTCDate(); break; }
+    default: return null;
+  }
+  if (!match) return null;
+  if (r.COUNT && periodIndex / interval >= Number(r.COUNT) * Math.max(1, byday.length || 1)) return null;
+  return at(dayStart);
+}
+
 /* ───────────── apply the change ───────────── */
 
 function dpApply_(p, who) {
@@ -365,19 +526,19 @@ function dpUnschedule_(p, who) {
 
 function dpEmployees_() {
   const cache = CacheService.getScriptCache();
-  const hit = cache.get('dp_emps');
+  const hit = cache.get('dp_emps2');
   if (hit) return JSON.parse(hit);
   const out = [];
   for (let page = 1; page <= 10; page++) {
     const r = hcp_('get', `/employees?page=${page}&page_size=100`);
     (r.employees || []).forEach(e => {
       const name = [e.first_name, e.last_name].filter(Boolean).join(' ').trim();
-      if (name && e.id) out.push({ id: e.id, name: name, color: e.color_hex || '' });
+      if (name && e.id) out.push({ id: e.id, name: name, first: e.first_name || '', last: e.last_name || '', color: e.color_hex || '', role: e.role || '' });
     });
     if (page >= (r.total_pages || 0)) break;
   }
   out.sort((a, b) => a.name.localeCompare(b.name));
-  cache.put('dp_emps', JSON.stringify(out), 6 * 3600);
+  cache.put('dp_emps2', JSON.stringify(out), 6 * 3600);
   return out;
 }
 
