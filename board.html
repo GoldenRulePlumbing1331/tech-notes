@@ -546,6 +546,12 @@
       S.data = r; put(LAST, JSON.stringify(r));
       say((r.warnings || []).length ? "Some of the schedule couldn't load: " + r.warnings.join(" · ") : "");
       render();
+      // The server's saved copy of HCP's events (Emergency Phone, time off…) is a few hours old: refresh it in the
+      // background (≈20 s), then reload quietly. Once per page visit.
+      if (r.events_stale && !S.syncing) {
+        S.syncing = true;
+        api("events_sync").then(function (x) { if (x && x.ok && !x.skipped && !x.busy && S.date === want) load(true, true); });
+      }
     });
   }
   function go(ymd) { if (!ymd) return; S.date = ymd; closeSheet(); renderTop(); load(false); try { history.replaceState(null, "", "?date=" + ymd); } catch (e) {} }

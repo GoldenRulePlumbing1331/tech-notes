@@ -32,6 +32,8 @@
  *   board   {date, employee_id}        → read-only list of jobs that day (optionally one tech)
  *   day     {date}                     → everything on the schedule that day for the Board page (board.html):
  *                                        jobs (incl. multi-day appointments), estimates and events, per tech
+ *   events_sync {}                     → re-reads every HCP event into the saved list the Board uses (the page
+ *                                        calls it in the background when the list is over 3 hours old)
  *   apply   {req_id, job_id, change}   → writes the schedule / crew change to HCP
  *   unschedule {req_id, job_id}        → removes the schedule (job goes back to "needs scheduling")
  */
@@ -44,6 +46,8 @@ const DP = {
   DEFAULT_ARRIVAL_MIN: 120,
   JOB_SCAN_PAGES: 15,          // x100 recent jobs scanned when a job number isn't cached yet
   BOARD_PAGE_SIZE: 100,
+  EVENT_SYNC_MS: 3 * 3600 * 1000,   // Board: re-read the whole HCP event list (≈17 pages, ~20 s) at most this often
+  EVENT_KEEP_DAYS: 14,             // …keeping every repeating event plus one-off events that end after (today − this)
 };
 
 const TEST_JOB_NUMBER = '';    // for verifyAccess(): a SCHEDULED job, e.g. '49370'
@@ -67,6 +71,7 @@ function dispatchAction_(p) {
       case 'job':        return { ok: true, jobs: dpJobsByNumber_(p.number).map(dpJobOut_) };
       case 'board':      return { ok: true, jobs: dpBoard_(p.date, p.employee_id) };
       case 'day':        return Object.assign({ ok: true }, dpDay_(p.date, !!p.fresh));
+      case 'events_sync': return dpSyncEvents_(!!p.force);
       case 'apply':      mustDispatch_(who); return dpApply_(p, who);
       case 'unschedule': mustDispatch_(who); return dpUnschedule_(p, who);
       default:           throw new Error('Unknown action.');
@@ -293,21 +298,28 @@ function dpDay_(date, fresh) {
   const onDay = d => d && d >= dayStart && d < dayEnd;
   const items = [], warnings = [];
 
-  // Jobs (expanded appointments → one item per appointment that falls on this day)
+  // Jobs (expanded appointments → one item per appointment that falls on this day), estimates and the most recently
+  // changed events, fetched together.
+  const jobsQ = `/jobs?page_size=100&expand[]=appointments&scheduled_start_min=${encodeURIComponent(dpIso_(lookBack))}` +
+                `&scheduled_start_max=${encodeURIComponent(dpIso_(dayEnd))}&scheduled_end_min=${encodeURIComponent(dpIso_(dayStart))}`;
+  const estQ = `/estimates?page_size=100&scheduled_start_min=${encodeURIComponent(dpIso_(dayStart))}&scheduled_start_max=${encodeURIComponent(dpIso_(dayEnd))}`;
+  const evQ = '/events?page=1&page_size=100&sort_by=updated_at&sort_direction=desc';
+  const first = hcpAll_([jobsQ + '&page=1', estQ, evQ]);
+
   try {
-    const q = `/jobs?page_size=100&expand[]=appointments&scheduled_start_min=${encodeURIComponent(dpIso_(lookBack))}` +
-              `&scheduled_start_max=${encodeURIComponent(dpIso_(dayEnd))}&scheduled_end_min=${encodeURIComponent(dpIso_(dayStart))}`;
+    if (first[0].error) throw new Error(first[0].error);
+    let r = first[0].body;
     for (let page = 1; page <= 5; page++) {
-      const r = hcp_('get', q + `&page=${page}`);
+      if (page > 1) r = hcp_('get', jobsQ + `&page=${page}`);
       (r.jobs || []).forEach(j => {
-        if (/canceled/.test(j.work_status || '') || j.deleted_at) return;
+        if (/canceled/.test(j.work_status || '') || j.deleted_at || j.canceled_at) return;
         const s = j.schedule || {}, appts = s.appointments || j.appointments || [];
         const crew = (j.assigned_employees || []).map(e => e.id);
         const slots = appts.length
           ? appts.map(a => ({ start: dpDate_(a.start_time) || (a.start_date ? Utilities.parseDate(a.start_date + ' 08:00', tz, 'yyyy-MM-dd HH:mm') : null),
                               end: dpDate_(a.end_time), anytime: !!a.anytime, n: appts.length,
                               emps: (a.dispatched_employees_ids || []).length || appts.length > 1 ? (a.dispatched_employees_ids || []) : crew }))
-          : [{ start: dpDate_(s.scheduled_start), end: dpDate_(s.scheduled_end), emps: (j.assigned_employees || []).map(e => e.id), anytime: !!s.anytime, n: 1 }];
+          : [{ start: dpDate_(s.scheduled_start), end: dpDate_(s.scheduled_end), emps: crew, anytime: !!s.anytime, n: 1 }];
         slots.forEach((sl, i) => {
           if (!sl.start || !(onDay(sl.start) || (sl.end && sl.start < dayStart && sl.end > dayStart))) return;
           items.push(dpDayItem_(j, 'job', sl, i, mins, hhmm, onDay));
@@ -319,31 +331,45 @@ function dpDay_(date, fresh) {
 
   // Estimates with a visit that day
   try {
-    const r = hcp_('get', `/estimates?page_size=100&scheduled_start_min=${encodeURIComponent(dpIso_(dayStart))}&scheduled_start_max=${encodeURIComponent(dpIso_(dayEnd))}`);
-    (r.estimates || []).forEach(est => {
+    if (first[1].error) throw new Error(first[1].error);
+    (first[1].body.estimates || []).forEach(est => {
       const s = est.schedule || {}, start = dpDate_(s.scheduled_start);
       if (!onDay(start) || /canceled/.test(est.work_status || '')) return;
       items.push(dpDayItem_(est, 'estimate', { start: start, end: dpDate_(s.scheduled_end), emps: (est.assigned_employees || []).map(e => e.id), n: 1 }, 0, mins, hhmm, onDay));
     });
   } catch (e) { warnings.push('Estimates: ' + e.message); }
 
-  // Events (Emergency Phone, appointments, meetings) incl. simple repeating ones
+  // Events (Emergency Phone rotation, time off, meetings), incl. repeating ones. HCP keeps ~1,700 of them, so the
+  // full list is read every few hours (events_sync) and saved; each load adds the 100 most recently changed.
+  let eventsStale = false;
   try {
-    for (let page = 1; page <= 4; page++) {
-      const r = hcp_('get', `/events?page=${page}&page_size=100&sort_by=created_at&sort_direction=desc`);
-      (r.events || []).forEach(ev => {
-        const sc = ev.schedule || {}, s0 = dpDate_(sc.start_time), e0 = dpDate_(sc.end_time);
-        if (!s0) return;
-        const hit = dpEventOn_(ev.recurrence_rule, s0, e0, dayStart, dayEnd, tz);
-        if (!hit) return;
-        items.push({ id: ev.id + ':' + date, kind: 'event', number: '', title: ev.name || 'Event', customer: '', note: String(ev.note || '').slice(0, 300),
-          address: [((ev.address || {}).street), ((ev.address || {}).city)].filter(Boolean).join(', '), lat: null, lng: null, phone: '',
-          all_day: !!ev.all_day || (hit.end - hit.start) >= 20 * 3600000, smin: Math.max(0, mins(hit.start)), emin: Math.min(1440, mins(hit.end)),
-          time: hhmm(hit.start) + (hit.end ? '–' + hhmm(hit.end) : ''), employee_ids: [].concat(ev.assigned_employees || []).map(e => (e && e.id) || e).filter(x => typeof x === 'string'),
-          amount: 0, status: 'event', omw: '', started: '', done: '', unit: '', type: '', url: '' });
-      });
-      if (!(r.events || []).length || page >= (r.total_pages || 0)) break;
+    const byId = {};
+    const store = dpEventStore_();
+    eventsStale = !store || Date.now() - store.at > DP.EVENT_SYNC_MS;
+    if (store) store.list.forEach(c => { byId[c.id] = c; });
+    else {
+      // Never synced yet: the newest-created pages hold the current repeating events.
+      for (let page = 1; page <= 4; page++) {
+        const r = hcp_('get', `/events?page=${page}&page_size=100&sort_by=created_at&sort_direction=desc`);
+        (r.events || []).forEach(ev => { byId[ev.id] = dpEvCompact_(ev); });
+        if (!(r.events || []).length || page >= (r.total_pages || 0)) break;
+      }
     }
+    if (first[2].error) throw new Error(first[2].error);
+    (first[2].body.events || []).forEach(ev => { byId[ev.id] = dpEvCompact_(ev); });
+    Object.keys(byId).forEach(id => {
+      const c = byId[id], s0 = dpDate_(c.s), e0 = dpDate_(c.e);
+      if (!s0 || c.x) return;
+      const hit = dpEventOn_(c.r, s0, e0, dayStart, dayEnd, tz);
+      if (!hit) return;
+      const multi = hit.end - hit.start > 86400000 || dpFmt_(hit.start, 'yyyy-MM-dd') !== dpFmt_(new Date(hit.end.getTime() - 1), 'yyyy-MM-dd');
+      items.push({ id: c.id + ':' + date, kind: 'event', number: '', title: c.n || 'Event', customer: '', note: c.no || '',
+        address: c.a || '', lat: null, lng: null, phone: '',
+        all_day: !!c.ad || (Math.min(hit.end, dayEnd) - Math.max(hit.start, dayStart)) >= 20 * 3600000,
+        smin: Math.max(0, mins(hit.start)), emin: Math.min(1440, mins(hit.end)),
+        time: multi ? dpFmt_(hit.start, 'EEE h:mm a') + ' – ' + dpFmt_(hit.end, 'EEE h:mm a') : hhmm(hit.start) + '–' + hhmm(hit.end),
+        employee_ids: c.emp || [], amount: 0, status: 'event', omw: '', started: '', done: '', unit: '', type: '', url: '' });
+    });
   } catch (e) { warnings.push('Events: ' + e.message); }
 
   items.sort((a, b) => a.smin - b.smin || String(a.number).localeCompare(String(b.number)));
@@ -351,7 +377,7 @@ function dpDay_(date, fresh) {
                 now_min: date === dpToday_() ? mins(new Date()) : null,
                 techs: dpEmployees_().map(e => ({ id: e.id, name: e.name, short: (e.first || e.name.split(' ')[0]) + (e.last ? ' ' + e.last.charAt(0) + '.' : ''),
                   initials: ((e.first || '').charAt(0) + (e.last || '').charAt(0)).toUpperCase() || e.name.charAt(0), color: e.color, role: e.role })),
-                items: items, warnings: warnings, loaded_at: dpFmt_(new Date(), 'h:mm a') };
+                items: items, warnings: warnings, events_stale: eventsStale, loaded_at: dpFmt_(new Date(), 'h:mm a') };
   try { cache.put(key, JSON.stringify(out), 60); } catch (_) {}
   return out;
 }
@@ -383,29 +409,106 @@ function dpDayItem_(o, kind, sl, i, mins, hhmm, onDay) {
   };
 }
 
+/** An HCP event cut down to what the Board needs (kept small so the saved list fits in script properties). */
+function dpEvCompact_(ev) {
+  const sc = ev.schedule || {}, a = ev.address || {};
+  return { id: ev.id, n: String(ev.name || '').slice(0, 80), no: String(ev.note || '').slice(0, 200), s: sc.start_time || '', e: sc.end_time || '',
+           ad: !!ev.all_day, r: ev.recurrence_rule || '', a: [a.street, a.city].filter(Boolean).join(', '),
+           emp: [].concat(ev.assigned_employees || []).map(e => (e && e.id) || e).filter(x => typeof x === 'string'),
+           x: ev.deleted_at ? 1 : 0 };
+}
+
+/** The saved event list: { at: ms, list: [compact events] } or null. */
+function dpEventStore_() {
+  const raw = dpPropGet_('DP_EVENTS');
+  if (!raw) return null;
+  try { const o = JSON.parse(raw); return o && Array.isArray(o.list) ? o : null; } catch (_) { return null; }
+}
+
 /**
- * Does an event (with an optional iCal RRULE) happen on [dayStart, dayEnd)? Returns {start, end} of that day's
- * occurrence or null. Handles FREQ=DAILY|WEEKLY|MONTHLY|YEARLY with INTERVAL, BYDAY (incl. 1FR / -1MO),
- * BYMONTHDAY, UNTIL and COUNT — enough for on-call phones, monthly reviews and appointments.
+ * Re-reads every HCP event (≈17 pages) and saves the ones the Board can need: every repeating event, plus one-off
+ * events that end after (today − EVENT_KEEP_DAYS). The Board page calls this in the background when the saved list is
+ * over EVENT_SYNC_MS old; it can also be run by hand from the editor (syncEvents).
+ */
+function dpSyncEvents_(force) {
+  const store = dpEventStore_();
+  if (!force && store && Date.now() - store.at < 10 * 60000) return { ok: true, skipped: true, count: store.list.length };
+  const cache = CacheService.getScriptCache();
+  if (cache.get('dp_ev_syncing')) return { ok: true, busy: true };
+  cache.put('dp_ev_syncing', '1', 180);
+  try {
+    const keepAfter = Date.now() - DP.EVENT_KEEP_DAYS * 86400000, list = [];
+    let pages = 0, seen = 0;
+    for (let page = 1; page <= 60; page++) {
+      const r = hcp_('get', `/events?page=${page}&page_size=100&sort_by=created_at&sort_direction=desc`);
+      pages = page;
+      (r.events || []).forEach(ev => {
+        seen++;
+        const c = dpEvCompact_(ev); if (c.x) return;
+        const end = dpDate_(c.e) || dpDate_(c.s);
+        if (c.r || (end && end.getTime() >= keepAfter)) list.push(c);
+      });
+      if (!(r.events || []).length || page >= (r.total_pages || 0)) break;
+    }
+    dpPropPut_('DP_EVENTS', JSON.stringify({ at: Date.now(), list: list }));
+    console.log(`events_sync ✅ ${seen} events on ${pages} pages → kept ${list.length}`);
+    return { ok: true, count: list.length, scanned: seen };
+  } finally { cache.remove('dp_ev_syncing'); }
+}
+function syncEvents() { console.log(JSON.stringify(dpSyncEvents_(true))); }
+
+/** Script properties hold 9 KB per value — long values are split across numbered keys. */
+function dpPropPut_(key, value) {
+  const p = props_(), size = 8000, n = Math.ceil(value.length / size);
+  const old = Number(p.getProperty(key + '_N') || 0), all = {};
+  for (let i = 0; i < n; i++) all[key + '_' + i] = value.slice(i * size, (i + 1) * size);
+  all[key + '_N'] = String(n);
+  p.setProperties(all);
+  for (let i = n; i < old; i++) p.deleteProperty(key + '_' + i);
+}
+function dpPropGet_(key) {
+  const p = props_(), n = Number(p.getProperty(key + '_N') || 0);
+  if (!n) return '';
+  let out = '';
+  for (let i = 0; i < n; i++) { const part = p.getProperty(key + '_' + i); if (part == null) return ''; out += part; }
+  return out;
+}
+
+/**
+ * Does an event (with an optional iCal RRULE) cover any of [dayStart, dayEnd)? Returns {start, end} of the occurrence
+ * or null. Handles FREQ=DAILY|WEEKLY|MONTHLY|YEARLY with INTERVAL, BYDAY (incl. 1FR / -1MO), BYMONTHDAY, UNTIL and
+ * COUNT (weeks start Sunday, like HCP's WKST=SU). Occurrences longer than a day — the Emergency Phone runs Fri 5 PM →
+ * Thu 5 PM — also show on the days after they start.
  */
 function dpEventOn_(rule, s0, e0, dayStart, dayEnd, tz) {
   const len = e0 && e0 > s0 ? e0 - s0 : 3600000;
-  const at = d => { const t = Utilities.parseDate(Utilities.formatDate(d, tz, 'yyyy-MM-dd') + ' ' + Utilities.formatDate(s0, tz, 'HH:mm'), tz, 'yyyy-MM-dd HH:mm'); return { start: t, end: new Date(t.getTime() + len) }; };
   if (!rule) return (s0 < dayEnd && new Date(s0.getTime() + len) > dayStart) ? { start: s0, end: new Date(s0.getTime() + len) } : null;
-  const r = {}; String(rule).replace(/^RRULE:/i, '').split(';').forEach(kv => { const p = kv.split('='); if (p[0]) r[p[0].toUpperCase()] = (p[1] || '').toUpperCase(); });
+  const r = {}; String(rule).replace(/^RRULE:/i, '').split(';').forEach(kv => { const p = kv.split('='); if (p[0]) r[p[0].trim().toUpperCase()] = (p[1] || '').trim().toUpperCase(); });
   const ymd = d => Utilities.formatDate(d, tz, 'yyyy-MM-dd');
-  const day = ymd(dayStart), first = ymd(s0);
-  if (day < first) return null;
-  if (r.UNTIL) { const u = r.UNTIL.replace(/T.*/, ''); if (day > u.slice(0, 4) + '-' + u.slice(4, 6) + '-' + u.slice(6, 8)) return null; }
-  const interval = Math.max(1, Number(r.INTERVAL) || 1);
   const D = s => { const p = s.split('-').map(Number); return Date.UTC(p[0], p[1] - 1, p[2]); };
+  const back = (s, n) => new Date(D(s) - n * 86400000).toISOString().slice(0, 10);
+  const first = ymd(s0), hhmm = Utilities.formatDate(s0, tz, 'HH:mm');
+  const until = r.UNTIL ? r.UNTIL.slice(0, 4) + '-' + r.UNTIL.slice(4, 6) + '-' + r.UNTIL.slice(6, 8) : '';
+  const span = Math.ceil(len / 86400000), today = ymd(dayStart);
+  for (let k = 0; k <= span; k++) {
+    const day = back(today, k);
+    if (day < first || (until && day > until) || !dpRuleHits_(r, first, day, D)) continue;
+    const t = Utilities.parseDate(day + ' ' + hhmm, tz, 'yyyy-MM-dd HH:mm'), occ = { start: t, end: new Date(t.getTime() + len) };
+    if (occ.start < dayEnd && occ.end > dayStart) return occ;
+  }
+  return null;
+}
+
+/** Is `day` (yyyy-MM-dd) the start date of an occurrence of rule `r` (parsed RRULE) that began on `first`? */
+function dpRuleHits_(r, first, day, D) {
+  const interval = Math.max(1, Number(r.INTERVAL) || 1);
   const daysBetween = Math.round((D(day) - D(first)) / 86400000);
   const dows = ['SU', 'MO', 'TU', 'WE', 'TH', 'FR', 'SA'];
   const dt = new Date(D(day)), dow = dows[dt.getUTCDay()], dom = dt.getUTCDate(), month = dt.getUTCMonth();
   const s0d = new Date(D(first));
   const byday = (r.BYDAY || '').split(',').filter(Boolean);
   const nthOk = tok => {   // "1FR", "-1MO", "FR"
-    const m = /^(-?\d)?([A-Z]{2})$/.exec(tok); if (!m || m[2] !== dow) return false;
+    const m = /^([+-]?\d)?([A-Z]{2})$/.exec(tok); if (!m || m[2] !== dow) return false;
     if (!m[1]) return true;
     const n = Number(m[1]);
     if (n > 0) return Math.ceil(dom / 7) === n;
@@ -425,11 +528,11 @@ function dpEventOn_(rule, s0, e0, dayStart, dayEnd, tz) {
       match = mi % interval === 0 && (byday.length ? byday.some(nthOk) : bmd.length ? bmd.indexOf(dom) !== -1 : dom === s0d.getUTCDate()); break;
     }
     case 'YEARLY': { const yi = dt.getUTCFullYear() - s0d.getUTCFullYear(); periodIndex = yi; match = yi % interval === 0 && month === s0d.getUTCMonth() && dom === s0d.getUTCDate(); break; }
-    default: return null;
+    default: return false;
   }
-  if (!match) return null;
-  if (r.COUNT && periodIndex / interval >= Number(r.COUNT) * Math.max(1, byday.length || 1)) return null;
-  return at(dayStart);
+  if (!match) return false;
+  if (r.COUNT && periodIndex / interval >= Number(r.COUNT) * Math.max(1, byday.length || 1)) return false;
+  return true;
 }
 
 /* ───────────── apply the change ───────────── */
@@ -607,6 +710,20 @@ function hcp_(method, path, body) {
     throw new Error(`HCP ${method.toUpperCase()} ${path.split('?')[0]} → ${code}: ${text.slice(0, 200)}`);
   }
   throw new Error('HCP rate limit — gave up after retries.');
+}
+
+/** Several GETs at once (UrlFetchApp.fetchAll). Returns [{body}|{error}] in order; a rate-limited one is retried alone. */
+function hcpAll_(paths) {
+  const opts = p => ({ url: DP.BASE + p, method: 'get', headers: { Authorization: 'Token ' + apiKey_(), Accept: 'application/json' }, muteHttpExceptions: true });
+  let res;
+  try { res = UrlFetchApp.fetchAll(paths.map(opts)); } catch (e) { res = null; }
+  return paths.map((p, i) => {
+    try {
+      const r = res && res[i], code = r ? r.getResponseCode() : 0;
+      if (code >= 200 && code < 300) { const t = r.getContentText(); return { body: t ? JSON.parse(t) : {} }; }
+      return { body: hcp_('get', p) };   // 429 / error / fetchAll failure → one more try through the normal path
+    } catch (e) { return { error: e.message }; }
+  });
 }
 
 function props_() { return PropertiesService.getScriptProperties(); }

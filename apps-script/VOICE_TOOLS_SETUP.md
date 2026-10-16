@@ -308,8 +308,12 @@ of the Dispatch script.
 - Server side: jobs come from `/jobs?expand[]=appointments` (one entry per appointment that day, so multi-day jobs show
   "Day 2 of 3"; canceled jobs are left off; amounts are HCP cents ÷ 100), estimates from `/estimates`, and events
   (Emergency Phone, appointments, meetings) from `/events` with the repeat rule worked out (daily/weekly/monthly/yearly,
-  every-N, first-Friday style, until/count). The whole day is cached 60 s so several people watching don't multiply
-  HCP calls.
+  every-N, first-Friday style, until/count; a week-long occurrence like the Emergency Phone rotation shows on every day
+  it covers). The whole day is cached 60 s so several people watching don't multiply HCP calls.
+- HCP holds ~1,700 events and reading them all takes ~20 s, so the script keeps a saved list (script properties
+  `DP_EVENTS_*`: every repeating event + one-off events from the last 14 days on) and adds the 100 most recently
+  changed events on every load. When the saved list is over 3 hours old the Board page quietly asks the script to
+  re-read it (`events_sync`) and reloads. Run `syncEvents()` in the editor to force it.
 
 ## Things to watch (unverified until the real run)
 
