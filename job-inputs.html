@@ -1,0 +1,410 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#14365c">
+<meta name="robots" content="noindex">
+<title>Job Inputs</title>
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="icon" href="icon.svg">
+<style>
+  :root {
+    --bg: #f3f4f6; --card: #ffffff; --ink: #14181f; --muted: #5d6573; --line: #d5d9e0; --soft: #eef1f5;
+    --brand: #14365c; --accent: #f2b632; --ok-bg: #e4f4e8; --ok-ink: #14532d; --wait-bg: #fff4d6; --wait-ink: #6b4a00;
+    --err-bg: #fde8e8; --err-ink: #7f1d1d; --net-bg: #e8eefb; --net-ink: #1e3a8a;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root { --bg: #0f1216; --card: #191d23; --ink: #eef1f5; --muted: #9aa3b0; --line: #2e343d; --soft: #232831;
+      --ok-bg: #12301d; --ok-ink: #b9f0c9; --err-bg: #3a1515; --err-ink: #ffc9c9; --wait-bg: #3a2e0f; --wait-ink: #ffe3a3; --net-bg: #16213f; --net-ink: #c7d6ff; }
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; background: var(--bg); color: var(--ink); }
+  body { font: 16px/1.45 -apple-system, "Segoe UI", Roboto, Arial, sans-serif; padding: 16px 16px calc(24px + env(safe-area-inset-bottom)); max-width: 1040px; margin: 0 auto; }
+  header { display: flex; align-items: center; gap: 10px; margin: 4px 0 16px; }
+  header .dot { width: 34px; height: 34px; border-radius: 9px; background: var(--brand); display: grid; place-items: center; color: var(--accent); font-weight: 800; text-decoration: none; flex: none; }
+  h1 { font-size: 21px; margin: 0; flex: 1; }
+  header a.nav { font-size: 15px; font-weight: 600; color: var(--brand); text-decoration: none; white-space: nowrap; }
+  @media (prefers-color-scheme: dark) { header a.nav { color: var(--accent); } }
+  .card { background: var(--card); border: 1px solid var(--line); border-radius: 14px; padding: 14px; margin-bottom: 14px; }
+  label { display: block; font-weight: 650; margin-bottom: 8px; }
+  .hint { font-size: 14px; color: var(--muted); margin-top: 8px; }
+  input[type=text], input[type=search] { font: inherit; color: var(--ink); background: var(--card); border: 1px solid var(--line); border-radius: 10px; padding: 10px 12px; }
+  .btn { padding: 12px 16px; border-radius: 12px; font: 700 16px/1 inherit; font-family: inherit; border: 1px solid var(--line); background: var(--card); color: var(--ink); cursor: pointer; }
+  .btn.go { background: var(--accent); color: #1a1300; border-color: transparent; font-size: 17px; padding: 14px 20px; }
+  .btn.sm { padding: 8px 12px; font-size: 14px; border-radius: 9px; }
+  .btn:disabled { opacity: .5; cursor: default; }
+  .hidden { display: none !important; }
+  .status { display: none; white-space: pre-wrap; border-radius: 12px; padding: 12px 14px; margin-top: 12px; font-size: 15px; }
+  .status.ok { display: block; background: var(--ok-bg); color: var(--ok-ink); }
+  .status.err { display: block; background: var(--err-bg); color: var(--err-ink); }
+  .status.wait { display: block; background: var(--wait-bg); color: var(--wait-ink); }
+  .status.busy { display: block; background: var(--soft); color: var(--muted); }
+  .drop { border: 2px dashed var(--line); border-radius: 14px; padding: 26px 16px; text-align: center; background: var(--soft); cursor: pointer; }
+  .drop.over { border-color: var(--brand); background: var(--card); }
+  .drop b { display: block; font-size: 17px; margin-bottom: 4px; }
+  .drop input { display: none; }
+  .chips { display: flex; flex-wrap: wrap; gap: 8px; margin: 10px 0 2px; }
+  .chip { border-radius: 999px; padding: 6px 12px; font-size: 14px; font-weight: 650; background: var(--soft); color: var(--ink); }
+  .chip.add { background: var(--ok-bg); color: var(--ok-ink); } .chip.net { background: var(--net-bg); color: var(--net-ink); }
+  .chip.pending { background: var(--wait-bg); color: var(--wait-ink); } .chip.flag { background: var(--err-bg); color: var(--err-ink); }
+  .apply { display: flex; flex-wrap: wrap; align-items: center; gap: 12px; margin-top: 12px; }
+  .grp { border: 1px solid var(--line); border-radius: 12px; margin-top: 12px; overflow: hidden; }
+  .grp .hd { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 14px; padding: 10px 12px; background: var(--soft); }
+  .grp .hd b { font-size: 17px; }
+  .grp .hd .st { font-size: 13px; font-weight: 650; border-radius: 999px; padding: 3px 10px; }
+  .grp .hd .st.ready { background: var(--ok-bg); color: var(--ok-ink); } .grp .hd .st.pending { background: var(--wait-bg); color: var(--wait-ink); }
+  .grp .hd .st.flag { background: var(--err-bg); color: var(--err-ink); } .grp .hd .st.skipped, .grp .hd .st.info { background: var(--card); color: var(--muted); border: 1px solid var(--line); }
+  .grp .hd .why { flex-basis: 100%; font-size: 14px; color: var(--muted); }
+  .grp .hd .fix { flex-basis: 100%; display: flex; gap: 8px; align-items: center; }
+  .grp .hd .fix input { width: 150px; }
+  table { width: 100%; border-collapse: collapse; font-size: 14px; }
+  th, td { text-align: left; padding: 8px 10px; border-top: 1px solid var(--line); vertical-align: top; }
+  th { font-size: 12px; text-transform: uppercase; letter-spacing: .04em; color: var(--muted); border-top: 0; }
+  td.n, th.n { text-align: right; white-space: nowrap; }
+  td.part { white-space: nowrap; font-weight: 650; }
+  td .why { display: block; font-size: 13px; color: var(--muted); margin-top: 2px; }
+  td .why.net { color: var(--net-ink); } td .why.held, td .why.flag { color: var(--err-ink); } td .why.pending { color: var(--wait-ink); }
+  tr.off td { opacity: .55; }
+  tr.off td .why { opacity: 1; }
+  input[type=checkbox] { width: 20px; height: 20px; }
+  .res { margin-top: 6px; }
+  .res div { padding: 6px 0; border-top: 1px solid var(--line); }
+  details summary { cursor: pointer; font-weight: 650; color: var(--muted); padding: 6px 0; }
+  footer { text-align: center; font-size: 13px; color: var(--muted); margin-top: 18px; }
+  footer a { color: inherit; }
+  @media (max-width: 640px) { th.hide, td.hide { display: none; } body { font-size: 15px; } }
+</style>
+</head>
+<body>
+<header>
+  <a class="dot" href="home.html" aria-label="All tools">GR</a>
+  <h1>Job Inputs</h1>
+  <a class="nav" href="home.html">All tools →</a>
+</header>
+
+<div class="card hidden" id="codeCard">
+  <label for="code">Your access code</label>
+  <input type="text" id="code" inputmode="numeric" autocomplete="off" placeholder="8-digit code" enterkeyhint="go" style="width:100%">
+  <button class="btn go" id="codeGo" style="margin-top:10px;width:100%">Continue</button>
+  <div class="status" id="codeMsg"></div>
+</div>
+
+<div id="app" class="hidden">
+  <div class="card">
+    <label>Weinstein material → HCP Job Inputs</label>
+    <div class="drop" id="drop">
+      <b>Drop the Weinstein CSV here, or tap to choose it</b>
+      <span class="hint">Weinstein web store → Order History → <i>Order History Detail</i> → Export CSV. Any date range; lines already posted are skipped.</span>
+      <input type="file" id="file" accept=".csv,text/csv,text/plain">
+    </div>
+    <div class="status" id="fileMsg"></div>
+    <div class="hint" id="pendingNote"></div>
+  </div>
+
+  <div class="card hidden" id="planCard">
+    <label>What will happen</label>
+    <div class="chips" id="chips"></div>
+    <div class="apply">
+      <button class="btn go" id="applyBtn">Apply all</button>
+      <span class="hint" id="applyHint" style="margin:0"></span>
+    </div>
+    <div class="status" id="applyMsg"></div>
+    <div class="res hidden" id="results"></div>
+    <div id="groups"></div>
+  </div>
+</div>
+
+<footer><a href="#" id="forget">Not you? Change code</a></footer>
+
+<script src="config.js"></script>
+<script>
+(function () {
+  var ENDPOINT = (window.GR_ENDPOINTS && window.GR_ENDPOINTS.jobInputs) || "";
+  var KEY = "grTechCode";
+  function $(id) { return document.getElementById(id); }
+  function get(k) { try { return localStorage.getItem(k) || ""; } catch (e) { return ""; } }
+  function put(k, v) { try { localStorage.setItem(k, v); } catch (e) {} }
+  function drop(k) { try { localStorage.removeItem(k); } catch (e) {} }
+  function show(el, on) { el.classList.toggle("hidden", !on); }
+  function say(id, text, kind) { var m = $(id); m.textContent = text || ""; m.className = "status" + (text ? " " + (kind || "ok") : ""); }
+  function el(tag, cls, text) { var e = document.createElement(tag); if (cls) e.className = cls; if (text != null) e.textContent = text; return e; }
+  function money(c) { var n = (Number(c) || 0) / 100; return (n < 0 ? "-$" : "$") + Math.abs(n).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 }); }
+  function recent(text) { try { var r = JSON.parse(get("grRecent") || "[]"); r.unshift({ tool: "Job Inputs", text: text, at: Date.now() }); put("grRecent", JSON.stringify(r.slice(0, 20))); } catch (e) {} }
+  function uid() { return Date.now().toString(36) + Math.random().toString(36).slice(2, 8); }
+
+  var S = { code: "", who: "", lines: [], plan: null, over: {}, fileName: "", applied: false };
+
+  // ---------- server ----------
+  function post(data, timeoutMs) {
+    data.token = S.code;
+    if (ENDPOINT.indexOf("https://") !== 0) return Promise.resolve({ ok: false, error: "Job Inputs isn't connected yet. Add its URL to config.js as jobInputs." });
+    var ctrl = window.AbortController ? new AbortController() : null;
+    var timer = ctrl ? setTimeout(function () { ctrl.abort(); }, timeoutMs || 60000) : null;
+    return fetch(ENDPOINT, { method: "POST", headers: { "Content-Type": "text/plain" }, body: JSON.stringify(data), signal: ctrl ? ctrl.signal : undefined })
+      .then(function (r) { return r.json(); })
+      .then(function (r) { if (timer) clearTimeout(timer); return r; }, function (e) { if (timer) clearTimeout(timer); throw e; });
+  }
+  function api(action, data, timeoutMs) {
+    data = data || {}; data.action = action;
+    return post(data, timeoutMs).catch(function () { return { ok: false, error: "Couldn't reach the server — check the connection and try again.", net: true }; })
+      .then(function (r) { if (!r.ok && action !== "init" && /access code|Too many wrong/.test(r.error || "")) { drop(KEY); S.code = ""; showCode(r.error); } return r; });
+  }
+
+  // ---------- access code ----------
+  function showCode(msg) { show($("codeCard"), true); show($("app"), false); say("codeMsg", msg, "err"); }
+  function start(code) {
+    S.code = code; say("codeMsg", "Checking…", "busy");
+    api("init").then(function (r) {
+      if (!r.ok) { showCode(r.error); return; }
+      put(KEY, code); S.who = r.who || "";
+      show($("codeCard"), false); show($("app"), true); say("codeMsg", "");
+      var pn = $("pendingNote"); pn.innerHTML = "";
+      if (r.pending) { pn.appendChild(document.createTextNode("⏳ " + r.pending + " line" + (r.pending === 1 ? "" : "s") + " from earlier uploads " + (r.pending === 1 ? "is" : "are") + " waiting for " + r.pending_jobs + " job" + (r.pending_jobs === 1 ? "" : "s") + " to be finished in HCP — they post themselves every morning. ")); }
+      if (r.sheet_url) { var a = el("a", null, "Open the upload log"); a.href = r.sheet_url; a.target = "_blank"; a.rel = "noopener"; pn.appendChild(a); }
+    });
+  }
+  $("codeGo").onclick = function () { var c = $("code").value.trim(); if (c) start(c); };
+  $("code").onkeydown = function (e) { if (e.key === "Enter") $("codeGo").click(); };
+  $("forget").onclick = function (e) { e.preventDefault(); drop(KEY); S.code = ""; $("code").value = ""; showCode(""); };
+  if (get(KEY)) start(get(KEY)); else showCode("");
+
+  // ---------- the CSV ----------
+  var COLS = {
+    order: ["Order Number", "Order #", "Invoice Number", "Invoice #"], date: ["Ship Date", "Order Date", "Invoice Date"],
+    po: ["Customer PO#", "Customer PO", "Job Name", "Job Number"], part: ["Product #", "Product Number", "Part Number", "Item Number"],
+    desc: ["Description", "Item Description"], comment: ["Comment", "Comments", "Notes"], qty: ["Quantity", "Qty Shipped", "Qty"],
+    price: ["Price", "Unit Price", "Net Price"], ext: ["Ext Price", "Extension", "Extended Price", "Line Total"], uom: ["Qty UOM", "UOM", "U/M"]
+  };
+  var STOCK_WORDS = ["inventory", "stock", "truck", "shop", "van", "warehouse"];
+  function norm(s) { return String(s || "").toLowerCase().replace(/[^a-z0-9]/g, ""); }
+  function splitLine(line) {
+    var s = line.replace(/[\r\n]+$/, "");
+    if (s.charAt(0) === '"' && s.charAt(s.length - 1) === '"') return s.slice(1, -1).split('","');   // Weinstein doesn't escape inch marks — never trust the quoting
+    return s.split(",").map(function (c) { return c.trim().replace(/^"|"$/g, ""); });
+  }
+  function findCol(headers, cands) {
+    var normed = {}; headers.forEach(function (h, i) { normed[norm(h)] = i; });
+    for (var i = 0; i < cands.length; i++) if (normed.hasOwnProperty(norm(cands[i]))) return normed[norm(cands[i])];
+    for (i = 0; i < cands.length; i++) { var nc = norm(cands[i]); for (var k in normed) if (nc && k.indexOf(nc) !== -1) return normed[k]; }
+    return -1;
+  }
+  function toFloat(v) {
+    var s = String(v || "").trim().replace(/\$/g, "").replace(/,/g, "");
+    if (!s || s === "*") return 0;
+    var neg = false;
+    if (/^\(.*\)$/.test(s)) { neg = true; s = s.slice(1, -1); }
+    if (/-$/.test(s)) { neg = true; s = s.slice(0, -1); }
+    if (/CR$/i.test(s)) { neg = true; s = s.slice(0, -2).trim(); }
+    var f = parseFloat(s); if (isNaN(f)) return 0;
+    return neg ? -f : f;
+  }
+  function jobRef(raw) { var m = /(?:^|[^\d])(\d{4,6})(?:\s*-\s*(\d{1,2}))?(?!\d)/.exec(String(raw || "")); return m ? (m[2] ? m[1] + "-" + parseInt(m[2], 10) : m[1]) : ""; }
+  function classifyPO(t) {
+    var body = String(t || "").trim().replace(/^\s*PO\s*#?\s*/i, "").trim(), low = body.toLowerCase();
+    if (/^return/.test(low) || low === "rtn" || /^credit/.test(low)) return { kind: "return", ref: "" };
+    var ref = jobRef(body); if (ref) return { kind: "purchase", ref: ref };
+    for (var i = 0; i < STOCK_WORDS.length; i++) if (low.indexOf(STOCK_WORDS[i]) !== -1) return { kind: "stock", ref: "" };
+    return { kind: "unknown", ref: "" };
+  }
+  function parseCsv(text) {
+    var raw = text.split(/\r?\n/), headerIdx = -1, headers = null;
+    for (var i = 0; i < Math.min(raw.length, 20); i++) { var cells = splitLine(raw[i]); if (findCol(cells, COLS.part) !== -1 && findCol(cells, COLS.qty) !== -1) { headerIdx = i; headers = cells; break; } }
+    if (headerIdx === -1) throw new Error("That doesn't look like a Weinstein Order History Detail export — no header row with Product # and Quantity.");
+    var col = {}; Object.keys(COLS).forEach(function (k) { col[k] = findCol(headers, COLS[k]); });
+    var missing = ["order", "part", "qty", "ext", "po"].filter(function (k) { return col[k] === -1; });
+    if (missing.length) throw new Error("Columns not found: " + missing.join(", ") + ". Headers were: " + headers.join(" | "));
+    var lines = [], warns = [];
+    for (var n = headerIdx + 1; n < raw.length; n++) {
+      if (!raw[n].trim()) continue;
+      var c = splitLine(raw[n]);
+      if (c.length !== headers.length) { warns.push("Row " + (n + 1) + ": " + c.length + " fields (expected " + headers.length + ") — skipped"); continue; }
+      var g = function (k) { return col[k] >= 0 && col[k] < c.length ? c[col[k]].trim() : ""; };
+      var part = g("part"), qs = g("qty"), es = g("ext");
+      if ((part.toUpperCase() === "C" || part === "") && (qs === "*" || qs === "" || es === "*" || es === "")) continue;   // comment row
+      var qty = toFloat(qs), ext = toFloat(es);
+      if (qty === 0 && ext === 0) continue;
+      if (!part) { warns.push("Row " + (n + 1) + ": no part number — skipped"); continue; }
+      if (ext === 0 && qty !== 0) { var up = toFloat(g("price")); if (up) ext = up * qty; }
+      var po = g("po"), comment = g("comment"), cls = classifyPO(po), orig = "", ref = cls.ref, kind = cls.kind;
+      if (kind === "return" || qty < 0) {
+        kind = "return";
+        var m1 = /Original\s+Sale\s*:\s*([A-Za-z0-9.\-]+)/i.exec(comment); orig = m1 ? m1[1] : "";
+        var m2 = /Cus\s*PO\s*:\s*([^*]+?)\s*(?:\*|$)/i.exec(comment); if (m2) ref = jobRef(m2[1]);
+        if (!ref) ref = jobRef(po);
+        qty = -Math.abs(qty); ext = -Math.abs(ext);
+      }
+      lines.push({ order: g("order"), date: g("date"), po: po, ref: ref, part: part, desc: g("desc") || part, qty: qty, ext: ext, uom: g("uom"), kind: kind, orig: orig, row: n + 1 });
+    }
+    return { lines: lines, warns: warns };
+  }
+  function readFile(file) {
+    return new Promise(function (resolve, reject) {
+      var fr = new FileReader();
+      fr.onerror = function () { reject(new Error("Couldn't read that file.")); };
+      fr.onload = function () {
+        var buf = fr.result, text;
+        try { text = new TextDecoder("utf-8", { fatal: true }).decode(buf); } catch (e) { try { text = new TextDecoder("windows-1252").decode(buf); } catch (e2) { text = new TextDecoder().decode(buf); } }
+        resolve(text.replace(/^﻿/, ""));
+      };
+      fr.readAsArrayBuffer(file);
+    });
+  }
+  function lineKey(l) { return l.order + "|" + l.part.toUpperCase() + "|" + l.qty + "|" + l.ext; }
+
+  // ---------- file in → preview ----------
+  var dz = $("drop");
+  dz.onclick = function () { $("file").click(); };
+  dz.ondragover = function (e) { e.preventDefault(); dz.classList.add("over"); };
+  dz.ondragleave = function () { dz.classList.remove("over"); };
+  dz.ondrop = function (e) { e.preventDefault(); dz.classList.remove("over"); if (e.dataTransfer.files && e.dataTransfer.files[0]) load(e.dataTransfer.files[0]); };
+  $("file").onchange = function () { if (this.files[0]) load(this.files[0]); this.value = ""; };
+
+  function load(file) {
+    S.over = {}; S.applied = false; S.fileName = file.name;
+    say("fileMsg", "Reading " + file.name + "…", "busy"); show($("planCard"), false);
+    readFile(file).then(function (text) {
+      var p = parseCsv(text);
+      if (!p.lines.length) throw new Error("No material lines in " + file.name + "." + (p.warns.length ? "\n" + p.warns.join("\n") : ""));
+      S.lines = p.lines;
+      var orders = {}, refs = {}, dates = [];
+      p.lines.forEach(function (l) { orders[l.order] = 1; if (l.ref) refs[l.ref] = 1; var m = /^(\d{1,2})\/(\d{1,2})\/(\d{4})/.exec(l.date); if (m) dates.push(new Date(+m[3], +m[1] - 1, +m[2])); });
+      dates.sort(function (a, b) { return a - b; });
+      var span = dates.length ? dates[0].toLocaleDateString() + (dates.length > 1 ? " – " + dates[dates.length - 1].toLocaleDateString() : "") : "";
+      say("fileMsg", "📄 " + file.name + ": " + p.lines.length + " lines · " + Object.keys(orders).length + " orders · " + Object.keys(refs).length + " job numbers" + (span ? " · shipped " + span : "") + (p.warns.length ? "\n⚠️ " + p.warns.join("\n⚠️ ") : ""), p.warns.length ? "wait" : "ok");
+      preview();
+    }).catch(function (e) { say("fileMsg", "❌ " + e.message, "err"); });
+  }
+
+  function linesForServer() { return S.lines.map(function (l) { var o = {}; for (var k in l) o[k] = l[k]; if (S.over[lineKey(l)]) { o.ref = S.over[lineKey(l)]; if (o.kind === "unknown") o.kind = "purchase"; } return o; }); }
+
+  function preview() {
+    show($("planCard"), true); $("groups").innerHTML = ""; $("chips").innerHTML = ""; show($("results"), false); say("applyMsg", "");
+    $("applyBtn").disabled = true; $("applyHint").textContent = "";
+    var refs = {}; S.lines.forEach(function (l) { var r = S.over[lineKey(l)] || l.ref; if (r) refs[r] = 1; });
+    var n = Object.keys(refs).length;
+    say("applyMsg", "⏳ Checking " + n + " job" + (n === 1 ? "" : "s") + " in Housecall Pro — status, what's already on each job, returns… about " + Math.max(10, Math.round(n * 2.5)) + " seconds.", "busy");
+    api("preview", { lines: linesForServer() }, 330000).then(function (r) {
+      if (!r.ok) { say("applyMsg", "❌ " + r.error, "err"); return; }
+      S.plan = r; say("applyMsg", ""); renderPlan();
+    });
+  }
+
+  // ---------- render the plan ----------
+  var KLABEL = { add: "add", net: "return netted", skip: "skip", held: "held", warranty: "warranty — left off", flag: "needs attention", pending: "waiting", info: "not for a job" };
+  function totals() {
+    var t = { add: 0, net: 0, addAmt: 0, jobs: {}, pending: 0, held: 0, flag: 0, skip: 0, info: 0 };
+    (S.plan.groups || []).forEach(function (g) { g.items.forEach(function (it) {
+      if ((it.k === "add" || it.k === "held") && it.use) { t.add++; t.addAmt += it.total || 0; t.jobs[g.ref] = 1; }
+      else if (it.k === "net" && it.use) { t.net++; t.jobs[g.ref] = 1; }
+      else if (it.k === "held") t.held++;
+      else if (it.k === "pending") t.pending++;
+      else if (it.k === "flag") t.flag++;
+      else if (it.k === "skip" || it.k === "warranty") t.skip++;
+      else t.info++;
+    }); });
+    t.jobCount = Object.keys(t.jobs).length;
+    return t;
+  }
+  function renderChips() {
+    var t = totals(), box = $("chips"); box.innerHTML = "";
+    if (t.add) box.appendChild(el("span", "chip add", t.add + " line" + (t.add === 1 ? "" : "s") + " to add · " + money(t.addAmt) + " · " + t.jobCount + " job" + (t.jobCount === 1 ? "" : "s")));
+    if (t.net) box.appendChild(el("span", "chip net", t.net + " return" + (t.net === 1 ? "" : "s") + " to net"));
+    if (t.pending) box.appendChild(el("span", "chip pending", t.pending + " waiting for jobs to finish"));
+    if (t.held) box.appendChild(el("span", "chip flag", t.held + " held (duplicate part)"));
+    if (t.flag) box.appendChild(el("span", "chip flag", t.flag + " need a job number"));
+    if (t.skip) box.appendChild(el("span", "chip", t.skip + " already on HCP / skipped"));
+    if (t.info) box.appendChild(el("span", "chip", t.info + " stock, not for a job"));
+    var can = (t.add + t.net) > 0 && !S.applied;
+    $("applyBtn").disabled = !can;
+    $("applyBtn").textContent = S.applied ? "Applied" : can ? "Apply all — post " + (t.add + t.net) + " line" + (t.add + t.net === 1 ? "" : "s") + " to " + t.jobCount + " job" + (t.jobCount === 1 ? "" : "s") : "Nothing to post";
+    $("applyHint").textContent = S.applied ? "" : (t.pending ? "Waiting lines are saved too and post themselves once the job is finished." : (can ? "Untick a line to leave it off." : ""));
+  }
+  function renderPlan() {
+    renderChips();
+    var box = $("groups"); box.innerHTML = "";
+    var order = { ready: 0, flag: 1, pending: 2, skipped: 3, info: 4 };
+    var groups = (S.plan.groups || []).slice().sort(function (a, b) { return (order[a.state] - order[b.state]) || String(a.ref).localeCompare(String(b.ref), undefined, { numeric: true }); });
+    var quiet = groups.filter(function (g) { return g.state === "skipped" || g.state === "info"; });
+    groups.filter(function (g) { return g.state !== "skipped" && g.state !== "info"; }).forEach(function (g, i) { box.appendChild(renderGroup(g, i)); });
+    if (quiet.length) {
+      var d = el("details"); d.appendChild(el("summary", null, "Already on HCP / not for a job (" + quiet.reduce(function (s, g) { return s + g.items.length; }, 0) + " lines)"));
+      quiet.forEach(function (g, i) { d.appendChild(renderGroup(g, "q" + i)); });
+      box.appendChild(d);
+    }
+  }
+  var STLABEL = { ready: "ready", pending: "waiting", flag: "needs attention", skipped: "nothing to do", info: "not for a job" };
+  function renderGroup(g, i) {
+    var wrap = el("div", "grp"), hd = el("div", "hd");
+    var title = g.job ? "Job #" + g.job.number + " · " + g.job.customer : (g.ref ? "Job " + g.ref : (g.state === "flag" ? "No job number" : g.reason));
+    hd.appendChild(el("b", null, title));
+    if (g.job) hd.appendChild(el("span", "hint", [g.job.status, g.job.scheduled].filter(Boolean).join(" · ")));
+    hd.appendChild(el("span", "st " + g.state, STLABEL[g.state] || g.state));
+    var sum = g.items.reduce(function (s, it) { return s + ((it.k === "add" || it.k === "held") && it.use ? it.total : 0); }, 0);
+    if (sum) hd.appendChild(el("span", "hint", money(sum) + " to add"));
+    if (g.reason && (g.job || g.ref)) hd.appendChild(el("span", "why", g.reason));
+    if (g.state === "flag" || g.state === "pending") {
+      var fix = el("div", "fix"), inp = el("input"); inp.type = "text"; inp.placeholder = g.ref ? "Different job #" : "Job #"; inp.inputMode = "numeric";
+      var b = el("button", "btn sm", "Use this job"); b.type = "button";
+      b.onclick = function () { var v = inp.value.trim(); if (!/^\d{4,6}(-\d{1,2})?$/.test(v)) { inp.focus(); return; } g.items.forEach(function (it) { (it.keys || []).forEach(function (k) { S.over[k] = v; }); }); preview(); };
+      inp.onkeydown = function (e) { if (e.key === "Enter") b.click(); };
+      fix.appendChild(el("span", "hint", g.state === "flag" ? "Know the job? " : "Wrong number? ")); fix.appendChild(inp); fix.appendChild(b); hd.appendChild(fix);
+    }
+    wrap.appendChild(hd);
+    var t = el("table"), th = el("tr");
+    [["", ""], ["Part", "part"], ["Description", ""], ["Qty", "n"], ["Each", "n hide"], ["Total", "n"], ["Order", "hide"]].forEach(function (h) { var c = el("th", h[1], h[0]); th.appendChild(c); });
+    t.appendChild(th);
+    g.items.forEach(function (it) {
+      var tr = el("tr", it.use ? "" : "off"), c0 = el("td");
+      if (it.k === "add" || it.k === "net" || it.k === "held") {
+        var cb = el("input"); cb.type = "checkbox"; cb.checked = !!it.use; cb.disabled = S.applied;
+        cb.title = it.k === "held" ? "Upload anyway" : "Include this line";
+        cb.onchange = function () { it.use = cb.checked; tr.classList.toggle("off", !it.use); renderChips(); };
+        c0.appendChild(cb);
+      }
+      tr.appendChild(c0);
+      tr.appendChild(el("td", "part", it.part));
+      var cd = el("td", null, it.name || "");
+      var why = it.k === "held" ? "Held — " + it.reason + (S.applied ? "" : " (tick the box to upload anyway)") : it.k === "add" ? (it.reason || "") : (it.k === "net" || it.k === "pending") && it.reason ? it.reason : (KLABEL[it.k] + (it.reason ? " — " + it.reason : ""));
+      if (why) cd.appendChild(el("span", "why " + it.k, why));
+      tr.appendChild(cd);
+      tr.appendChild(el("td", "n", String(it.qty)));
+      tr.appendChild(el("td", "n hide", money(it.cents)));
+      tr.appendChild(el("td", "n", it.k === "net" || it.k === "add" || it.k === "held" ? money(it.total) : ""));
+      tr.appendChild(el("td", "hide", (it.order || "") + (it.date ? " · " + it.date : "")));
+      t.appendChild(tr);
+    });
+    wrap.appendChild(t);
+    return wrap;
+  }
+
+  // ---------- apply ----------
+  $("applyBtn").onclick = function () {
+    if (!S.plan || S.applied) return;
+    var groups = [], pending = [], reasons = {}, t = totals();
+    S.plan.groups.forEach(function (g) {
+      if (g.job && g.state === "ready") {
+        var items = g.items.filter(function (it) { return it.use && it.payload && (it.k === "add" || it.k === "net" || it.k === "held"); })
+          .map(function (it) { return { k: it.k, use: true, order: it.order, part: it.part, qty: it.qty, cents: it.cents, keys: it.keys, payload: it.payload }; });
+        if (items.length) groups.push({ job_id: g.job.id, ref: g.job.number, customer: g.job.customer, items: items });
+      }
+      g.items.forEach(function (it) {
+        if (it.k === "pending" || (it.k === "held" && !it.use)) { if (it.line) { pending.push(it.line); reasons[lineKey(it.line)] = (g.job ? "job " + g.job.number + ": " : "") + (it.k === "held" ? "held — " + it.reason : (g.reason || it.reason)); } }
+      });
+    });
+    var btn = $("applyBtn"); btn.disabled = true; btn.textContent = "Posting…";
+    say("applyMsg", "⏳ Posting to " + groups.length + " job" + (groups.length === 1 ? "" : "s") + "…", "busy");
+    api("apply", { req_id: uid(), groups: groups, pending: pending, pending_reasons: reasons }, 330000).then(function (r) {
+      if (!r.ok) { say("applyMsg", "❌ " + r.error, "err"); btn.disabled = false; renderChips(); return; }
+      S.applied = true;
+      say("applyMsg", r.message, r.failed ? "wait" : "ok");
+      var res = $("results"); res.innerHTML = ""; show(res, true);
+      (r.results || []).forEach(function (x) { res.appendChild(el("div", null, (x.ok ? "✅ Job " + x.ref + ": " + x.count + " line" + (x.count === 1 ? "" : "s") + " posted" + (x.skipped ? " (" + x.skipped + " already there)" : "") : "❌ Job " + x.ref + ": " + x.error))); });
+      recent(S.fileName + " — " + r.posted + " posted, " + r.netted + " returns netted, " + r.saved + " waiting");
+      renderPlan();
+    });
+  };
+})();
+</script>
+</body>
+</html>

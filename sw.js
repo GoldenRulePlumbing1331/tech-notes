@@ -4,7 +4,7 @@
  * a page after it ships. Nothing from script.google.com is ever cached — those are the live calls.
  * Bump CACHE when a file is removed or renamed; ordinary edits don't need it. */
 var CACHE = "gr-tools-v2";
-var ASSETS = ["home.html", "index.html", "new-job.html", "dispatch.html", "estimate.html", "order.html", "clock.html",
+var ASSETS = ["home.html", "index.html", "new-job.html", "dispatch.html", "estimate.html", "order.html", "clock.html", "job-inputs.html",
               "config.js", "manifest.webmanifest", "icon.svg"];
 
 self.addEventListener("install", function (e) {

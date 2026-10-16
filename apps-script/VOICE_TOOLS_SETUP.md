@@ -198,6 +198,37 @@ SupplyZone's Quick Pad list is still offered on the done screen.
   and the tech's review happen live). They open offline but their Build/Look up buttons say the server can't
   be reached; a "save the dictation and resume later" outbox for those is the natural next step if needed.
 
+## Job Inputs — Weinstein CSV → HCP (added 2026-10-16)
+
+Replaces `D:\Job_Uploads` (the Python scripts). Same rules, no laptop: the office opens **job-inputs.html**,
+drops the Weinstein *Order History Detail* CSV on it, the page parses it in the browser (split on `","` so
+unescaped inch marks don't break rows; comment rows skipped; `PO # 49040-1` → job number; `PO # return` →
+original sale + job from the Comment), and **HCP Job Inputs** (`hcp_job_inputs.gs`) builds a plan:
+
+| Line | What happens |
+|---|---|
+| Job finished (complete rated/unrated) | **Add** to the job's Job Inputs — name prefixed with the part #, description `Weinstein #<order> <ship date>`, unit cost = extension ÷ qty in cents |
+| Job not finished / not in HCP yet | **Waiting** — saved in the sheet's *Pending* tab; `retryPending()` runs every morning and posts it once the job is complete, then emails `REPORT_TO` |
+| Same order # + part # already on the job (tagged), or an untagged entry with the same part/qty/cost | **Skip** |
+| Same part already on the job (any order) and the line is $100+ | **Held** — unticked; tick "upload anyway" if it really is a second one |
+| Return | **Netted**: against a purchase in the same file first, then against the HCP entry (qty reduced in place, "(RETURNED)" at zero), by part # alone if there's exactly one candidate; otherwise flagged |
+| Several segments (49040-1, 49040-2) for a bare 49040 | The one scheduled closest to the ship date (shown as "auto-picked segment") |
+| Job canceled / no job number / unknown PO text | **Needs attention** — type the job # in the group's box and the plan refreshes |
+| Stock / truck / shop PO | Listed under "not for a job", nothing posted |
+| Job tagged in `WARRANTY_TAGS` (off by default) | Water-heater unit left off, accessories post |
+
+**Apply all** is the default button: posts every ticked add/net line (one `bulk_update` per job), logs each
+line in the *Posted* tab (so a re-upload or overlapping export skips it), and saves the waiting lines.
+Replays are safe (`req_id`), and the script re-reads the job's inputs before posting so two tabs can't
+double-add. There is still no API to delete a Job Input — fix mistakes in HCP; the description says which
+order the line came from.
+
+Setup: new Apps Script project **HCP Job Inputs** ← `hcp_job_inputs.gs`; properties `HCP_API_KEY`,
+`TECH_CODES`, `REPORT_TO` (optional `REPORT_CC`, `WARRANTY_TAGS`); run `setupSheet()` → `verifyAccess()` →
+`installDailyTrigger()`; deploy as web app (Execute as Me, Anyone) → URL into `config.js` as `jobInputs`.
+Tested against a fake HCP: 7 backend checks (plan, netting, held, warranty, apply, replay, morning retry)
+and 14 browser checks (real CSV parse → plan → untick → apply).
+
 ## Things to watch (unverified until the real run)
 
 1. Dispatch/schedule writes with a Company key (verifyAccess tells you).
