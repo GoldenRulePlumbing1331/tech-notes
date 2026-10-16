@@ -127,6 +127,7 @@
   function el(tag, cls, text) { var e = document.createElement(tag); if (cls) e.className = cls; if (text != null) e.textContent = text; return e; }
   function tfmt(iso) { return new Date(iso).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" }); }
   function dfmt(iso) { return new Date(iso).toLocaleString([], { weekday: "short", hour: "numeric", minute: "2-digit" }); }
+  function localDay() { var d = new Date(); return d.getFullYear() + "-" + String(d.getMonth() + 1).padStart(2, "0") + "-" + String(d.getDate()).padStart(2, "0"); }   // phone's own date, not UTC
   function recent(text) { try { var r = JSON.parse(get("grRecent") || "[]"); r.unshift({ tool: "Job Clock", text: text, at: Date.now() }); put("grRecent", JSON.stringify(r.slice(0, 20))); } catch (e) {} }
 
   var S = { code: "", who: "", jobs: [], job: null, online: true };
@@ -156,7 +157,7 @@
       put(KEY, code);
       show($("codeCard"), false); show($("app"), true); say("codeMsg", "");
       if (r.ok) { S.who = r.who || ""; S.jobs = r.jobs || []; put("grClockJobs", JSON.stringify({ day: r.today, jobs: S.jobs })); }
-      else { try { var c = JSON.parse(get("grClockJobs") || "null"); if (c && c.day === new Date().toISOString().slice(0, 10)) S.jobs = c.jobs; } catch (e) {} }
+      else { try { var c = JSON.parse(get("grClockJobs") || "null"); if (c && c.day === localDay()) S.jobs = c.jobs; } catch (e) {} }
       renderToday(r.ok ? "" : "📶 No signal — showing today's jobs from the last time this page loaded. You can still press the buttons.");
       renderBox(); flushSoon();
     });
