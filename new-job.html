@@ -84,6 +84,19 @@
   @media (prefers-color-scheme: dark) { .link { color: var(--accent); } }
   .shows { font-size: 15px; color: var(--muted); margin-top: 8px; }
   .shows b { color: var(--ink); }
+  .match .warn { display: block; font-size: 14px; color: var(--warn-ink); margin-top: 4px; }
+  .match .tag.role { color: var(--brand); background: var(--soft); }
+  .li { display: flex; gap: 10px; align-items: flex-start; padding: 10px 0; border-top: 1px solid var(--line); }
+  .li:first-child { border-top: 0; padding-top: 2px; }
+  .li input[type="checkbox"] { width: 22px; height: 22px; margin: 2px 0 0; flex: none; }
+  .li .body { flex: 1; min-width: 0; }
+  .li .body b { display: block; font-size: 16px; }
+  .li .body span { display: block; font-size: 14px; color: var(--muted); }
+  .li .body select { margin-top: 6px; font-size: 14px; min-height: 36px; padding: 6px 8px; width: 100%; }
+  .li .qty { width: 64px; flex: none; text-align: center; min-height: 40px; padding: 6px; }
+  .li .price { flex: none; font-weight: 700; min-width: 72px; text-align: right; padding-top: 2px; }
+  .li.off .body, .li.off .price { opacity: .5; }
+  .total { display: flex; justify-content: space-between; font-weight: 700; margin-top: 10px; padding-top: 10px; border-top: 1px solid var(--line); }
   footer { text-align: center; font-size: 13px; color: var(--muted); margin-top: 18px; }
   footer a { color: inherit; }
 </style>
@@ -198,6 +211,19 @@
     <div class="hint">Leave the date blank to create it unscheduled. A date with no time books it as "anytime".</div>
   </div>
 
+  <!-- line items from the price book -->
+  <div class="sub" id="liSection">
+    <label>Line items from the price book</label>
+    <div class="hint" style="margin-top:0" id="liHint">Picked from what you said. Untick anything you don't want on the job, or change the match.</div>
+    <div id="liList"></div>
+    <div class="total hidden" id="liTotal"><span>Job total</span><span id="liSum">$0.00</span></div>
+    <div class="row" style="margin-top:10px">
+      <input id="liSearch" placeholder="Add from the price book — e.g. hose bib" autocomplete="off" enterkeyhint="search">
+      <button class="btn" id="liGo" style="width:auto;margin:0;padding:0 16px">Find</button>
+    </div>
+    <div class="status" id="liMsg"></div>
+  </div>
+
   <button class="btn" id="submit">Create job</button>
   <div class="status" id="submitMsg"></div>
   <button class="btn hidden" id="again">Start another job</button>
@@ -224,7 +250,8 @@
   function el(tag, cls, text) { var e = document.createElement(tag); if (cls) e.className = cls; if (text != null) e.textContent = text; return e; }
   function recent(text) { try { var r = JSON.parse(get("grRecent") || "[]"); r.unshift({ tool: "New Job", text: text, at: Date.now() }); put("grRecent", JSON.stringify(r.slice(0, 20))); } catch (e) {} }
 
-  var S = { code: "", mode: "auto", fields: null, cust: null, isNew: false, addr: "", me: "", today: "", usualUnit: {} };
+  var S = { code: "", mode: "auto", fields: null, cust: null, isNew: false, addr: "", me: "", today: "", usualUnit: {}, items: [], priceBook: true };
+  function money(c) { return "$" + ((Number(c) || 0) / 100).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 }); }
 
   // ---------- server ----------
   function api(action, data) {
@@ -253,6 +280,8 @@
       (r.employees || []).forEach(function (e) { var o = el("option", null, e.name); o.value = e.id; sel.appendChild(o); });
       sel.value = S.me;
       S.usualUnit = r.usual_unit || {};
+      S.priceBook = r.price_book !== false;
+      show($("liSection"), S.priceBook);
       [["jType", r.job_types], ["jUnit", r.business_units]].forEach(function (d) {
         (d[1] || []).forEach(function (x) { var o = el("option", null, x.name); o.value = x.id; $(d[0]).appendChild(o); });
       });
@@ -375,6 +404,7 @@
       if (!r.ok) { say("talkMsg", "❌ " + r.error, "err"); return; }
       S.fields = r.fields || {};
       fillJob(S.fields);
+      setItems(r.suggestions || []);
       if (S.mode === "new") { say("talkMsg", ""); openNew(r.dupes || []); return; }
       var m = r.matches || [];
       if (m.length) {
@@ -420,6 +450,8 @@
     var b = el("button", "match");
     var name = el("b", null, c.display_name);
     if (best) name.appendChild(el("span", "tag", "Best match"));
+    if (c.role === "parent") name.appendChild(el("span", "tag role", "Billing account"));
+    if (c.role === "child") name.appendChild(el("span", "tag role", "Sub-account"));
     b.appendChild(name);
     var sub = [];
     if (c.display_name !== [c.first_name, c.last_name].filter(Boolean).join(" ") && (c.first_name || c.last_name))
@@ -427,6 +459,7 @@
     if (c.phones.length) sub.push(c.phones[0].text);
     b.appendChild(el("span", null, sub.join(" · ") || "No phone on file"));
     b.appendChild(el("span", null, c.addresses.length ? c.addresses[0].text + (c.addresses.length > 1 ? "  (+" + (c.addresses.length - 1) + " more)" : "") : "No address on file"));
+    if (c.related && c.related.length) b.appendChild(el("span", "warn", "⚠️ " + (c.related.length + 1) + " accounts share this phone or address" + (c.created ? " · this one added " + c.created.slice(0, 4) : "") + (c.tags && c.tags.length ? " · tags: " + c.tags.join(", ") : "")));
     b.onclick = function () { onPick(c); };
     return b;
   }
@@ -542,6 +575,64 @@
   }
   function fmtPhone(d) { d = String(d).replace(/\D/g, ""); return d.length === 10 ? "(" + d.slice(0, 3) + ") " + d.slice(3, 6) + "-" + d.slice(6) : d; }
 
+  // ---------- line items from the price book ----------
+  function setItems(suggestions) {
+    S.items = suggestions.map(function (sg) {
+      var cands = sg.candidates || [];
+      var pick = cands.filter(function (c) { return c.strong; })[0] || cands[0] || null;
+      return { label: sg.name || sg.search || "", qty: sg.quantity > 0 ? sg.quantity : 1, cands: cands, cand: pick, use: !!(pick && (pick.strong || cands.length === 1)) };
+    });
+    renderItems();
+  }
+  function renderItems() {
+    var box = $("liList"); box.innerHTML = "";
+    S.items.forEach(function (it) {
+      var row = el("div", "li" + (it.use ? "" : " off"));
+      var cb = el("input"); cb.type = "checkbox"; cb.checked = it.use && !!it.cand; cb.disabled = !it.cand;
+      cb.onchange = function () { it.use = cb.checked; row.classList.toggle("off", !it.use); sumItems(); };
+      row.appendChild(cb);
+      var body = el("div", "body");
+      body.appendChild(el("b", null, it.cand ? it.cand.name : it.label));
+      if (!it.cand) body.appendChild(el("span", null, "Heard “" + it.label + "” — nothing like it in the price book. Search below to add it by hand."));
+      else if (it.label && it.label.toLowerCase() !== it.cand.name.toLowerCase()) body.appendChild(el("span", null, "Heard: " + it.label));
+      if (it.cands.length > 1) {
+        var sel = el("select");
+        it.cands.forEach(function (c, i) { var o = el("option", null, c.name + " — " + money(c.price)); o.value = String(i); if (c === it.cand) o.selected = true; sel.appendChild(o); });
+        sel.onchange = function () { it.cand = it.cands[Number(sel.value)]; it.use = true; renderItems(); };
+        body.appendChild(sel);
+      }
+      row.appendChild(body);
+      var q = el("input", "qty"); q.type = "number"; q.min = "0.25"; q.step = "0.25"; q.value = String(it.qty); q.inputMode = "decimal"; q.title = "Quantity";
+      q.onchange = function () { it.qty = Number(q.value) > 0 ? Number(q.value) : 1; q.value = String(it.qty); sumItems(); };
+      row.appendChild(q);
+      row.appendChild(el("div", "price", it.cand ? money(it.cand.price * it.qty) : ""));
+      box.appendChild(row);
+    });
+    sumItems();
+  }
+  function sumItems() {
+    var n = 0, sum = 0;
+    S.items.forEach(function (it) { if (it.use && it.cand) { n++; sum += it.cand.price * it.qty; } });
+    Array.prototype.forEach.call($("liList").querySelectorAll(".li"), function (row, i) { var it = S.items[i]; row.querySelector(".price").textContent = it.cand ? money(it.cand.price * it.qty) : ""; });
+    show($("liTotal"), n > 0); $("liSum").textContent = money(sum) + (n ? " · " + n + " line item" + (n === 1 ? "" : "s") : "");
+    $("liHint").textContent = S.items.length ? "Picked from what you said. Untick anything you don't want on the job, or change the match." : "Nothing picked yet — search the price book below to add line items.";
+  }
+  $("liGo").onclick = function () {
+    var q = $("liSearch").value.trim();
+    if (!q) { $("liSearch").focus(); return; }
+    $("liGo").disabled = true; say("liMsg", "Searching the price book…", "busy");
+    api("services", { q: q }).then(function (r) {
+      $("liGo").disabled = false;
+      if (!r.ok) { say("liMsg", "❌ " + r.error, "err"); return; }
+      var cands = r.candidates || [];
+      if (!cands.length) { say("liMsg", "Nothing in the price book for “" + q + "”. Try fewer words.", "warn"); return; }
+      say("liMsg", "");
+      S.items.push({ label: q, qty: 1, cands: cands, cand: cands[0], use: true });
+      $("liSearch").value = ""; renderItems();
+    });
+  };
+  $("liSearch").onkeydown = function (e) { if (e.key === "Enter") $("liGo").click(); };
+
   // ---------- submit ----------
   $("submit").onclick = function () { stopAll(submit); };
   function need(ids) {
@@ -555,6 +646,9 @@
                         job_type_id: $("jType").value, business_unit_id: $("jUnit").value } };
     if (!data.job.description) { say("submitMsg", "❌ Add a job description.", "err"); $("desc").focus(); return; }
     if (data.job.time && !data.job.date) { say("submitMsg", "❌ Pick a date for that time.", "err"); return; }
+    data.job.line_items = S.items.filter(function (it) { return it.use && it.cand; }).map(function (it) {
+      return { uuid: it.cand.uuid, name: it.cand.name, description: it.cand.description || "", quantity: it.qty, unit_price: it.cand.price, unit_cost: it.cand.cost, kind: "labor", taxable: it.cand.taxable };
+    });
     if (S.isNew) {
       if (!$("nFirst").value.trim() && !$("nLast").value.trim()) { need(["nFirst", "nLast"]); say("submitMsg", "❌ Add the customer's name.", "err"); return; }
       if (!need(["naStreet", "naCity", "naZip"])) { say("submitMsg", "❌ Fill in the street, city, and ZIP.", "err"); return; }
@@ -594,7 +688,7 @@
   $("again").onclick = function () {
     S.fields = null; S.cust = null; resetSubmit();
     $("heard").value = ""; $("desc").value = ""; $("jDate").value = ""; $("jTime").value = "";
-    $("jArrival").value = "120"; $("jEmp").value = S.me; $("searchBox").value = ""; setJobFields("", "");
+    $("jArrival").value = "120"; $("jEmp").value = S.me; $("searchBox").value = ""; setJobFields("", ""); setItems([]); $("liSearch").value = "";
     say("talkMsg", ""); show($("matchCard"), false); show($("confirmCard"), false);
     window.scrollTo({ top: 0, behavior: "smooth" });
   };

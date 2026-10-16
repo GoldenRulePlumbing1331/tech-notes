@@ -229,6 +229,26 @@ Setup: new Apps Script project **HCP Job Inputs** ← `hcp_job_inputs.gs`; prope
 Tested against a fake HCP: 7 backend checks (plan, netting, held, warranty, apply, replay, morning retry)
 and 14 browser checks (real CSV parse → plan → untick → apply).
 
+## New Job — price book line items + duplicate accounts (added 2026-10-16)
+
+- **Line items from the price book.** Haiku now also pulls the billable work out of the dictation ("replace the
+  50-gallon gas water heater", "diagnostic") and the script searches HCP price book services for each one. The
+  confirm card shows them as tick boxes with the price: a clear match is pre-ticked, alternatives sit in a
+  dropdown, quantity is editable, and a search box adds anything else. On Create the job is made first, then
+  `PUT /jobs/{id}/line_items/bulk_update` (append) adds the ticked items linked to the price book entry
+  (`service_item_id` + `service_item_type: organizational`); if HCP rejects the link they're added as plain
+  line items and the message says "(not linked to the price book entry)". Prices come straight from the
+  price book (cents), so what the tech sees is what lands on the job.
+- **Parent / child accounts.** The public API has no field for HCP's "This customer bills to" link (checked
+  2026-10-16 against the 24 Patrick Ave accounts: the customer object only carries `kind`, `tags`, `addresses`).
+  What the tool can do: when two or more matches share a phone number or an address, each gets a
+  "⚠️ N accounts share this phone or address" note with its created year and tags, an account tagged with one
+  of `PARENT_TAGS` (default *Parent, Billing, Bill to*) is ranked first and badged "Billing account", and one
+  tagged with `CHILD_TAGS` (default *Child, Sub-customer, Sub customer, Tenant*) is ranked last and badged
+  "Sub-account". Tag the accounts in HCP once and the voice page will steer to the right one. Script
+  properties `PARENT_TAGS` / `CHILD_TAGS` override the defaults.
+- `verifyAccess()` now also checks the price book search. Tests: 6 backend + 9 browser checks.
+
 ## Things to watch (unverified until the real run)
 
 1. Dispatch/schedule writes with a Company key (verifyAccess tells you).
