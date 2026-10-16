@@ -114,6 +114,11 @@
   <a class="nav" href="home.html">All tools →</a>
 </header>
 
+<div class="card hidden" id="updateBar" style="border-color:var(--warn-ink)">
+  <div class="status warn" style="display:block;margin-top:0"><span></span></div>
+  <button class="btn" id="updateGo">Reload the page</button>
+</div>
+
 <!-- Access code (same code as the other voice pages) -->
 <div class="card hidden" id="codeCard">
   <label for="code">Your access code</label>
@@ -260,13 +265,15 @@
   function money(c) { return "$" + ((Number(c) || 0) / 100).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 }); }
 
   // ---------- server ----------
+  var PAGE_VERSION = 5;   // bump with every change the server depends on (server: NJ.MIN_PAGE_VERSION)
   function api(action, data) {
-    data = data || {}; data.action = action; data.token = S.code;
+    data = data || {}; data.action = action; data.token = S.code; data.v = PAGE_VERSION;
     if (ENDPOINT.indexOf("https://") !== 0) return Promise.resolve({ ok: false, error: "New Job isn't connected yet. Check back soon." });
     return fetch(ENDPOINT, { method: "POST", headers: { "Content-Type": "text/plain" }, body: JSON.stringify(data) })
       .then(function (r) { return r.json(); })
       .catch(function () { return { ok: false, error: "Couldn't reach the server. Check your signal and try again.", net: true }; })
       .then(function (r) {
+        if (!r.ok && r.outdated) { showOutdated(r.error); return r; }
         if (!r.ok && action !== "init" && /access code|Too many wrong/.test(r.error || "")) { drop(KEY); S.code = ""; showCode(r.error); }
         if (!r.ok && action === "init" && /access code|Too many wrong/.test(r.error || "")) drop(KEY);
         return r;
@@ -275,6 +282,12 @@
 
   // "Assign to" always starts on Unassigned — pick a person only when you mean to.
   function setAssign() { $("jEmp").value = ""; }
+
+  function showOutdated(msg) {
+    var b = $("updateBar"); b.querySelector("span").textContent = msg; show(b, true);
+    window.scrollTo({ top: 0, behavior: "smooth" });
+  }
+  $("updateGo").onclick = function () { location.reload(); };
 
   // ---------- access code ----------
   function showCode(msg) { show($("codeCard"), true); show($("app"), false); say("codeMsg", msg, "err"); }
@@ -502,15 +515,38 @@
   function addressForm(prefix, f) {
     var wrap = el("div", "grid");
     [["Street", "Street", "full", f.street], ["Apt / unit", "Unit", "full", f.street_line_2], ["City", "City", "", f.city],
-     ["State", "State", "", f.state || "PA"], ["ZIP", "Zip", "", f.zip]].forEach(function (d) {
+     ["State", "State", "", f.state || "PA"], ["ZIP (optional)", "Zip", "", f.zip]].forEach(function (d) {
       var box = el("div", d[2]);
       var lab = el("label", null, d[0]); lab.htmlFor = prefix + d[1];
       var inp = el("input"); inp.id = prefix + d[1]; inp.value = d[3] || ""; inp.autocomplete = "off";
       if (d[1] === "Zip") inp.inputMode = "numeric";
       inp.oninput = function () { inp.classList.remove("missing"); };
+      if (d[1] === "Street" || d[1] === "City" || d[1] === "State") inp.addEventListener("blur", function () { setTimeout(function () { zipLookup(prefix); }, 0); });
+      if (d[1] === "Zip") inp.placeholder = "Looked up if blank";
       box.appendChild(lab); box.appendChild(inp); wrap.appendChild(box);
     });
+    var hint = el("div", "hint full", f.zip_looked_up && f.zip ? "ZIP " + f.zip + " looked up from the address." : ""); hint.id = prefix + "ZipHint";
+    wrap.appendChild(hint);
     return wrap;
+  }
+  function addrOk(prefix) {
+    var st = $(prefix + "Street"), ci = $(prefix + "City"), zp = $(prefix + "Zip");
+    var okSt = !!st.value.trim(), okCi = !!(ci.value.trim() || zp.value.trim());
+    st.classList.toggle("missing", !okSt); ci.classList.toggle("missing", !okCi);
+    return okSt && okCi;
+  }
+  // ZIP left blank → look it up from street + city (US Census address lookup, via the server).
+  function zipLookup(prefix) {
+    var st = $(prefix + "Street"), ci = $(prefix + "City"), sta = $(prefix + "State"), zp = $(prefix + "Zip"), hint = $(prefix + "ZipHint");
+    if (!st || !zp || zp.value.trim() || !st.value.trim() || !ci.value.trim()) return;
+    var want = [st.value.trim(), ci.value.trim(), sta.value.trim()].join("|");
+    if (zp.dataset.tried === want) return;
+    zp.dataset.tried = want; hint.textContent = "Looking up the ZIP…";
+    api("address", { address: { street: st.value.trim(), city: ci.value.trim(), state: sta.value.trim() } }).then(function (r) {
+      if (zp.value.trim()) { hint.textContent = ""; return; }
+      if (r.ok && r.found) { zp.value = r.zip; hint.textContent = "ZIP " + r.zip + " looked up from the address."; }
+      else hint.textContent = "Couldn't find the ZIP — leave it blank if you don't have it.";
+    });
   }
   function readAddress(prefix) {
     function v(k) { return $(prefix + k).value.trim(); }
@@ -559,9 +595,10 @@
     $("confirmCard").scrollIntoView({ behavior: "smooth", block: "start" });
   }
 
+  // Same as HCP: last name then first name, no spaces ("John Doe" → "DoeJohn"); the company only if there's no name.
   function updateDisplay() {
-    var name = [$("nFirst").value.trim(), $("nLast").value.trim()].filter(Boolean).join(" ");
-    $("nDisplay").textContent = $("nCompany").value.trim() || name || "—";
+    var name = ($("nLast").value + $("nFirst").value).replace(/\s+/g, "");
+    $("nDisplay").textContent = name || $("nCompany").value.trim() || "—";
   }
   ["nFirst", "nLast", "nCompany"].forEach(function (id) { $(id).oninput = function () { $(id).classList.remove("missing"); updateDisplay(); }; });
 
@@ -685,14 +722,14 @@
     });
     if (S.isNew) {
       if (!$("nFirst").value.trim() && !$("nLast").value.trim()) { need(["nFirst", "nLast"]); say("submitMsg", "❌ Add the customer's name.", "err"); return; }
-      if (!need(["naStreet", "naCity", "naZip"])) { say("submitMsg", "❌ Fill in the street, city, and ZIP.", "err"); return; }
+      if (!addrOk("na")) { say("submitMsg", "❌ Fill in the street and the city — the ZIP is looked up for you.", "err"); return; }
       data.customer = { first_name: $("nFirst").value.trim(), last_name: $("nLast").value.trim(), company: $("nCompany").value.trim(),
                         phone: $("nPhone").value.trim(), email: $("nEmail").value.trim() };
       data.address = readAddress("na");
     } else {
       data.customer_id = S.cust.id;
       if (S.addr === "new") {
-        if (!need(["xaStreet", "xaCity", "xaZip"])) { say("submitMsg", "❌ Fill in the street, city, and ZIP.", "err"); return; }
+        if (!addrOk("xa")) { say("submitMsg", "❌ Fill in the street and the city — the ZIP is looked up for you.", "err"); return; }
         data.address = readAddress("xa");
       } else data.address_id = S.addr;
     }

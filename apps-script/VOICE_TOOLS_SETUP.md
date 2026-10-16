@@ -251,6 +251,19 @@ and 14 browser checks (real CSV parse → plan → untick → apply).
   the item name), so "gas line cap" no longer lands on a water heater.
 - **Assign to** always starts on **Unassigned** (also after "Start another job"); pick a tech only when you mean to.
   The success message always says who it's assigned to, or "Unassigned".
+- **ZIP is optional** (2026-10-16, 3 PM). A street + city with no ZIP is looked up with the free US Census address
+  lookup (no key): on the server when the dictation is read, on the page as soon as you leave the street/city box,
+  and again on Create as a safety net. Not found → the address is sent without a ZIP (if HCP ever insists, the
+  page says "type the ZIP"). Street + ZIP with no city fills the city the same way.
+- **Display name** preview matches HCP: last name then first name, no spaces ("John Doe" → "DoeJohn"), even
+  when a company is entered (HCP shows Jim Talarico at Parke Bank as "TalaricoJim"). HCP sets that name itself;
+  the page now shows it the same way, including on the customer match cards.
+- **Price book descriptions** go on the job word for word, line breaks included (the cached copy used to
+  flatten them and cut them at 160 characters — 93 of the 105 services are longer than that).
+- **Out-of-date pages are refused.** The page sends its version with every request (`v`); the script turns away
+  anything older than `NJ.MIN_PAGE_VERSION` with "This New Job page is out of date on this phone — close it and
+  open it again", and the page shows a Reload button. Job #49761 (Oct 16) was assigned to Kyle by a copy of the page
+  that had been open since before that day's fixes.
 - **Parent / child accounts.** The public API has no field for HCP's "This customer bills to" link (checked
   2026-10-16 against the 24 Patrick Ave accounts: the customer object only carries `kind`, `tags`, `addresses`).
   What the tool can do: when two or more matches share a phone number or an address, each gets a

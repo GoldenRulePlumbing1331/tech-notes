@@ -46,6 +46,7 @@ const NJ = {
   MAX_MATCHES: 6,
   SEARCH_PAGE_SIZE: 10,
   JOB_SCAN_PAGES: 10,         // recent jobs scanned (x100) to find Business Units, which have no list endpoint
+  MIN_PAGE_VERSION: 5,        // new-job.html sends its version; older copies still open on a phone are turned away
   PRICE_CANDIDATES: 6,        // price book hits kept per suggested line item
   MAX_SUGGEST: 5,             // line items Haiku may suggest per dictation
   DEFAULT_PARENT_TAGS: 'Parent, Billing, Bill to',
@@ -66,8 +67,12 @@ function doGet() {
 
 function newJobAction_(p) {
   try {
+    if ((Number(p.v) || 0) < NJ.MIN_PAGE_VERSION) {
+      return { ok: false, outdated: true, error: 'This New Job page is out of date on this phone. Close it and open it again (or pull down to refresh), then try again — nothing was created.' };
+    }
     const who = whoIs_(p.token);
     switch (p.action) {
+      case 'address':  return Object.assign({ ok: true }, njLookupAddress_(p.address || {}));
       case 'init':     return Object.assign({ ok: true }, njInit_(who));
       case 'parse':    return Object.assign({ ok: true }, njParse_(p.text, p.mode));
       case 'search':   return { ok: true, matches: njSearchText_(p.q) };
@@ -263,7 +268,7 @@ function njParse_(text, mode) {
 }
 
 const NJ_FIELDS_ = ['first_name', 'last_name', 'company', 'phone', 'email', 'street', 'street_line_2',
-  'city', 'state', 'zip', 'job_description', 'date', 'time'];
+  'city', 'state', 'zip', 'job_description', 'date', 'time'];   // (+ zip_looked_up when the ZIP came from the address lookup)
 
 function njPrompt_(jf, catalog) {
   const tz = njTz_();
@@ -321,6 +326,10 @@ function njExtract_(text, catalog) {
   if (!/^\S+@\S+\.\S+$/.test(clean.email)) clean.email = '';
   clean.state = clean.state.toUpperCase().slice(0, 2);
   clean.zip = (clean.zip.match(/\d{5}/) || [''])[0];
+  if (clean.street && (!clean.zip || !clean.city)) {
+    const look = njLookupAddress_(clean);
+    if (look.found) { clean.zip = clean.zip || look.zip; clean.city = clean.city || look.city; clean.state = clean.state || look.state; clean.zip_looked_up = true; }
+  }
   if (!/^\d{4}-\d{2}-\d{2}$/.test(clean.date)) clean.date = '';
   if (!/^\d{2}:\d{2}$/.test(clean.time)) clean.time = '';
   if (clean.time && !clean.date) clean.date = njToday_();
@@ -377,7 +386,7 @@ function njSuggest_(items, catalog) {
  */
 function njCatalog_(fresh) {
   const cache = CacheService.getScriptCache();
-  const hit = !fresh && cache.get('nj_catalog');
+  const hit = !fresh && cache.get('nj_catalog2');
   if (hit) { try { return JSON.parse(hit); } catch (_) {} }
   const out = [];
   try {
@@ -385,7 +394,7 @@ function njCatalog_(fresh) {
       const r = hcp_('get', `/api/price_book/services?page=${page}&page_size=100&sort_by=name&sort_direction=asc`);
       (r.data || []).forEach(sv => out.push({
         uuid: sv.uuid, name: String(sv.name || '').trim(), category: String((sv.category && sv.category.name) || '').trim(),
-        description: String(sv.description || '').replace(/\s+/g, ' ').trim().slice(0, 160),
+        description: String(sv.description || '').replace(/\r\n?/g, '\n').replace(/[ \t]+\n/g, '\n').trim(),   // full text, line breaks kept
         price: Number(sv.price) || 0, cost: Number(sv.cost) || 0, uom: sv.unit_of_measure || '', taxable: !!sv.taxable,
       }));
       const pages = r.total_pages_count || r.total_pages || 0;
@@ -393,7 +402,7 @@ function njCatalog_(fresh) {
     }
   } catch (e) { console.warn('Price book services not reachable: ' + e.message); return []; }
   const list = out.filter(c => c.uuid && c.name);
-  try { cache.put('nj_catalog', JSON.stringify(list), 6 * 3600); } catch (e) { console.warn('catalog too big to cache: ' + e.message); }
+  try { cache.put('nj_catalog2', JSON.stringify(list), 6 * 3600); } catch (e) { console.warn('catalog too big to cache: ' + e.message); }
   return list;
 }
 
@@ -439,7 +448,7 @@ function njAddLineItems_(jobId, items) {
   const clean = (Array.isArray(items) ? items : []).map(li => ({
     uuid: String((li && li.uuid) || '').trim(),
     name: String((li && li.name) || '').trim().slice(0, 120),
-    description: String((li && li.description) || '').trim().slice(0, 1000),
+    description: String((li && li.description) || '').replace(/\r\n?/g, '\n').trim().slice(0, 5000),
     quantity: Number(li && li.quantity) > 0 ? Math.round(Number(li.quantity) * 100) / 100 : 1,
     unit_price: Math.max(0, Math.round(Number(li && li.unit_price) || 0)),
     unit_cost: Math.max(0, Math.round(Number(li && li.unit_cost) || 0)),
@@ -465,6 +474,40 @@ function njAddLineItems_(jobId, items) {
       return { added: clean.length, total: total, linked: 0, priced: clean.filter(li => li.uuid).length };
     } catch (e2) { return { added: 0, total: total, linked: 0, error: e2.message }; }
   }
+}
+
+/* ───────────── address → ZIP (US Census geocoder: free, no key) ───────────── */
+
+/**
+ * Fills in the ZIP (and city) for a street address. {street, city, state, zip} in → {found, zip, city, state, matched}.
+ * Uses the US Census Bureau geocoder, which needs no key; results are cached for a day. Never throws.
+ */
+function njLookupAddress_(a) {
+  const street = String((a && a.street) || '').trim(), city = String((a && a.city) || '').trim();
+  const state = (String((a && a.state) || '').trim() || NJ.DEFAULT_STATE).toUpperCase().slice(0, 2);
+  const zip = (String((a && a.zip) || '').match(/\d{5}/) || [''])[0];
+  if (!street || (!city && !zip)) return { found: false };
+  const key = 'nj_zip_' + Utilities.base64EncodeWebSafe([street, city, state, zip].join('|').toLowerCase()).slice(0, 200);
+  const cache = CacheService.getScriptCache();
+  const hit = cache.get(key);
+  if (hit) { try { return JSON.parse(hit); } catch (_) {} }
+  let out = { found: false };
+  try {
+    const url = 'https://geocoding.geo.census.gov/geocoder/locations/address?street=' + encodeURIComponent(street) +
+      '&city=' + encodeURIComponent(city) + '&state=' + encodeURIComponent(state) + '&zip=' + encodeURIComponent(zip) +
+      '&benchmark=Public_AR_Current&format=json';
+    const res = UrlFetchApp.fetch(url, { muteHttpExceptions: true });
+    if (res.getResponseCode() === 200) {
+      const m = ((JSON.parse(res.getContentText()).result || {}).addressMatches || [])[0];
+      if (m && m.addressComponents && m.addressComponents.zip) {
+        const c = m.addressComponents;
+        out = { found: true, zip: String(c.zip), state: String(c.state || state).toUpperCase(), matched: m.matchedAddress || '',
+                city: String(c.city || city).toLowerCase().replace(/\b[a-z]/g, ch => ch.toUpperCase()) };
+      }
+    }
+  } catch (e) { console.warn('address lookup failed: ' + e.message); }
+  try { cache.put(key, JSON.stringify(out), out.found ? 86400 : 3600); } catch (_) {}
+  return out;
 }
 
 /* ───────────── customer lookup ───────────── */
@@ -553,6 +596,12 @@ function njFlagRelated_(list) {
   });
 }
 
+/** HCP's display name: last name then first name, no spaces ("John Doe" → "DoeJohn"), even when there's a company
+ *  (Jim Talarico at Parke Bank shows as "TalaricoJim"); the company only when there's no name at all. */
+function njDisplayName_(first, last, company) {
+  return (String(last || '') + String(first || '')).replace(/\s+/g, '') || String(company || '').trim();
+}
+
 function njFmtPhone_(d) {
   d = njDigits_(d);
   return d.length === 10 ? `(${d.slice(0, 3)}) ${d.slice(3, 6)}-${d.slice(6)}` : d;
@@ -578,7 +627,7 @@ function njCustomer_(c) {
     first_name: c.first_name || '',
     last_name: c.last_name || '',
     company: c.company || '',
-    display_name: c.display_name || c.company || name || '(no name)',
+    display_name: c.display_name || njDisplayName_(c.first_name, c.last_name, c.company) || '(no name)',   // as HCP shows it, e.g. "WhitemanMary"
     email: c.email || '',
     phones: phones,
     addresses: addresses,
@@ -619,7 +668,12 @@ function njCreateLocked_(p, who) {
       zip: String(a.zip || '').trim(),
       country: 'US',
     };
-    if (!addr.street || !addr.city || !addr.zip) throw new Error('The address needs a street, city, and ZIP.');
+    if (!addr.street || (!addr.city && !addr.zip)) throw new Error('The address needs a street and a city (the ZIP is looked up for you).');
+    if (!addr.zip || !addr.city) {
+      const look = njLookupAddress_(addr);
+      if (look.found) { addr.zip = addr.zip || look.zip; addr.city = addr.city || look.city; }
+    }
+    if (!addr.city) throw new Error('Couldn’t work out the city for that street and ZIP — type the city.');
   }
 
   // 1. Customer
@@ -645,9 +699,11 @@ function njCreateLocked_(p, who) {
   if (addressId && !custOut.addresses.some(a => a.id === addressId)) return fail('That address isn’t on this customer.');
   if (!addressId) {
     try {
-      addressId = hcp_('post', `/customers/${cust.id}/addresses`, addr).id;
+      const body = Object.assign({}, addr);
+      if (!body.zip) delete body.zip;            // no ZIP found: try without it rather than block the job
+      addressId = hcp_('post', `/customers/${cust.id}/addresses`, body).id;
     } catch (err) {
-      return fail('Couldn’t add the address: ' + err.message);
+      return fail(!addr.zip ? 'HCP needs a ZIP for this address and the lookup couldn’t find one — type the ZIP and try again.' : 'Couldn’t add the address: ' + err.message);
     }
     if (!addressId) return fail('HCP didn’t return an address ID.');
   }
@@ -823,7 +879,7 @@ function generateTechCodes() {
 /** Read-only: confirms the HCP key can read employees, search customers and the price book. Changes nothing. */
 function verifyAccess() {
   CacheService.getScriptCache().remove('nj_emps');
-  CacheService.getScriptCache().remove('nj_catalog');
+  CacheService.getScriptCache().remove('nj_catalog2');
   console.log(`✅ Employees readable — ${njEmployees_().length} found.`);
   const r = hcp_('get', '/customers?page=1&page_size=1');
   console.log(`✅ Customers readable — ${r.total_items} total.`);
