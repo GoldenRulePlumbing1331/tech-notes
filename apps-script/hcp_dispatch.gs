@@ -32,6 +32,8 @@
  *   board   {date, employee_id}        → read-only list of jobs that day (optionally one tech)
  *   day     {date}                     → everything on the schedule that day for the Board page (board.html):
  *                                        jobs (incl. multi-day appointments), estimates and events, per tech
+ *   unassigned {}                      → every open job with no tech: scheduled ones (14 days back → 90 ahead, by
+ *                                        day; a multi-day job's day with nobody on it counts) and "needs scheduling"
  *   events_sync {}                     → re-reads every HCP event into the saved list the Board uses (the page
  *                                        calls it in the background when the list is over 3 hours old)
  *   apply   {req_id, job_id, change}   → writes the schedule / crew change to HCP
@@ -48,6 +50,8 @@ const DP = {
   BOARD_PAGE_SIZE: 100,
   EVENT_SYNC_MS: 3 * 3600 * 1000,   // Board: re-read the whole HCP event list (≈17 pages, ~20 s) at most this often
   EVENT_KEEP_DAYS: 14,             // …keeping every repeating event plus one-off events that end after (today − this)
+  UNASSIGNED_BACK_DAYS: 14,        // Board "Unassigned" list: scheduled jobs with no tech from this many days back…
+  UNASSIGNED_AHEAD_DAYS: 90,       // …to this many days ahead, plus every job that still needs scheduling
 };
 
 const TEST_JOB_NUMBER = '';    // for verifyAccess(): a SCHEDULED job, e.g. '49370'
@@ -72,6 +76,7 @@ function dispatchAction_(p) {
       case 'board':      return { ok: true, jobs: dpBoard_(p.date, p.employee_id) };
       case 'day':        return Object.assign({ ok: true }, dpDay_(p.date, !!p.fresh));
       case 'events_sync': return dpSyncEvents_(!!p.force);
+      case 'unassigned': return Object.assign({ ok: true }, dpUnassigned_(!!p.fresh));
       case 'apply':      mustDispatch_(who); return dpApply_(p, who);
       case 'unschedule': mustDispatch_(who); return dpUnschedule_(p, who);
       default:           throw new Error('Unknown action.');
@@ -407,6 +412,85 @@ function dpDayItem_(o, kind, sl, i, mins, hhmm, onDay) {
     tags: (o.tags || []).map(t => (t && t.name) || t).filter(Boolean).slice(0, 6),
     url: 'https://pro.housecallpro.com/app/' + (kind === 'job' ? 'jobs/' : 'estimates/') + o.id,
   };
+}
+
+/**
+ * Board "Unassigned" list: every open job nobody is on. Scheduled jobs (work_status scheduled, from
+ * UNASSIGNED_BACK_DAYS ago to UNASSIGNED_AHEAD_DAYS ahead) with no tech — for multi-day jobs, each day with nobody
+ * dispatched — plus every job that still needs scheduling. Cached 60 s.
+ */
+function dpUnassigned_(fresh) {
+  const cache = CacheService.getScriptCache(), key = 'dp_unassigned';
+  if (!fresh) { const hit = cache.get(key); if (hit) { try { return JSON.parse(hit); } catch (_) {} } }
+  const tz = dpTz_(), today = dpToday_();
+  const dayStart = Utilities.parseDate(today + ' 00:00', tz, 'yyyy-MM-dd HH:mm');
+  const from = new Date(dayStart.getTime() - DP.UNASSIGNED_BACK_DAYS * 86400000), to = new Date(dayStart.getTime() + DP.UNASSIGNED_AHEAD_DAYS * 86400000);
+  const schedQ = `/jobs?page_size=100&expand[]=appointments&work_status[]=scheduled&scheduled_start_min=${encodeURIComponent(dpIso_(from))}` +
+                 `&scheduled_start_max=${encodeURIComponent(dpIso_(to))}&sort_by=created_at&sort_direction=desc`;
+  const unschedQ = '/jobs?page_size=100&work_status[]=unscheduled&sort_by=created_at&sort_direction=desc';
+  const first = hcpAll_([schedQ + '&page=1', unschedQ + '&page=1']);
+  const items = [], warnings = [];
+  const short = d => { const h = Number(dpFmt_(d, 'HH')), m = dpFmt_(d, 'mm'); return (h % 12 || 12) + (m !== '00' ? ':' + m : '') + (h < 12 ? 'a' : 'p'); };
+  const add = (j, start, end, dayOf, group) => {
+    const c = j.customer || {}, a = j.address || {}, jf = j.job_fields || {};
+    const date = start ? dpFmt_(start, 'yyyy-MM-dd') : '';
+    items.push({
+      id: j.id + (dayOf ? ':' + dayOf : ''), job_id: j.id, kind: 'job', group: group, number: String(j.invoice_number || ''),
+      title: String(j.description || (jf.job_type && jf.job_type.name) || '').split('\n')[0].slice(0, 120),
+      customer: ((c.last_name || '') + (c.first_name || '')).replace(/\s+/g, '') || c.company || '(no name)',
+      full_name: [c.first_name, c.last_name].filter(Boolean).join(' '), company: c.company || '',
+      address: [a.street, a.city].filter(Boolean).join(', '), zip: a.zip || '', phone: c.mobile_number || c.home_number || c.work_number || '',
+      amount: (Number(j.total_amount) || 0) / 100, status: j.work_status || '', date: date, day_of: dayOf || '',
+      when: start ? dpFmt_(start, 'EEE, MMM d') + ' · ' + short(start) + (end ? '–' + short(end) : '') : 'Needs scheduling',
+      sort: start ? start.getTime() : 0, created: j.created_at ? dpFmt_(dpDate_(j.created_at), 'MMM d') : '',
+      employee_ids: (j.assigned_employees || []).map(e => e.id),
+      type: (jf.job_type && jf.job_type.name) || '', unit: (jf.business_unit && jf.business_unit.name) || '',
+      tags: (j.tags || []).map(t => (t && t.name) || t).filter(Boolean).slice(0, 6),
+      url: 'https://pro.housecallpro.com/app/jobs/' + j.id,
+    });
+  };
+  const groupOf = d => d < dayStart ? 'past' : 'upcoming';
+
+  try {
+    if (first[0].error) throw new Error(first[0].error);
+    let r = first[0].body;
+    for (let page = 1; page <= 6; page++) {
+      if (page > 1) r = hcp_('get', schedQ + `&page=${page}`);
+      (r.jobs || []).forEach(j => {
+        if (j.deleted_at || j.canceled_at || /cancel|complete/.test(j.work_status || '')) return;
+        const s = j.schedule || {}, appts = s.appointments || j.appointments || [];
+        if (appts.length > 1) {
+          appts.forEach((a, i) => {
+            const st = dpDate_(a.start_time);
+            if (!st || st < from || st > to || (a.dispatched_employees_ids || []).length) return;
+            add(j, st, dpDate_(a.end_time), `Day ${i + 1} of ${appts.length}`, groupOf(st));
+          });
+        } else if (!(j.assigned_employees || []).length) {
+          const st = dpDate_(s.scheduled_start);
+          if (st) add(j, st, dpDate_(s.scheduled_end), '', groupOf(st));
+        }
+      });
+      if (!(r.jobs || []).length || page >= (r.total_pages || 0)) break;
+    }
+  } catch (e) { warnings.push('Scheduled jobs: ' + e.message); }
+
+  try {
+    if (first[1].error) throw new Error(first[1].error);
+    let r = first[1].body;
+    for (let page = 1; page <= 3; page++) {
+      if (page > 1) r = hcp_('get', unschedQ + `&page=${page}`);
+      (r.jobs || []).forEach(j => { if (!j.deleted_at && !j.canceled_at && !/cancel|complete/.test(j.work_status || '')) add(j, null, null, '', 'unscheduled'); });
+      if (!(r.jobs || []).length || page >= (r.total_pages || 0)) break;
+    }
+  } catch (e) { warnings.push('Needs scheduling: ' + e.message); }
+
+  const order = { past: 0, upcoming: 1, unscheduled: 2 };
+  items.sort((a, b) => order[a.group] - order[b.group] || (a.group === 'unscheduled' ? 0 : a.sort - b.sort));
+  const count = g => items.filter(i => i.group === g).length;
+  const out = { today: today, items: items, warnings: warnings, counts: { past: count('past'), upcoming: count('upcoming'), unscheduled: count('unscheduled') },
+                loaded_at: dpFmt_(new Date(), 'h:mm a') };
+  try { cache.put(key, JSON.stringify(out), 60); } catch (_) {}
+  return out;
 }
 
 /** An HCP event cut down to what the Board needs (kept small so the saved list fits in script properties). */

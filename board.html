@@ -53,6 +53,39 @@
   .chip.off i { background: transparent; border: 2px solid var(--c, #8a94a6); }
   .chip.act { padding: 0 12px; color: var(--brand); }
   @media (prefers-color-scheme: dark) { .chip.act { color: var(--accent); } .chip.on { background: #2b4a73; border-color: #2b4a73; } }
+  .tools { display: flex; gap: 6px; padding-top: 8px; }
+  .dd { flex: 1; min-width: 0; display: flex; align-items: center; justify-content: center; gap: 6px; height: 36px; border-radius: 10px; cursor: pointer;
+        border: 1px solid var(--line); background: var(--card); font-weight: 700; font-size: 14px; white-space: nowrap; padding: 0 10px; }
+  .dd svg { width: 18px; height: 18px; fill: currentColor; flex: none; }
+  .dd .caret { font-size: 11px; color: var(--muted); }
+  .dd em { font-style: normal; font-weight: 650; color: var(--muted); }
+  .dd .badge { font-style: normal; background: var(--warn-bg); color: var(--warn-ink); border-radius: 9px; padding: 1px 7px; font-size: 13px; font-weight: 800; }
+  .dd .badge.zero { background: var(--soft); color: var(--muted); }
+  .dd[aria-expanded="true"] { border-color: var(--brand); box-shadow: 0 0 0 1px var(--brand) inset; }
+  #ddShade { position: fixed; inset: 0; z-index: 39; }
+  #techMenu { position: fixed; z-index: 40; left: 10px; right: 10px; max-width: 420px; background: var(--card); border: 1px solid var(--line);
+              border-radius: 14px; box-shadow: 0 12px 34px rgba(0,0,0,.22); overflow: hidden; display: flex; flex-direction: column; }
+  #techMenu .mh { display: flex; align-items: center; gap: 8px; padding: 10px 12px; border-bottom: 1px solid var(--line); }
+  #techMenu .mh b { flex: 1; font-size: 15px; }
+  #techMenu .mh button { border: 1px solid var(--line); background: var(--soft); border-radius: 8px; padding: 6px 12px; font-weight: 700; font-size: 13px; cursor: pointer; }
+  #techMenu .ml { overflow-y: auto; -webkit-overflow-scrolling: touch; overscroll-behavior: contain; }
+  #techMenu .sec { font-size: 11px; font-weight: 800; letter-spacing: .06em; text-transform: uppercase; color: var(--muted); padding: 10px 12px 4px; }
+  .opt { display: flex; align-items: center; gap: 10px; width: 100%; padding: 10px 12px; border: 0; border-top: 1px solid var(--grid); background: none; cursor: pointer; text-align: left; }
+  .opt:active { background: var(--soft); }
+  .opt .box { width: 22px; height: 22px; border-radius: 6px; border: 2px solid var(--line); display: grid; place-items: center; flex: none; color: #fff; font-size: 14px; font-weight: 900; line-height: 1; }
+  .opt.on .box { background: var(--brand); border-color: var(--brand); }
+  @media (prefers-color-scheme: dark) { .opt.on .box { background: #3b6aa8; border-color: #3b6aa8; } }
+  .opt i { width: 12px; height: 12px; border-radius: 50%; background: var(--c, #8a94a6); flex: none; }
+  .opt .nm { flex: 1; min-width: 0; font-weight: 650; font-size: 15px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .opt small { color: var(--muted); font-size: 13px; white-space: nowrap; }
+  .opt:not(.on) .nm { color: var(--muted); }
+  #techMenu .mf { padding: 10px 12px; border-top: 1px solid var(--line); }
+  #techMenu .mf button { width: 100%; }
+  .ugrp { font-size: 12px; font-weight: 800; letter-spacing: .05em; text-transform: uppercase; color: var(--muted); padding: 14px 0 6px; border-top: 1px solid var(--grid); }
+  .ugrp:first-of-type { border-top: 0; }
+  .ugrp.warn { color: var(--warn-ink); }
+  .udate { font-size: 14px; font-weight: 750; padding: 8px 0 2px; }
+  #sheet .row { padding: 9px 0; }
   .sub { display: flex; align-items: center; gap: 8px; padding-top: 6px; font-size: 13px; color: var(--muted); }
   .sub .sum { flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   .seg { display: flex; border: 1px solid var(--line); border-radius: 9px; overflow: hidden; flex: none; }
@@ -78,6 +111,8 @@
   .head .meta { font-size: 12px; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; margin-top: 2px; }
   .head .st { font-size: 12px; font-weight: 650; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; margin-top: 2px; }
   .st.omw { color: var(--omw); } .st.work { color: var(--work); } .st.done, .st.free { color: var(--muted); } .st.need { color: var(--warn-ink); }
+  .st.link { color: var(--brand); text-decoration: underline; }
+  @media (prefers-color-scheme: dark) { .st.link { color: var(--accent); } }
   .adcorner { position: sticky; left: 0; z-index: 6; background: var(--bg); border-right: 1px solid var(--line); border-bottom: 1px solid var(--line);
               font-size: 10px; color: var(--muted); text-align: right; padding: 4px 6px 0 0; }
   .adcell { border-bottom: 1px solid var(--line); border-right: 1px solid var(--grid); padding: 3px; min-width: 0; background: var(--card); }
@@ -179,6 +214,10 @@
       <button class="ib" id="todayBtn">Today</button>
       <button class="ib" id="refresh" aria-label="Refresh"><svg viewBox="0 0 24 24"><path d="M17.65 6.35A7.96 7.96 0 0 0 12 4a8 8 0 1 0 7.75 10h-2.08A6 6 0 1 1 12 6c1.66 0 3.14.69 4.22 1.78L13 11h7V4z"/></svg></button>
     </div>
+    <div class="tools">
+      <button class="dd" id="techBtn" aria-haspopup="true" aria-expanded="false"><svg viewBox="0 0 24 24"><path d="M16 11a3 3 0 1 0 0-6 3 3 0 0 0 0 6zm-8 0a3 3 0 1 0 0-6 3 3 0 0 0 0 6zm0 2c-2.7 0-8 1.3-8 4v2h16v-2c0-2.7-5.3-4-8-4zm8 0c-.3 0-.7 0-1.1.1A4.2 4.2 0 0 1 17 17v2h7v-2c0-2.7-5.3-4-8-4z"/></svg><span>Techs</span><em id="techCount"></em><span class="caret">▼</span></button>
+      <button class="dd" id="unBtn"><svg viewBox="0 0 24 24"><path d="M19 3h-4.2a3 3 0 0 0-5.6 0H5v18h14zm-7 0a1 1 0 1 1 0 2 1 1 0 0 1 0-2zm1 15h-2v-2h2zm0-4h-2V8h2z"/></svg><span>All unassigned</span><em class="badge zero" id="unCount">…</em></button>
+    </div>
     <div class="chips" id="chips"></div>
     <div class="sub">
       <span class="sum" id="sum"></span>
@@ -192,6 +231,12 @@
   <footer id="foot"><a href="dispatch.html">Move a job by voice →</a> · <a href="#" id="forget">Change code</a></footer>
 </div>
 
+<div id="ddShade" class="hidden"></div>
+<div id="techMenu" class="hidden" role="dialog" aria-label="Choose techs">
+  <div class="mh"><b>Show on the board</b><button id="mAll">All</button><button id="mNone">None</button></div>
+  <div class="ml" id="mList"></div>
+  <div class="mf"><button class="btn pri" id="mDone">Done</button></div>
+</div>
 <div id="shade" class="hidden"></div>
 <div id="sheet" class="hidden" role="dialog" aria-modal="true"></div>
 
@@ -211,11 +256,13 @@
   function el(tag, cls, text) { var e = document.createElement(tag); if (cls) e.className = cls; if (text != null) e.textContent = text; return e; }
   function say(text, kind) { var m = $("msg"); m.textContent = text || ""; m.className = "msg" + (text ? " " + (kind || "warn") : " hidden"); sizeBoard(); }
 
-  var prefs = { hidden: {}, showEmpty: false, view: "grid", fit: 2 };
+  // hidden: techs switched off; shown: techs with nothing scheduled that were switched on anyway.
+  var prefs = { hidden: {}, shown: {}, view: "grid", fit: 2 };
   try { var sp = JSON.parse(get(PREF) || "{}"); for (var k in sp) prefs[k] = sp[k]; } catch (e) {}
+  delete prefs.showEmpty; if (!prefs.shown) prefs.shown = {}; if (!prefs.hidden) prefs.hidden = {};
   function savePrefs() { put(PREF, JSON.stringify(prefs)); }
 
-  var S = { code: "", date: "", today: "", data: null, loading: false, scrolledFor: "", timer: null, offline: false };
+  var S = { code: "", date: "", today: "", data: null, loading: false, scrolledFor: "", timer: null, offline: false, un: null };
 
   // ---------- server ----------
   function api(action, data) {
@@ -275,6 +322,7 @@
   // Where is this tech right now? Only meaningful for today.
   function whereNow(c) {
     var w = work(c.items).filter(function (it) { return !it.all_day || it.kind === "job"; });
+    if (c.id === UN && !w.length) { var n0 = unOpen(); return n0 ? { cls: "link", text: "None this day · " + n0 + " open ›", un: true } : { cls: "done", text: "Nothing unassigned" }; }
     if (!w.length) return { cls: "free", text: "Nothing scheduled" };
     if (c.id === UN) { var open = w.filter(function (it) { return stateOf(it) !== "done"; }); return open.length ? { cls: "need", text: open.length + (open.length === 1 ? " needs a tech" : " need a tech"), it: open[0] } : { cls: "done", text: "All covered" }; }
     if (S.data.date !== S.data.today) return { cls: "free", text: w.length + (w.length === 1 ? " stop" : " stops") };
@@ -287,13 +335,15 @@
     var nm = nowMin(), next = left.filter(function (it) { return it.emin > nm; })[0] || left[0];
     return { cls: "free", text: "Next " + hm(next.smin) + " · " + next.customer, it: next };
   }
-  function visible(cols) {
-    return cols.filter(function (c) {
-      if (prefs.hidden[c.id]) return false;
-      if (!c.items.length && !prefs.showEmpty) return false;
-      return true;
-    });
+  // Unassigned is always there (like HCP) unless switched off; techs show when they have something that day or were
+  // switched on by hand.
+  function isOn(c) { if (prefs.hidden[c.id]) return false; return c.id === UN || c.items.length > 0 || !!prefs.shown[c.id]; }
+  function toggle(c) {
+    if (isOn(c)) { prefs.hidden[c.id] = 1; delete prefs.shown[c.id]; }
+    else { delete prefs.hidden[c.id]; if (c.id !== UN && !c.items.length) prefs.shown[c.id] = 1; }
+    savePrefs();
   }
+  function visible(cols) { return cols.filter(isOn); }
   function tint(hex) { return /^#[0-9a-f]{6}$/i.test(hex || "") ? hex + "22" : "rgba(138,148,166,.13)"; }
 
   // ---------- render: top ----------
@@ -305,33 +355,113 @@
     show($("todayBtn"), S.date !== S.today);
     if (!d) { $("chips").innerHTML = ""; $("sum").textContent = ""; return; }
     var cols = columns(), box = $("chips"); box.innerHTML = "";
-    var busy = cols.filter(function (c) { return c.items.length; }), idle = cols.filter(function (c) { return !c.items.length && c.id !== UN; });
-    var anyHidden = busy.some(function (c) { return prefs.hidden[c.id]; });
-    var all = el("button", "chip act", anyHidden ? "Show all" : "Only…");
-    all.onclick = function () {
-      if (anyHidden) { busy.forEach(function (c) { delete prefs.hidden[c.id]; }); savePrefs(); render(); }
-      else { busy.forEach(function (c) { prefs.hidden[c.id] = 1; }); savePrefs(); render(); say("Tap the techs you want to see.", "busy"); }
-    };
-    box.appendChild(all);
-    busy.concat(prefs.showEmpty ? idle : []).forEach(function (c) {
-      var off = !!prefs.hidden[c.id];
+    var on = cols.filter(isOn).length;
+    $("techCount").textContent = on + "/" + cols.length;
+    // Quick toggles for whoever has something today (the Techs list has everyone).
+    cols.filter(function (c) { return c.items.length || isOn(c); }).forEach(function (c) {
+      var off = !isOn(c);
       var b = el("button", "chip " + (off ? "off" : "on")); b.style.setProperty("--c", c.color);
       b.appendChild(el("i")); b.appendChild(document.createTextNode(c.short)); b.appendChild(el("em", null, String(work(c.items).length)));
       b.setAttribute("aria-pressed", off ? "false" : "true");
-      b.onclick = function () { if (off) delete prefs.hidden[c.id]; else prefs.hidden[c.id] = 1; savePrefs(); if ($("msg").textContent === "Tap the techs you want to see.") say(""); render(); };
+      b.onclick = function () { toggle(c); render(); };
       box.appendChild(b);
     });
-    if (idle.length) {
-      var e = el("button", "chip act", prefs.showEmpty ? "Hide the " + idle.length + " with nothing" : "+ " + idle.length + " with nothing scheduled");
-      e.onclick = function () { prefs.showEmpty = !prefs.showEmpty; savePrefs(); render(); };
-      box.appendChild(e);
-    }
     var w = work(d.items || []), seen = {}, rev = 0, est = 0;
     w.forEach(function (it) { if (it.kind === "job" && !seen[it.job_id]) { seen[it.job_id] = 1; rev += it.amount || 0; } if (it.kind === "estimate") est++; });
     var jobs = Object.keys(seen).length;
     $("sum").textContent = jobs + (jobs === 1 ? " job" : " jobs") + (est ? " · " + est + " est." : "") + " · " + money(rev) +
       " · " + (S.offline ? "offline, " : "") + "as of " + (d.loaded_at || "");
   }
+
+  // ---------- Techs dropdown (check marks) ----------
+  function renderMenu() {
+    var box = $("mList"); box.innerHTML = "";
+    if (!S.data) { box.appendChild(el("div", "sec", "Loading…")); return; }
+    var cols = columns(), busy = cols.filter(function (c) { return c.id === UN || c.items.length; }), idle = cols.filter(function (c) { return c.id !== UN && !c.items.length; });
+    function row(c) {
+      var on = isOn(c), n = work(c.items).length;
+      var b = el("button", "opt" + (on ? " on" : "")); b.style.setProperty("--c", c.color);
+      b.setAttribute("role", "menuitemcheckbox"); b.setAttribute("aria-checked", on ? "true" : "false");
+      b.appendChild(el("span", "box", on ? "✓" : ""));
+      b.appendChild(el("i"));
+      b.appendChild(el("span", "nm", c.name));
+      b.appendChild(el("small", null, c.id === UN ? (n ? n + " this day" : "none this day") : n ? n + (n === 1 ? " stop" : " stops") : "nothing scheduled"));
+      b.onclick = function () { toggle(c); renderMenu(); render(); };
+      return b;
+    }
+    box.appendChild(el("div", "sec", "On the schedule " + (S.date === S.today ? "today" : dayLabel(S.date))));
+    busy.forEach(function (c) { box.appendChild(row(c)); });
+    if (idle.length) { box.appendChild(el("div", "sec", "Nothing scheduled")); idle.forEach(function (c) { box.appendChild(row(c)); }); }
+  }
+  function openMenu() {
+    renderMenu();
+    var r = $("top").getBoundingClientRect(), m = $("techMenu");
+    m.style.top = (r.bottom - 4) + "px";
+    m.style.maxHeight = Math.max(240, window.innerHeight - r.bottom - 12) + "px";
+    $("mList").style.maxHeight = Math.max(140, window.innerHeight - r.bottom - 130) + "px";
+    show(m, true); show($("ddShade"), true); $("techBtn").setAttribute("aria-expanded", "true");
+  }
+  function closeMenu() { show($("techMenu"), false); show($("ddShade"), false); $("techBtn").setAttribute("aria-expanded", "false"); }
+  $("techBtn").onclick = function () { if ($("techMenu").classList.contains("hidden")) openMenu(); else closeMenu(); };
+  $("ddShade").onclick = closeMenu; $("mDone").onclick = closeMenu;
+  $("mAll").onclick = function () { if (!S.data) return; prefs.hidden = {}; savePrefs(); renderMenu(); render(); };
+  $("mNone").onclick = function () { if (!S.data) return; prefs.hidden = {}; prefs.shown = {}; columns().forEach(function (c) { prefs.hidden[c.id] = 1; }); savePrefs(); renderMenu(); render(); };
+
+  // ---------- Unassigned jobs (any day) ----------
+  function unOpen() { return S.un ? (S.un.items || []).length : 0; }
+  function renderUnBtn() {
+    var b = $("unCount");
+    if (!S.un) { b.textContent = "…"; b.className = "badge zero"; return; }
+    b.textContent = String(unOpen()); b.className = "badge" + (unOpen() ? "" : " zero");
+  }
+  function loadUn(fresh) {
+    return api("unassigned", { fresh: !!fresh }).then(function (r) {
+      if (r && r.ok) { S.un = r; try { put("grBoardUn", JSON.stringify(r)); } catch (e) {} }
+      else if (!S.un) { try { S.un = JSON.parse(get("grBoardUn") || "null"); } catch (e) {} }
+      renderUnBtn(); if (S.data) render();
+      if (!$("sheet").classList.contains("hidden") && S.sheetIsUn) openUnassigned();
+      return r;
+    });
+  }
+  function urow(it) {
+    var r = el("button", "row");
+    var tm = el("div", "tm", it.group === "unscheduled" ? "—" : it.when.split(" · ")[1] || "");
+    if (it.group === "unscheduled" && it.created) tm.appendChild(el("small", null, "added " + it.created));
+    r.appendChild(tm);
+    var bd = el("div", "bd"); var nm = el("b", null, it.customer); if (it.day_of) nm.appendChild(el("span", "tag est", it.day_of)); bd.appendChild(nm);
+    bd.appendChild(el("span", null, it.title || "—"));
+    if (it.address) bd.appendChild(el("span", null, it.address));
+    r.appendChild(bd);
+    r.appendChild(el("div", "am", it.amount ? money(it.amount) : "#" + it.number));
+    r.onclick = function () { openSheet(it, null, openUnassigned); };
+    return r;
+  }
+  function openUnassigned() {
+    closeMenu();
+    var sh = $("sheet"); sh.innerHTML = ""; sh.appendChild(el("div", "grab")); S.sheetIsUn = true;
+    sh.appendChild(el("h3", null, "Unassigned jobs"));
+    var u = S.un;
+    if (!u) { sh.appendChild(el("div", "kind", "Loading…")); loadUn(false); }
+    else {
+      var items = u.items || [];
+      sh.appendChild(el("div", "kind", (items.length ? items.length + (items.length === 1 ? " open job" : " open jobs") + " with nobody on " + (items.length === 1 ? "it" : "them") : "Every open job has a tech") + " · as of " + (u.loaded_at || "")));
+      var past = items.filter(function (i) { return i.group === "past"; }), up = items.filter(function (i) { return i.group === "upcoming"; }), un = items.filter(function (i) { return i.group === "unscheduled"; });
+      if (past.length) { sh.appendChild(el("div", "ugrp warn", "Past — still open (" + past.length + ")")); past.forEach(function (it) { sh.appendChild(el("div", "udate", it.when.split(" · ")[0])); sh.appendChild(urow(it)); }); }
+      if (up.length) {
+        sh.appendChild(el("div", "ugrp", "Scheduled, no tech (" + up.length + ")"));
+        var last = "";
+        up.forEach(function (it) { if (it.date !== last) { last = it.date; var r0 = rel(it.date); sh.appendChild(el("div", "udate", dayLabel(it.date) + (r0 ? " · " + r0 : ""))); } sh.appendChild(urow(it)); });
+      }
+      if (un.length) { sh.appendChild(el("div", "ugrp", "Needs scheduling (" + un.length + ")")); un.forEach(function (it) { sh.appendChild(urow(it)); }); }
+      if ((u.warnings || []).length) sh.appendChild(el("div", "msg warn", "Some of the list couldn't load: " + u.warnings.join(" · ")));
+    }
+    var acts = el("div", "acts");
+    var rf = el("button", "btn", "Refresh"); rf.onclick = function () { rf.textContent = "Refreshing…"; loadUn(true); }; acts.appendChild(rf);
+    var cl = el("button", "btn", "Close"); cl.onclick = closeSheet; acts.appendChild(cl);
+    sh.appendChild(acts);
+    show($("shade"), true); show(sh, true);
+  }
+  $("unBtn").onclick = openUnassigned;
 
   // ---------- render: grid ----------
   function lanes(items) {
@@ -373,7 +503,7 @@
       var nm = el("div", "nm"); var av = el("div", "av", c.initials); nm.appendChild(av); nm.appendChild(el("span", null, c.short)); h.appendChild(nm);
       h.appendChild(el("div", "meta", (st.rev ? money(st.rev) : "$0") + " · " + hours(st.hrs) + " · " + st.n + (st.n === 1 ? " stop" : " stops")));
       h.appendChild(el("div", "st " + wn.cls, wn.text));
-      h.onclick = function () { if (wn.it) openSheet(wn.it, c); };
+      h.onclick = function () { if (wn.it) openSheet(wn.it, c); else if (c.id === UN) openUnassigned(); };
       g.appendChild(h);
     });
     if (anyAllDay) {
@@ -444,7 +574,8 @@
       th.appendChild(x);
       th.appendChild(el("div", "meta", (st.rev ? money(st.rev) : "$0") + " · " + hours(st.hrs)));
       card.appendChild(th);
-      if (!c.items.length) card.appendChild(el("div", "row", "Nothing scheduled."));
+      if (!c.items.length) card.appendChild(el("div", "row", c.id === UN ? "Nothing unassigned this day." : "Nothing scheduled."));
+      if (c.id === UN && unOpen()) { var all = el("button", "row", "See all " + unOpen() + " open unassigned jobs ›"); all.style.fontWeight = "700"; all.onclick = openUnassigned; card.appendChild(all); }
       c.items.forEach(function (it) {
         var r = el("button", "row"), s = stateOf(it);
         var tm = el("div", "tm", it.all_day ? "All day" : hm(it.smin)); if (!it.all_day) tm.appendChild(el("small", null, "to " + hm(it.emin))); r.appendChild(tm);
@@ -486,20 +617,21 @@
   window.addEventListener("resize", function () { sizeBoard(); });
 
   // ---------- detail sheet ----------
-  function closeSheet() { show($("shade"), false); show($("sheet"), false); }
+  function closeSheet() { show($("shade"), false); show($("sheet"), false); S.sheetIsUn = false; }
   function kv(box, label, content) { var r = el("div", "kv"); r.appendChild(el("span", null, label)); var v = el("span"); if (typeof content === "string") v.textContent = content; else v.appendChild(content); r.appendChild(v); box.appendChild(r); }
   function link(href, text, blank) { var a = el("a", null, text); a.href = href; if (blank) { a.target = "_blank"; a.rel = "noopener"; } return a; }
-  function openSheet(it, c) {
-    var sh = $("sheet"); sh.innerHTML = ""; sh.appendChild(el("div", "grab"));
-    var tm = techMap(), s = stateOf(it);
+  function openSheet(it, c, back) {
+    var sh = $("sheet"); sh.innerHTML = ""; sh.appendChild(el("div", "grab")); S.sheetIsUn = false;
+    var tm = S.data ? techMap() : {}, s = stateOf(it);
     sh.appendChild(el("h3", null, it.kind === "event" ? it.title : it.customer));
     var kind = it.kind === "job" ? "Job #" + (it.number || "?") : it.kind === "estimate" ? "Estimate #" + (it.number || "?") : "Event";
     if (it.full_name && it.full_name.replace(/\s+/g, "") !== it.customer) kind += " · " + it.full_name;
     if (it.company) kind += " · " + it.company;
     sh.appendChild(el("div", "kind", kind));
-    kv(sh, "When", dayLabel(S.date) + " · " + (it.all_day ? "All day" : range(it)) + (it.day_of ? " · " + it.day_of : ""));
+    kv(sh, "When", (it.when || dayLabel(S.date) + " · " + (it.all_day ? "All day" : range(it))) + (it.day_of ? " · " + it.day_of : ""));
     var st = s === "done" ? "Done" + (it.done ? " at " + it.done : "") : s === "work" ? "Working" + (it.started ? " since " + it.started : "") + (it.omw ? " (left " + it.omw + ")" : "")
            : s === "omw" ? "On the way since " + it.omw : s === "event" ? "" : (it.status ? it.status.charAt(0).toUpperCase() + it.status.slice(1) : "Scheduled");
+    if (/needs scheduling/i.test(it.status || "")) st = "Needs scheduling" + (it.created ? " (added " + it.created + ")" : "");
     if (st) kv(sh, "Status", st);
     var names = (it.employee_ids || []).map(function (id) { return tm[id] ? tm[id].name : ""; }).filter(Boolean);
     kv(sh, "Techs", names.length ? names.join(", ") : "Unassigned");
@@ -514,12 +646,14 @@
     var acts = el("div", "acts");
     if (it.url) { var o = link(it.url, "Open in HCP", true); o.className = "btn"; acts.appendChild(o); }
     if (it.kind === "job" && it.number) { var mv = link("dispatch.html?job=" + encodeURIComponent(it.number), "Move / reassign"); mv.className = "btn pri"; acts.appendChild(mv); }
-    var cl = el("button", "btn full", "Close"); cl.onclick = closeSheet; acts.appendChild(cl);
+    if (it.date && it.date !== S.date) { var gd = el("button", "btn full", "Show " + dayLabel(it.date) + " on the board"); gd.onclick = function () { go(it.date); }; acts.appendChild(gd); }
+    if (back) { var bk = el("button", "btn", "‹ Back to list"); bk.onclick = back; acts.appendChild(bk); }
+    var cl = el("button", "btn" + (back ? "" : " full"), "Close"); cl.onclick = closeSheet; acts.appendChild(cl);
     sh.appendChild(acts);
     show($("shade"), true); show(sh, true); sh.scrollTop = 0;
   }
   $("shade").onclick = closeSheet;
-  document.addEventListener("keydown", function (e) { if (e.key === "Escape") closeSheet(); });
+  document.addEventListener("keydown", function (e) { if (e.key === "Escape") { closeSheet(); closeMenu(); } });
 
   // ---------- loading ----------
   function load(fresh, quiet) {
@@ -543,6 +677,7 @@
       }
       S.offline = false;
       if (r.today) S.today = r.today;
+      if (!S.un || fresh || Date.now() - (S.unAt || 0) > REFRESH_MS - 5000) { S.unAt = Date.now(); loadUn(fresh); }
       S.data = r; put(LAST, JSON.stringify(r));
       say((r.warnings || []).length ? "Some of the schedule couldn't load: " + r.warnings.join(" · ") : "");
       render();
@@ -554,7 +689,7 @@
       }
     });
   }
-  function go(ymd) { if (!ymd) return; S.date = ymd; closeSheet(); renderTop(); load(false); try { history.replaceState(null, "", "?date=" + ymd); } catch (e) {} }
+  function go(ymd) { if (!ymd) return; S.date = ymd; closeSheet(); closeMenu(); renderTop(); load(false); try { history.replaceState(null, "", "?date=" + ymd); } catch (e) {} }
   $("prev").onclick = function () { go(addDays(S.date, -1)); };
   $("next").onclick = function () { go(addDays(S.date, 1)); };
   $("todayBtn").onclick = function () { go(S.today || localDay()); };
@@ -580,13 +715,14 @@
     show($("codeCard"), false); show($("app"), true);
     var q = (/[?&]date=(\d{4}-\d{2}-\d{2})/.exec(location.search) || [])[1];
     S.today = localDay(); S.date = q || S.today;
+    try { S.un = JSON.parse(get("grBoardUn") || "null"); } catch (e) {} renderUnBtn();
     // Show the last board straight away when it's the same day (instant open, works with no signal).
     try { var last = JSON.parse(get(LAST) || "null"); if (last && last.date === S.date) { S.data = last; render(); } } catch (e) {}
     renderTop(); sizeBoard(); load(false);
   }
   $("codeGo").onclick = function () { var c = $("code").value.trim(); if (c) start(c); };
   $("code").onkeydown = function (e) { if (e.key === "Enter") $("codeGo").click(); };
-  $("forget").onclick = function (e) { e.preventDefault(); drop(KEY); drop(LAST); S.code = ""; S.data = null; $("code").value = ""; showCode(""); };
+  $("forget").onclick = function (e) { e.preventDefault(); drop(KEY); drop(LAST); drop("grBoardUn"); S.un = null; S.code = ""; S.data = null; $("code").value = ""; showCode(""); };
   (function boot() {
     if (get(KEY)) return start(get(KEY));
     for (var i = 0; i < OLD_KEYS.length; i++) if (get(OLD_KEYS[i])) return start(get(OLD_KEYS[i]));

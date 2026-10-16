@@ -296,9 +296,13 @@ of the Dispatch script.
   from the On my way / Start / Finish buttons: "● At SwoffordMichael · since 9:40", "➜ Driving to …", "Next 1p · …",
   "✓ All done". All-day items (Emergency Phone, anytime jobs) sit in a strip under the headers.
 - **List**: the same day as one card per tech — easier to read on a small screen.
-- **Tech chips** across the top turn columns on/off (remembered on that phone). "Only…" switches them all off so
-  you can pick one or two; techs with nothing scheduled (office staff) are hidden unless you tap
-  "+ N with nothing scheduled".
+- **Techs ▾** opens a checklist of everyone with a check mark next to each name: tap names to switch columns on/off,
+  **All** / **None** at the top, and a "Nothing scheduled" section (office staff, people off) you can tick to add an
+  empty column. Choices are remembered on that phone. The chips under it are quick toggles for whoever has work that day.
+- **Unassigned** is always the first column (like HCP), even on a day with none. **All unassigned (N)** opens every
+  open job nobody is on: *Past — still open* (last 14 days), *Scheduled, no tech* by day for the next 90 days (a
+  multi-day job's day with nobody dispatched counts), and *Needs scheduling*. Tap one for details, Move / reassign,
+  or "Show that day on the board". Server action `unassigned`, cached 60 s.
 - **Tap anything** for the details: customer, job #, status times, techs, address (opens Maps), phone (tap to call),
   amount, type, tags, **Open in HCP**, and **Move / reassign**, which opens Dispatch with the job already typed in
   (`dispatch.html?job=NUMBER`).
