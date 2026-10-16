@@ -102,6 +102,9 @@
   .li .tag2 { display: inline-block; font-size: 12px; font-weight: 700; border-radius: 6px; padding: 1px 6px; background: var(--warn-bg, #fff4d6); color: var(--warn-ink, #6b4a00); margin-top: 4px; }
   .li .price { flex: none; font-weight: 700; min-width: 72px; text-align: right; padding-top: 2px; }
   .li.off .body, .li.off .price, .li.off .ctl { opacity: .5; }
+  .chips { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 4px; }
+  .chip { display: inline-flex; align-items: center; gap: 6px; border-radius: 999px; padding: 6px 6px 6px 12px; font-size: 15px; font-weight: 600; background: var(--soft); border: 1px solid var(--line); color: var(--ink); }
+  .chip button { border: 0; background: none; color: var(--muted); font-size: 18px; line-height: 1; padding: 0 6px; cursor: pointer; }
   .total { display: flex; justify-content: space-between; font-weight: 700; margin-top: 10px; padding-top: 10px; border-top: 1px solid var(--line); }
   footer { text-align: center; font-size: 13px; color: var(--muted); margin-top: 18px; }
   footer a { color: inherit; }
@@ -209,6 +212,16 @@
       <div class="full"><label for="jUnit">Business unit</label><select id="jUnit"><option value="">— None —</option></select></div>
     </div>
     <div class="hint" id="jfHint">Picked from the description. <button class="link" id="suggest">Suggest again</button></div>
+    <div style="margin-top:12px">
+      <label for="tagAdd">Job tags</label>
+      <div class="chips" id="tagChips"></div>
+      <div class="row" style="margin-top:8px">
+        <input id="tagAdd" list="tagList" placeholder="Add a tag" autocomplete="off" enterkeyhint="done">
+        <button class="btn" id="tagGo" style="width:auto;margin:0;padding:0 16px">Add</button>
+      </div>
+      <datalist id="tagList"></datalist>
+      <div class="hint" id="tagHint">Up to 3 picked from what you said — tap × to drop one.</div>
+    </div>
     <div class="grid" style="margin-top:12px">
       <div><label for="jDate">Date</label><input id="jDate" type="date"></div>
       <div><label for="jTime">Time</label><input id="jTime" type="time" step="900"></div>
@@ -261,11 +274,11 @@
   function el(tag, cls, text) { var e = document.createElement(tag); if (cls) e.className = cls; if (text != null) e.textContent = text; return e; }
   function recent(text) { try { var r = JSON.parse(get("grRecent") || "[]"); r.unshift({ tool: "New Job", text: text, at: Date.now() }); put("grRecent", JSON.stringify(r.slice(0, 20))); } catch (e) {} }
 
-  var S = { code: "", mode: "auto", fields: null, cust: null, isNew: false, addr: "", me: "", today: "", usualUnit: {}, items: [], priceBook: true };
+  var S = { code: "", mode: "auto", fields: null, cust: null, isNew: false, addr: "", me: "", today: "", usualUnit: {}, items: [], priceBook: true, tags: [], allTags: [] };
   function money(c) { return "$" + ((Number(c) || 0) / 100).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 }); }
 
   // ---------- server ----------
-  var PAGE_VERSION = 5;   // bump with every change the server depends on (server: NJ.MIN_PAGE_VERSION)
+  var PAGE_VERSION = 6;   // bump with every change the server depends on (server: NJ.MIN_PAGE_VERSION)
   function api(action, data) {
     data = data || {}; data.action = action; data.token = S.code; data.v = PAGE_VERSION;
     if (ENDPOINT.indexOf("https://") !== 0) return Promise.resolve({ ok: false, error: "New Job isn't connected yet. Check back soon." });
@@ -303,6 +316,8 @@
       setAssign();
       S.usualUnit = r.usual_unit || {};
       S.priceBook = r.price_book !== false;
+      S.allTags = r.tags || [];
+      var dl = $("tagList"); dl.innerHTML = ""; S.allTags.forEach(function (t) { var o = el("option"); o.value = t.name; dl.appendChild(o); });
       show($("liSection"), S.priceBook);
       [["jType", r.job_types], ["jUnit", r.business_units]].forEach(function (d) {
         (d[1] || []).forEach(function (x) { var o = el("option", null, x.name); o.value = x.id; $(d[0]).appendChild(o); });
@@ -427,6 +442,7 @@
       S.fields = r.fields || {};
       fillJob(S.fields);
       setItems(r.suggestions || []);
+      setTags(r.tags || []);
       if (S.mode === "new") { say("talkMsg", ""); openNew(r.dupes || []); return; }
       var m = r.matches || [];
       if (m.length) {
@@ -621,6 +637,30 @@
   }
   function fmtPhone(d) { d = String(d).replace(/\D/g, ""); return d.length === 10 ? "(" + d.slice(0, 3) + ") " + d.slice(3, 6) + "-" + d.slice(6) : d; }
 
+  // ---------- job tags ----------
+  function setTags(list) { S.tags = (list || []).slice(); renderTags(); }
+  function renderTags() {
+    var box = $("tagChips"); box.innerHTML = "";
+    S.tags.forEach(function (t, i) {
+      var c = el("span", "chip", t.name);
+      var x = el("button", null, "×"); x.type = "button"; x.title = "Remove " + t.name;
+      x.onclick = function () { S.tags.splice(i, 1); renderTags(); };
+      c.appendChild(x); box.appendChild(c);
+    });
+    if (!S.tags.length) box.appendChild(el("span", "hint", "No tags yet."));
+  }
+  function addTag() {
+    var v = $("tagAdd").value.trim().toLowerCase(); if (!v) return;
+    var t = S.allTags.filter(function (x) { return x.name.toLowerCase() === v; })[0]
+         || S.allTags.filter(function (x) { return x.name.toLowerCase().indexOf(v) === 0; })[0];
+    if (!t) { $("tagHint").textContent = "No tag called “" + $("tagAdd").value.trim() + "” — pick one from the list."; return; }
+    if (!S.tags.some(function (x) { return x.id === t.id; })) S.tags.push(t);
+    $("tagAdd").value = ""; $("tagHint").textContent = "Up to 3 picked from what you said — tap × to drop one."; renderTags();
+  }
+  $("tagGo").onclick = addTag;
+  $("tagAdd").onkeydown = function (e) { if (e.key === "Enter") { e.preventDefault(); addTag(); } };
+  $("tagAdd").onchange = function () { if (S.allTags.some(function (x) { return x.name === $("tagAdd").value; })) addTag(); };
+
   // ---------- line items from the price book ----------
   function customItem(name, qty) {
     return { label: name, qty: qty > 0 ? qty : 1, cands: [], custom: true, use: false,
@@ -717,6 +757,7 @@
                         job_type_id: $("jType").value, business_unit_id: $("jUnit").value } };
     if (!data.job.description) { say("submitMsg", "❌ Add a job description.", "err"); $("desc").focus(); return; }
     if (data.job.time && !data.job.date) { say("submitMsg", "❌ Pick a date for that time.", "err"); return; }
+    data.job.tag_ids = S.tags.map(function (t) { return t.id; });
     data.job.line_items = S.items.filter(function (it) { return it.use && it.cand && String(it.cand.name).trim(); }).map(function (it) {
       return { uuid: it.cand.uuid || "", name: String(it.cand.name).trim(), description: it.cand.description || "", quantity: it.qty, unit_price: it.cand.price, unit_cost: it.cand.cost, kind: "labor", taxable: it.cand.taxable };
     });
@@ -759,7 +800,7 @@
   $("again").onclick = function () {
     S.fields = null; S.cust = null; resetSubmit();
     $("heard").value = ""; $("desc").value = ""; $("jDate").value = ""; $("jTime").value = "";
-    $("jArrival").value = "120"; setAssign(); $("searchBox").value = ""; setJobFields("", ""); setItems([]); $("liSearch").value = "";
+    $("jArrival").value = "120"; setAssign(); $("searchBox").value = ""; setJobFields("", ""); setItems([]); setTags([]); $("liSearch").value = "";
     say("talkMsg", ""); show($("matchCard"), false); show($("confirmCard"), false);
     window.scrollTo({ top: 0, behavior: "smooth" });
   };

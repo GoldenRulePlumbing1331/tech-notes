@@ -264,6 +264,14 @@ and 14 browser checks (real CSV parse → plan → untick → apply).
   anything older than `NJ.MIN_PAGE_VERSION` with "This New Job page is out of date on this phone — close it and
   open it again", and the page shows a Reload button. Job #49761 (Oct 16) was assigned to Kyle by a copy of the page
   that had been open since before that day's fixes.
+- **Job tags** (2026-10-16, 4 PM). Haiku picks the 3 tags that best fit the work from the tags actually used on the
+  last ~1,000 jobs (most used first), leaving out customer/office/request tags (Requested:, No Send:, Pipeline
+  Automation, New Customer, neighborhoods, Website, Tenant, … — `NJ.TAG_SKIP_RE`, plus script property `TAG_SKIP`).
+  The page shows them as chips (× to drop, type to add any other tag); on Create each one goes on the job with
+  `POST /jobs/{id}/tags` and the message lists them.
+- **Display name on new customers** is sent as `display_name: "DoeJohn"` when the page creates a customer. The
+  field isn't in HCP's documented API (and GET never returns it), so if HCP refuses it the customer is created
+  without it; check the first new customer after Oct 16 to see whether HCP took it.
 - **Parent / child accounts.** The public API has no field for HCP's "This customer bills to" link (checked
   2026-10-16 against the 24 Patrick Ave accounts: the customer object only carries `kind`, `tags`, `addresses`).
   What the tool can do: when two or more matches share a phone number or an address, each gets a
