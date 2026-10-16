@@ -50,7 +50,7 @@ const NJ = {
   PRICE_CANDIDATES: 6,        // price book hits kept per suggested line item
   MAX_SUGGEST: 5,             // line items Haiku may suggest per dictation
   MAX_TAGS: 3,                // job tags Haiku may pick
-  TAG_SCAN_PAGES: 10,         // recent jobs (x100) scanned to learn which tags are used on jobs
+  TAG_SCAN_PAGES: 6,          // recent jobs (x100) scanned to learn which tags are used on jobs (kept 7 days)
   // Tags that describe the customer, the office or a tech request — never picked from the work described.
   // Script property TAG_SKIP (comma-separated) adds more.
   TAG_SKIP_RE: /^(requested|no send|send)\b|pipeline automation|new customer|website|possible-duplicate|waived billing|difficult customer|has cats|family\/friend|word of mouth|service whale|landlord|tenant|contractor|bill from shop|can reschedule|timing is flexible|can arrive early|call on job completion|customer has credit|military|teacher|works from home|bcwc|pictures needed|no pics|follow-up|priority|colorful remedies|tru north|hersheys mill|exton station|greystone|indian king|reserve at eagle|evian|public (water|sewage)|well system|septic|townhouse|condo|duplex|mobile home|split level|walkout|on slab|finished basement|kfs|kfp|kft|kfjf|kfjt|^tt$|^new$|^other$|^final$|^install$|^air$|^power$|^alarm$/i,
@@ -383,6 +383,8 @@ function njJobTags_(fresh) {
   const cache = CacheService.getScriptCache();
   const hit = !fresh && cache.get('nj_tags');
   if (hit) { try { return JSON.parse(hit); } catch (_) {} }
+  const saved = !fresh && njPropGet_('NJ_TAGS_CACHE', 7 * 86400000);   // the scan takes ~15 s, so it's kept a week
+  if (saved) { try { cache.put('nj_tags', JSON.stringify(saved), 6 * 3600); } catch (_) {} return saved; }
   const all = {}, uses = {};
   try {
     for (let page = 1; page <= 10; page++) {
@@ -400,7 +402,28 @@ function njJobTags_(fresh) {
   const list = Object.keys(uses).filter(n => all[n] && !NJ.TAG_SKIP_RE.test(n) && extra.indexOf(n) === -1)
     .sort((a, b) => uses[b] - uses[a]).map(n => ({ id: all[n].id, name: all[n].name, uses: uses[n] }));
   try { cache.put('nj_tags', JSON.stringify(list), 6 * 3600); } catch (_) {}
+  njPropPut_('NJ_TAGS_CACHE', list.map(t => ({ id: t.id, name: t.name, uses: t.uses })));
   return list;
+}
+
+/** Script-property store for values bigger than one property (9 KB), split into chunks, with an age limit. */
+function njPropPut_(key, data) {
+  try {
+    const props = props_(), text = JSON.stringify({ at: Date.now(), data: data }), size = 8000, parts = Math.ceil(text.length / size);
+    const old = Number(props.getProperty(key + '_N') || 0);
+    for (let i = 0; i < parts; i++) props.setProperty(key + '_' + i, text.slice(i * size, (i + 1) * size));
+    for (let i = parts; i < old; i++) props.deleteProperty(key + '_' + i);
+    props.setProperty(key + '_N', String(parts));
+  } catch (e) { console.warn('could not save ' + key + ': ' + e.message); }
+}
+function njPropGet_(key, maxAgeMs) {
+  try {
+    const props = props_(), n = Number(props.getProperty(key + '_N') || 0);
+    if (!n) return null;
+    let text = ''; for (let i = 0; i < n; i++) text += props.getProperty(key + '_' + i) || '';
+    const o = JSON.parse(text);
+    return o && Date.now() - o.at < maxAgeMs ? o.data : null;
+  } catch (_) { return null; }
 }
 
 /** Puts the chosen tags on the new job (POST /jobs/{id}/tags, one per tag). Returns the names that stuck. Never throws. */
@@ -537,19 +560,23 @@ function njAddLineItems_(jobId, items) {
 /* ───────────── address → ZIP (US Census geocoder: free, no key) ───────────── */
 
 /**
- * Fills in the ZIP (and city) for a street address. {street, city, state, zip} in → {found, zip, city, state, matched}.
- * Uses the US Census Bureau geocoder, which needs no key; results are cached for a day. Never throws.
+ * Fills in the ZIP (and city) for a street address. {street, city, state, zip} in → {found, zip, city, state, source}.
+ * Tries, in order: the US Census geocoder (free, no key) · other HCP customers on the same street in the same town ·
+ * the town's ZIP when the town has only one (zippopotam.us). Results cached for a day. Never throws.
  */
 function njLookupAddress_(a) {
   const street = String((a && a.street) || '').trim(), city = String((a && a.city) || '').trim();
   const state = (String((a && a.state) || '').trim() || NJ.DEFAULT_STATE).toUpperCase().slice(0, 2);
   const zip = (String((a && a.zip) || '').match(/\d{5}/) || [''])[0];
   if (!street || (!city && !zip)) return { found: false };
-  const key = 'nj_zip_' + Utilities.base64EncodeWebSafe([street, city, state, zip].join('|').toLowerCase()).slice(0, 200);
+  const key = 'nj_zip2_' + Utilities.base64EncodeWebSafe([street, city, state, zip].join('|').toLowerCase()).slice(0, 200);
   const cache = CacheService.getScriptCache();
   const hit = cache.get(key);
   if (hit) { try { return JSON.parse(hit); } catch (_) {} }
+  const title = x => String(x || '').toLowerCase().replace(/\b[a-z]/g, ch => ch.toUpperCase());
   let out = { found: false };
+
+  // 1. US Census geocoder
   try {
     const url = 'https://geocoding.geo.census.gov/geocoder/locations/address?street=' + encodeURIComponent(street) +
       '&city=' + encodeURIComponent(city) + '&state=' + encodeURIComponent(state) + '&zip=' + encodeURIComponent(zip) +
@@ -559,11 +586,49 @@ function njLookupAddress_(a) {
       const m = ((JSON.parse(res.getContentText()).result || {}).addressMatches || [])[0];
       if (m && m.addressComponents && m.addressComponents.zip) {
         const c = m.addressComponents;
-        out = { found: true, zip: String(c.zip), state: String(c.state || state).toUpperCase(), matched: m.matchedAddress || '',
-                city: String(c.city || city).toLowerCase().replace(/\b[a-z]/g, ch => ch.toUpperCase()) };
+        out = { found: true, zip: String(c.zip), state: String(c.state || state).toUpperCase(), city: title(c.city || city), source: 'census' };
       }
     }
-  } catch (e) { console.warn('address lookup failed: ' + e.message); }
+  } catch (e) { console.warn('census lookup failed: ' + e.message); }
+
+  // 2. Our own customers on the same street (same town when we have one)
+  if (!out.found) {
+    try {
+      const norm = x => String(x || '').toLowerCase().replace(/^\s*\d+[a-z]?\s+/, '').replace(/[.,#]/g, ' ')
+        .replace(/\b(road)\b/g, 'rd').replace(/\b(street)\b/g, 'st').replace(/\b(avenue)\b/g, 'ave').replace(/\b(lane)\b/g, 'ln')
+        .replace(/\b(drive)\b/g, 'dr').replace(/\b(court)\b/g, 'ct').replace(/\b(circle)\b/g, 'cir').replace(/\b(boulevard)\b/g, 'blvd')
+        .replace(/\b(place)\b/g, 'pl').replace(/\b(pike)\b/g, 'pk').replace(/\s+/g, ' ').trim();
+      const want = norm(street), town = city.toLowerCase();
+      if (want) {
+        // search on the street name alone ("500 Park Rd" → "Park") so Rd/Road spellings both come back
+        const core = want.replace(/\s+(rd|st|ave|ln|dr|ct|cir|blvd|pl|pk|way|ter|trl)$/, '').trim() || want;
+        const r = hcp_('get', `/customers?q=${encodeURIComponent(core)}&page_size=50`);
+        const count = {};
+        (r.customers || []).forEach(c => (c.addresses || []).forEach(ad => {
+          if (norm(ad.street) !== want || !/^\d{5}/.test(ad.zip || '')) return;
+          if (town && String(ad.city || '').toLowerCase() !== town) return;
+          if (zip && String(ad.zip).slice(0, 5) !== zip) return;
+          const k = String(ad.zip).slice(0, 5) + '|' + title(ad.city);
+          count[k] = (count[k] || 0) + 1;
+        }));
+        const best = Object.keys(count).sort((x, y) => count[y] - count[x])[0];
+        if (best) out = { found: true, zip: best.split('|')[0], city: city || best.split('|')[1], state: state, source: 'hcp' };
+      }
+    } catch (e) { console.warn('hcp street lookup failed: ' + e.message); }
+  }
+
+  // 3. The town has a single ZIP
+  if (!out.found && city && !zip) {
+    try {
+      const res = UrlFetchApp.fetch('https://api.zippopotam.us/us/' + state.toLowerCase() + '/' + encodeURIComponent(city.toLowerCase()), { muteHttpExceptions: true });
+      if (res.getResponseCode() === 200) {
+        const codes = (JSON.parse(res.getContentText()).places || []).map(p => p['post code']).filter((x, i, arr) => arr.indexOf(x) === i);
+        if (codes.length === 1) out = { found: true, zip: codes[0], city: city, state: state, source: 'town' };
+        else if (codes.length > 1) out = { found: false, several: codes.slice(0, 6) };
+      }
+    } catch (e) { console.warn('town zip lookup failed: ' + e.message); }
+  }
+
   try { cache.put(key, JSON.stringify(out), out.found ? 86400 : 3600); } catch (_) {}
   return out;
 }
@@ -951,7 +1016,7 @@ function verifyAccess() {
   const cat = njCatalog_(true);
   console.log(cat.length ? `✅ Price book: ${cat.length} services cached; "50 gal gas water heater" → ${njPriceSearch_('50 gal gas water heater').slice(0, 3).map(c => c.name + ' $' + (c.price / 100).toFixed(2)).join(' | ') || 'no hits'}` : '⚠️ Price book services not reachable with this key — line item suggestions are off.');
   CacheService.getScriptCache().remove('nj_tags');
-  const tg = njJobTags_(true);
+  const tg = njJobTags_(true);   // also refreshes the 7-day saved copy
   console.log(tg.length ? `✅ Job tags: ${tg.length} work tags used on recent jobs — top: ${tg.slice(0, 12).map(t => t.name + ' (' + t.uses + ')').join(', ')}` : '⚠️ Job tags not readable — tag suggestions are off.');
   console.log(`Access codes set up for ${Object.keys(techCodes_()).length} people.`);
   console.log(props_().getProperty('ANTHROPIC_API_KEY') ? '✅ ANTHROPIC_API_KEY is set.' : '⚠️ ANTHROPIC_API_KEY is not set (dictation parsing will be basic).');

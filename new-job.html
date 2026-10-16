@@ -560,7 +560,8 @@
     zp.dataset.tried = want; hint.textContent = "Looking up the ZIP…";
     api("address", { address: { street: st.value.trim(), city: ci.value.trim(), state: sta.value.trim() } }).then(function (r) {
       if (zp.value.trim()) { hint.textContent = ""; return; }
-      if (r.ok && r.found) { zp.value = r.zip; hint.textContent = "ZIP " + r.zip + " looked up from the address."; }
+      if (r.ok && r.found) { zp.value = r.zip; hint.textContent = "ZIP " + r.zip + (r.source === "hcp" ? " — from other customers on this street." : r.source === "town" ? " — the only ZIP for " + ci.value.trim() + "." : " looked up from the address."); }
+      else if (r.ok && r.several && r.several.length) hint.textContent = ci.value.trim() + " has more than one ZIP (" + r.several.join(", ") + ") — leave it blank or type the right one.";
       else hint.textContent = "Couldn't find the ZIP — leave it blank if you don't have it.";
     });
   }

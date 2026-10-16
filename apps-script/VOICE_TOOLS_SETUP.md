@@ -251,8 +251,9 @@ and 14 browser checks (real CSV parse → plan → untick → apply).
   the item name), so "gas line cap" no longer lands on a water heater.
 - **Assign to** always starts on **Unassigned** (also after "Start another job"); pick a tech only when you mean to.
   The success message always says who it's assigned to, or "Unassigned".
-- **ZIP is optional** (2026-10-16, 3 PM). A street + city with no ZIP is looked up with the free US Census address
-  lookup (no key): on the server when the dictation is read, on the page as soon as you leave the street/city box,
+- **ZIP is optional** (2026-10-16, 3 PM). A street + city with no ZIP is looked up — US Census address lookup
+  first, then other HCP customers on the same street in the same town, then the town's ZIP when it has only one
+  (zippopotam.us; e.g. Downingtown → 19335, while West Chester has several and is left blank) —  on the server when the dictation is read, on the page as soon as you leave the street/city box,
   and again on Create as a safety net. Not found → the address is sent without a ZIP (if HCP ever insists, the
   page says "type the ZIP"). Street + ZIP with no city fills the city the same way.
 - **Display name** preview matches HCP: last name then first name, no spaces ("John Doe" → "DoeJohn"), even
@@ -268,7 +269,8 @@ and 14 browser checks (real CSV parse → plan → untick → apply).
   last ~1,000 jobs (most used first), leaving out customer/office/request tags (Requested:, No Send:, Pipeline
   Automation, New Customer, neighborhoods, Website, Tenant, … — `NJ.TAG_SKIP_RE`, plus script property `TAG_SKIP`).
   The page shows them as chips (× to drop, type to add any other tag); on Create each one goes on the job with
-  `POST /jobs/{id}/tags` and the message lists them.
+  `POST /jobs/{id}/tags` and the message lists them. Building the tag list scans ~600 jobs (~15 s), so it's
+  kept in script properties for 7 days (`NJ_TAGS_CACHE_*`); `verifyAccess()` refreshes it.
 - **Display name on new customers** is sent as `display_name: "DoeJohn"` when the page creates a customer. The
   field isn't in HCP's documented API (and GET never returns it), so if HCP refuses it the customer is created
   without it; check the first new customer after Oct 16 to see whether HCP took it.
