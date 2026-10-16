@@ -182,8 +182,9 @@ SupplyZone's Quick Pad list is still offered on the done screen.
 ## No signal — what works offline (added 2026-10-14, 4:15 PM)
 
 - **Every page opens with no signal** after its first visit: `sw.js` (a service worker, registered from
-  `config.js`) keeps the six pages + config/manifest/icon on the phone and refreshes them in the background,
-  so an update shows up the second time a page is opened after it ships. Nothing from script.google.com is cached.
+  `config.js`) keeps the pages + config/manifest/icon on the phone. Since 2026-10-16 pages load **network first**
+  (fresh copy whenever there's signal, so an update shows up the first time a page is opened after it ships) and
+  fall back to the saved copy offline or when the network takes over 4 seconds. Nothing from script.google.com is cached.
 - **Job Notes queues and auto-sends.** Every note is saved to the phone's outbox before it is sent. No
   signal → "📶 No signal — saved", the form clears, and a *Waiting to send* card lists the note with
   Send now / Edit / Delete. It sends itself when the phone comes back online, when the page is reopened, and
@@ -248,9 +249,8 @@ and 14 browser checks (real CSV parse → plan → untick → apply).
   price box — entering a price ticks it. A typed search with no real match does the same. Custom rows post as plain
   line items (not linked, not taxable). The search now ignores weak partial matches (about half the words must be in
   the item name), so "gas line cap" no longer lands on a water heater.
-- **Assign to** starts on the last choice made on that phone (Unassigned stays Unassigned, also after "Start another
-  job"); the very first time it's the signed-in tech. The success message always says who it's assigned to, or
-  "Unassigned".
+- **Assign to** always starts on **Unassigned** (also after "Start another job"); pick a tech only when you mean to.
+  The success message always says who it's assigned to, or "Unassigned".
 - **Parent / child accounts.** The public API has no field for HCP's "This customer bills to" link (checked
   2026-10-16 against the 24 Patrick Ave accounts: the customer object only carries `kind`, `tags`, `addresses`).
   What the tool can do: when two or more matches share a phone number or an address, each gets a

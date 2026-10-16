@@ -273,12 +273,8 @@
       });
   }
 
-  // "Assign to" starts on the last choice made on this phone (Unassigned stays Unassigned); first time: the signed-in person.
-  function setAssign() {
-    var sel = $("jEmp"), saved = get("grNewJobAssignSet") === "1", want = saved ? get("grNewJobAssign") : S.me;
-    sel.value = want;
-    if (sel.value !== want) sel.value = S.me;   // that person is no longer on the list
-  }
+  // "Assign to" always starts on Unassigned — pick a person only when you mean to.
+  function setAssign() { $("jEmp").value = ""; }
 
   // ---------- access code ----------
   function showCode(msg) { show($("codeCard"), true); show($("app"), false); say("codeMsg", msg, "err"); }
@@ -292,7 +288,6 @@
       var sel = $("jEmp");
       (r.employees || []).forEach(function (e) { var o = el("option", null, e.name); o.value = e.id; sel.appendChild(o); });
       setAssign();
-      sel.onchange = function () { put("grNewJobAssign", sel.value); put("grNewJobAssignSet", "1"); };
       S.usualUnit = r.usual_unit || {};
       S.priceBook = r.price_book !== false;
       show($("liSection"), S.priceBook);
