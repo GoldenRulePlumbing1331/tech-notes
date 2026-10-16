@@ -288,14 +288,16 @@ function njPrompt_(jf, catalog) {
     '  Job Types: ' + JSON.stringify(jf.job_types.map(x => x.name)),
     '  Business Units: ' + JSON.stringify(jf.business_units.map(x => x.name)),
     ...(catalog && catalog.length ? [
-    `- line_items: up to ${NJ.MAX_SUGGEST} items from OUR PRICE BOOK below that fit the work the customer is asking for, as`,
+    `- line_items: up to ${NJ.MAX_SUGGEST} items for the work the customer is asking for, matched to OUR PRICE BOOK below, as`,
     '  [{"pick": 12, "alternatives": [11, 13], "quantity": 1, "heard": "", "sure": true}]. pick = the number of the best item;',
     '  alternatives = up to 3 other numbers worth offering (other sizes, fuel types, homeowner- vs Golden-Rule-supplied); heard = the',
     '  words the tech used for it; sure = true only when the tech clearly asked for that exact work (size, fuel, who supplies it).',
     '  In the price book "Natural" = natural gas, "BW" = Bradford White, "HO Supplied"/"Homeowner Supplied" = the customer bought the',
     '  fixture, "GR Supplied" = Golden Rule supplies it, "Lavy" = bathroom sink. A water heater "quote" or "replacement" with no size',
     '  or fuel stated: pick the most common one (50 Gallon, Natural, Atmospheric) with sure=false and offer the others as alternatives.',
-    '  Only use numbers from the list. [] if nothing in the list fits or no work is described.',
+    '  Work the customer asked for that is NOT in the list still gets an item, with pick 0 and a short name, e.g.',
+    '  {"pick": 0, "name": "Repair leak on copper elbow joint", "quantity": 1, "heard": "repair a leak on a copper elbow", "sure": false}.',
+    '  Every separate piece of work gets its own item. Only use numbers from the list. [] if no work is described.',
     '  OUR PRICE BOOK (number. name [category] $price):',
     catalog.map((c, i) => `  ${i + 1}. ${c.name} [${c.category}] $${Math.round(c.price / 100)}`).join('\n'),
     ] : ['- line_items: always [].']),
@@ -329,8 +331,9 @@ function njExtract_(text, catalog) {
     alternatives: (Array.isArray(li && li.alternatives) ? li.alternatives : []).filter(okNum).map(Number).slice(0, 3),
     quantity: Number(li && li.quantity) > 0 ? Number(li.quantity) : 1,
     heard: String((li && li.heard) || '').trim().slice(0, 120),
+    name: String((li && li.name) || '').trim().slice(0, 120),
     sure: !!(li && li.sure === true),
-  })).filter(li => li.pick);
+  })).filter(li => li.pick || li.name);
   return njApplyJobFields_(clean, f.job_type, f.business_unit, jf);
 }
 
@@ -349,14 +352,23 @@ function njDigits_(s) {
 
 /** Haiku's picks (numbers into the catalog) → line item suggestions with alternatives; the page shows tick boxes. */
 function njSuggest_(items, catalog) {
-  if (!items || !items.length || !catalog || !catalog.length) return [];
+  if (!items || !items.length) return [];
   const seen = {};
   return items.map(li => {
+    if (!li.pick || !catalog || !catalog.length) {
+      // work that isn't in the price book: offered as a custom line item the tech can price
+      const name = li.name || li.heard;
+      return name ? { name: name, quantity: li.quantity, search: li.heard, custom: true, candidates: [] } : null;
+    }
     const nums = [li.pick].concat(li.alternatives).filter((x, i, a) => a.indexOf(x) === i);
     const cands = nums.map(k => Object.assign({}, catalog[k - 1], { strong: false }));
     cands[0].strong = li.sure;
     return { name: li.heard || cands[0].name, quantity: li.quantity, search: li.heard, candidates: cands };
-  }).filter(sg => { const k = sg.candidates[0].uuid; if (seen[k]) return false; seen[k] = 1; return true; });
+  }).filter(sg => {
+    if (!sg) return false;
+    const k = sg.custom ? 'custom:' + sg.name.toLowerCase() : sg.candidates[0].uuid;
+    if (seen[k]) return false; seen[k] = 1; return true;
+  });
 }
 
 /**
@@ -414,7 +426,8 @@ function njPriceSearch_(q) {
       else if (forms.some(x => desc.indexOf(x) !== -1)) score += 0.5;
     });
     return Object.assign({}, c, { score: score, strong: inName === words.length });
-  }).filter(c => c.score > 0).sort((a, b) => b.score - a.score || a.price - b.price);
+  }).filter(c => c.score >= words.length)   // about half the words must be in the name (2 pts each) — weak partial hits don't count
+    .sort((a, b) => b.score - a.score || a.price - b.price);
   return scored.slice(0, NJ.PRICE_CANDIDATES).map(c => { delete c.score; return c; });
 }
 
@@ -443,13 +456,13 @@ function njAddLineItems_(jobId, items) {
   }) });
   try {
     hcp_('put', `/jobs/${encodeURIComponent(jobId)}/line_items/bulk_update`, payload(true));
-    return { added: clean.length, total: total, linked: clean.filter(li => li.uuid).length };
+    return { added: clean.length, total: total, linked: clean.filter(li => li.uuid).length, priced: clean.filter(li => li.uuid).length };
   } catch (e1) {
     if (!/→ 4\d\d/.test(e1.message)) return { added: 0, total: total, linked: 0, error: e1.message };
     console.warn('line items with service_item_id rejected, retrying unlinked: ' + e1.message);
     try {
       hcp_('put', `/jobs/${encodeURIComponent(jobId)}/line_items/bulk_update`, payload(false));
-      return { added: clean.length, total: total, linked: 0 };
+      return { added: clean.length, total: total, linked: 0, priced: clean.filter(li => li.uuid).length };
     } catch (e2) { return { added: 0, total: total, linked: 0, error: e2.message }; }
   }
 }
@@ -704,11 +717,15 @@ function njCreateLocked_(p, who) {
 
   const lines = [`✅ Job ${j.invoice_number || ''} created${created ? ' with a new customer' : ''}.`,
     `${custOut.display_name} — ${addrText}`];
-  if (schedule && dropped.indexOf('schedule') === -1) lines.push(`Scheduled ${when}${emp ? ' · ' + emp.name : ''}`);
-  else if (!schedule && emp && dropped.indexOf('assigned_employee_ids') === -1) lines.push(`Assigned to ${emp.name} (unscheduled)`);
-  else if (!schedule) lines.push('Unscheduled — set the time in HCP.');
+  const crew = emp && dropped.indexOf('assigned_employee_ids') === -1 ? 'Assigned to ' + emp.name : 'Unassigned';
+  if (schedule && dropped.indexOf('schedule') === -1) lines.push(`Scheduled ${when} · ${crew}`);
+  else lines.push(`Unscheduled — set the time in HCP · ${crew}`);
   if (body.job_fields && dropped.indexOf('job_fields') === -1) lines.push([jType && 'Type: ' + jType.name, jUnit && 'Unit: ' + jUnit.name].filter(Boolean).join(' · '));
-  if (li.added) lines.push(`${li.added} line item${li.added === 1 ? '' : 's'} from the price book · $${(li.total / 100).toFixed(2)}` + (li.linked < li.added ? ' (not linked to the price book entry)' : ''));
+  if (li.added) {
+    const custom = li.added - li.priced;
+    const parts = [li.priced ? `${li.priced} from the price book` : '', custom ? `${custom} custom` : ''].filter(Boolean).join(', ');
+    lines.push(`${li.added} line item${li.added === 1 ? '' : 's'} added (${parts}) · $${(li.total / 100).toFixed(2)}` + (li.linked < li.priced ? ' — not linked to the price book entry' : ''));
+  }
   if (li.error) lines.push('⚠️ Couldn’t add the line items — add them in HCP. ' + li.error);
   if (dropped.indexOf('schedule') !== -1) lines.push('⚠️ HCP wouldn’t take the schedule/assignment — set those in HCP.');
   if (dropped.indexOf('job_fields') !== -1) lines.push('⚠️ HCP wouldn’t take the Job Type/Business Unit — set those in HCP.');

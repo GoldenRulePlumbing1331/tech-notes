@@ -243,6 +243,14 @@ and 14 browser checks (real CSV parse → plan → untick → apply).
   items and the message says "(not linked to the price book entry)". There is no diagnostic / service-call item in
   the services price book today, so a "just look at it" visit gets no suggestion — add one in HCP and it shows up
   within 6 hours (or run `verifyAccess()` to refresh now).
+- **Work that isn't in the price book** (added 2026-10-16, 2 PM): Haiku also returns any requested work it can't match
+  (e.g. "repair a leak on a copper elbow joint") and the page shows it as a custom row with an editable name and a
+  price box — entering a price ticks it. A typed search with no real match does the same. Custom rows post as plain
+  line items (not linked, not taxable). The search now ignores weak partial matches (about half the words must be in
+  the item name), so "gas line cap" no longer lands on a water heater.
+- **Assign to** starts on the last choice made on that phone (Unassigned stays Unassigned, also after "Start another
+  job"); the very first time it's the signed-in tech. The success message always says who it's assigned to, or
+  "Unassigned".
 - **Parent / child accounts.** The public API has no field for HCP's "This customer bills to" link (checked
   2026-10-16 against the 24 Patrick Ave accounts: the customer object only carries `kind`, `tags`, `addresses`).
   What the tool can do: when two or more matches share a phone number or an address, each gets a

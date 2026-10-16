@@ -97,6 +97,9 @@
   .li .ctl select { flex: 1; min-width: 0; font-size: 14px; min-height: 38px; padding: 6px 8px; }
   .li .ctl .ql { font-size: 13px; color: var(--muted); flex: none; }
   .li .qty { width: 64px; flex: none; text-align: center; min-height: 38px; padding: 6px; }
+  .li .nm { font-weight: 700; font-size: 16px; padding: 6px 8px; min-height: 38px; }
+  .li .pr { width: 96px; flex: none; text-align: right; min-height: 38px; padding: 6px 8px; }
+  .li .tag2 { display: inline-block; font-size: 12px; font-weight: 700; border-radius: 6px; padding: 1px 6px; background: var(--warn-bg, #fff4d6); color: var(--warn-ink, #6b4a00); margin-top: 4px; }
   .li .price { flex: none; font-weight: 700; min-width: 72px; text-align: right; padding-top: 2px; }
   .li.off .body, .li.off .price, .li.off .ctl { opacity: .5; }
   .total { display: flex; justify-content: space-between; font-weight: 700; margin-top: 10px; padding-top: 10px; border-top: 1px solid var(--line); }
@@ -216,7 +219,7 @@
 
   <!-- line items from the price book -->
   <div class="sub" id="liSection">
-    <label>Line items from the price book</label>
+    <label>Line items</label>
     <div class="hint" style="margin-top:0" id="liHint">Picked from what you said. Tick what goes on the job, or change the match.</div>
     <div id="liList"></div>
     <div class="total hidden" id="liTotal"><span>Job total</span><span id="liSum">$0.00</span></div>
@@ -270,6 +273,13 @@
       });
   }
 
+  // "Assign to" starts on the last choice made on this phone (Unassigned stays Unassigned); first time: the signed-in person.
+  function setAssign() {
+    var sel = $("jEmp"), saved = get("grNewJobAssignSet") === "1", want = saved ? get("grNewJobAssign") : S.me;
+    sel.value = want;
+    if (sel.value !== want) sel.value = S.me;   // that person is no longer on the list
+  }
+
   // ---------- access code ----------
   function showCode(msg) { show($("codeCard"), true); show($("app"), false); say("codeMsg", msg, "err"); }
   function start(code, quiet) {
@@ -281,7 +291,8 @@
       S.me = r.me || ""; S.today = r.today || "";
       var sel = $("jEmp");
       (r.employees || []).forEach(function (e) { var o = el("option", null, e.name); o.value = e.id; sel.appendChild(o); });
-      sel.value = S.me;
+      setAssign();
+      sel.onchange = function () { put("grNewJobAssign", sel.value); put("grNewJobAssignSet", "1"); };
       S.usualUnit = r.usual_unit || {};
       S.priceBook = r.price_book !== false;
       show($("liSection"), S.priceBook);
@@ -579,26 +590,42 @@
   function fmtPhone(d) { d = String(d).replace(/\D/g, ""); return d.length === 10 ? "(" + d.slice(0, 3) + ") " + d.slice(3, 6) + "-" + d.slice(6) : d; }
 
   // ---------- line items from the price book ----------
+  function customItem(name, qty) {
+    return { label: name, qty: qty > 0 ? qty : 1, cands: [], custom: true, use: false,
+             cand: { uuid: "", name: name, description: "", price: 0, cost: 0, taxable: false } };
+  }
   function setItems(suggestions) {
     S.items = suggestions.map(function (sg) {
+      if (sg.custom) return customItem(sg.name || sg.search || "", sg.quantity);
       var cands = sg.candidates || [];
       var pick = cands.filter(function (c) { return c.strong; })[0] || cands[0] || null;
       return { label: sg.name || sg.search || "", qty: sg.quantity > 0 ? sg.quantity : 1, cands: cands, cand: pick, use: !!(pick && pick.strong) };
-    });
+    }).filter(function (it) { return it.cand; });
     renderItems();
   }
   function renderItems() {
     var box = $("liList"); box.innerHTML = "";
     S.items.forEach(function (it) {
       var row = el("div", "li" + (it.use ? "" : " off"));
-      var cb = el("input"); cb.type = "checkbox"; cb.checked = it.use && !!it.cand; cb.disabled = !it.cand;
+      var cb = el("input"); cb.type = "checkbox"; cb.checked = !!it.use;
       cb.onchange = function () { it.use = cb.checked; row.classList.toggle("off", !it.use); sumItems(); };
       row.appendChild(cb);
       var body = el("div", "body");
-      body.appendChild(el("b", null, it.cand ? it.cand.name : it.label));
-      if (!it.cand) body.appendChild(el("span", null, "Heard “" + it.label + "” — nothing like it in the price book. Search below to add it by hand."));
-      else if (it.label && it.label.toLowerCase() !== it.cand.name.toLowerCase()) body.appendChild(el("span", null, "Heard: " + it.label));
       var ctl = el("div", "ctl");
+      if (it.custom) {
+        var nm = el("input", "nm"); nm.value = it.cand.name; nm.title = "Line item name"; nm.autocomplete = "off";
+        nm.oninput = function () { it.cand.name = nm.value; };
+        body.appendChild(nm);
+        body.appendChild(el("span", "tag2", "Not in the price book — enter a price"));
+        ctl.appendChild(el("span", "ql", "$"));
+        var pr = el("input", "pr"); pr.type = "number"; pr.min = "0"; pr.step = "0.01"; pr.inputMode = "decimal"; pr.placeholder = "0.00"; pr.title = "Price each";
+        if (it.cand.price) pr.value = (it.cand.price / 100).toFixed(2);
+        pr.onchange = function () { var c = Math.round((Number(pr.value) || 0) * 100); it.cand.price = c > 0 ? c : 0; if (it.cand.price && !it.use) { it.use = true; cb.checked = true; row.classList.remove("off"); } sumItems(); };
+        ctl.appendChild(pr);
+      } else {
+        body.appendChild(el("b", null, it.cand.name));
+        if (it.label && it.label.toLowerCase() !== it.cand.name.toLowerCase()) body.appendChild(el("span", null, "Heard: " + it.label));
+      }
       if (it.cands.length > 1) {
         var sel = el("select"); sel.title = "Other matches";
         it.cands.forEach(function (c, i) { var o = el("option", null, c.name + " — " + money(c.price)); o.value = String(i); if (c === it.cand) o.selected = true; sel.appendChild(o); });
@@ -623,7 +650,7 @@
     S.items.forEach(function (it) { if (it.use && it.cand) { n++; sum += it.cand.price * it.qty; } });
     Array.prototype.forEach.call($("liList").querySelectorAll(".li"), function (row, i) { var it = S.items[i]; row.querySelector(".price").textContent = it.cand ? money(it.cand.price * it.qty) : ""; });
     show($("liTotal"), n > 0); $("liSum").textContent = money(sum) + (n ? " · " + n + " line item" + (n === 1 ? "" : "s") : "");
-    $("liHint").textContent = S.items.length ? "Picked from what you said. Ticked = clearly asked for; tick the others if they apply, or change the match." : "Nothing picked yet — search the price book below to add line items.";
+    $("liHint").textContent = S.items.length ? "Picked from what you said. Ticked = clearly asked for; tick the others if they apply, change the match, or price the custom ones." : "Nothing picked yet — search the price book below to add line items.";
   }
   $("liGo").onclick = function () {
     var q = $("liSearch").value.trim();
@@ -633,7 +660,11 @@
       $("liGo").disabled = false;
       if (!r.ok) { say("liMsg", "❌ " + r.error, "err"); return; }
       var cands = r.candidates || [];
-      if (!cands.length) { say("liMsg", "Nothing in the price book for “" + q + "”. Try fewer words.", "warn"); return; }
+      if (!cands.length) {
+        S.items.push(customItem(q.charAt(0).toUpperCase() + q.slice(1), 1));
+        say("liMsg", "Nothing in the price book for “" + q + "” — added it as a custom line item. Enter the price to include it.", "warn");
+        $("liSearch").value = ""; renderItems(); return;
+      }
       say("liMsg", "");
       S.items.push({ label: q, qty: 1, cands: cands, cand: cands[0], use: true });
       $("liSearch").value = ""; renderItems();
@@ -654,8 +685,8 @@
                         job_type_id: $("jType").value, business_unit_id: $("jUnit").value } };
     if (!data.job.description) { say("submitMsg", "❌ Add a job description.", "err"); $("desc").focus(); return; }
     if (data.job.time && !data.job.date) { say("submitMsg", "❌ Pick a date for that time.", "err"); return; }
-    data.job.line_items = S.items.filter(function (it) { return it.use && it.cand; }).map(function (it) {
-      return { uuid: it.cand.uuid, name: it.cand.name, description: it.cand.description || "", quantity: it.qty, unit_price: it.cand.price, unit_cost: it.cand.cost, kind: "labor", taxable: it.cand.taxable };
+    data.job.line_items = S.items.filter(function (it) { return it.use && it.cand && String(it.cand.name).trim(); }).map(function (it) {
+      return { uuid: it.cand.uuid || "", name: String(it.cand.name).trim(), description: it.cand.description || "", quantity: it.qty, unit_price: it.cand.price, unit_cost: it.cand.cost, kind: "labor", taxable: it.cand.taxable };
     });
     if (S.isNew) {
       if (!$("nFirst").value.trim() && !$("nLast").value.trim()) { need(["nFirst", "nLast"]); say("submitMsg", "❌ Add the customer's name.", "err"); return; }
@@ -696,7 +727,7 @@
   $("again").onclick = function () {
     S.fields = null; S.cust = null; resetSubmit();
     $("heard").value = ""; $("desc").value = ""; $("jDate").value = ""; $("jTime").value = "";
-    $("jArrival").value = "120"; $("jEmp").value = S.me; $("searchBox").value = ""; setJobFields("", ""); setItems([]); $("liSearch").value = "";
+    $("jArrival").value = "120"; setAssign(); $("searchBox").value = ""; setJobFields("", ""); setItems([]); $("liSearch").value = "";
     say("talkMsg", ""); show($("matchCard"), false); show($("confirmCard"), false);
     window.scrollTo({ top: 0, behavior: "smooth" });
   };
