@@ -201,6 +201,9 @@ SupplyZone's Quick Pad list is still offered on the done screen.
 
 ## Job Inputs — Weinstein CSV → HCP (added 2026-10-16)
 
+**Live since 2026-10-19:** project "HCP Job Inputs" (owner golden.rule.calendar), setupSheet / verifyAccess / installDailyTrigger run, web app deployed, URL in config.js `jobInputs`.
+
+
 Replaces `D:\Job_Uploads` (the Python scripts). Same rules, no laptop: the office opens **job-inputs.html**,
 drops the Weinstein *Order History Detail* CSV on it, the page parses it in the browser (split on `","` so
 unescaped inch marks don't break rows; comment rows skipped; `PO # 49040-1` → job number; `PO # return` →

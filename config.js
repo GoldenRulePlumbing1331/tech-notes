@@ -9,7 +9,7 @@ window.GR_ENDPOINTS = {
   estimate: "https://script.google.com/macros/s/AKfycbx_RjHAhmNt7V0rGnyJIh1O6oo3JXsghWEY1pKofPGGbG1nk6ZG7FU3df7JVe_1Ajc2/exec",
   order:    "https://script.google.com/macros/s/AKfycbyu92e88bcaTG5Ps_g-PWp23ApU5DHSgPTVj7sBX_uBByR1_WcxYitp6A58HHc6bCiO6w/exec",
   clock:    "",
-  jobInputs: ""
+  jobInputs: "https://script.google.com/macros/s/AKfycbzoVcs67ro58JNElJG0zAPONOKx0HOhW8TjeJNB5j3LBILQJhc8m-KpD85VnqGPLLnd/exec"
 };
 
 /* Counter texting for the Order tool (the West Chester branch says "call or text" this number). */
