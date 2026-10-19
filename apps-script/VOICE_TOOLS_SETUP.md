@@ -333,3 +333,6 @@ of the Dispatch script.
 
 The standalone `hcp_verify_voice_access.gs` from earlier is now redundant — each script has its own
 `verifyAccess()`.
+
+## Job Clock — live 2026-10-19
+Project "HCP Job Clock" (owner golden.rule.calendar): setupSheet / verifyAccess / installWeeklyTrigger run (Monday 6–7 AM report), web app deployed, URL in config.js `clock`.

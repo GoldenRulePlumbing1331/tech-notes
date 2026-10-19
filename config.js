@@ -8,7 +8,7 @@ window.GR_ENDPOINTS = {
   dispatch: "https://script.google.com/macros/s/AKfycbwM3Jj1HXMY1KOllTpQ_Jrg08aKlz-tag0ATXNfJb_s-X2WGKgGjBmn1W38-K3C25JB/exec",
   estimate: "https://script.google.com/macros/s/AKfycbx_RjHAhmNt7V0rGnyJIh1O6oo3JXsghWEY1pKofPGGbG1nk6ZG7FU3df7JVe_1Ajc2/exec",
   order:    "https://script.google.com/macros/s/AKfycbyu92e88bcaTG5Ps_g-PWp23ApU5DHSgPTVj7sBX_uBByR1_WcxYitp6A58HHc6bCiO6w/exec",
-  clock:    "",
+  clock:    "https://script.google.com/macros/s/AKfycbwXCjTUxbcjvUuSWFBO7vsGDZtkZSCwEgUtNgoLjKBy9HvfrGmK5Yyj3WfRIYbWiPZQDQ/exec",
   jobInputs: "https://script.google.com/macros/s/AKfycbzoVcs67ro58JNElJG0zAPONOKx0HOhW8TjeJNB5j3LBILQJhc8m-KpD85VnqGPLLnd/exec"
 };
 
