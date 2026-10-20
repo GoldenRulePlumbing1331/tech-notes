@@ -519,11 +519,21 @@ function esCreateLocked_(p, who) {
       if ((e.options || []).length) dropped = dropped.filter(k => k !== 'schedule');
     } catch (err) { console.warn('estimate schedule failed: ' + err.message); }
   }
+  // HCP puts the API key's owner on a scheduled estimate when no tech is picked, and the API can't take them off
+  // (an empty crew is ignored — checked Oct 20 on #2225). Say so, so the office fixes it in HCP.
+  let autoCrew = '';
+  if (body.schedule && !emp && dropped.indexOf('schedule') === -1) {
+    try {
+      const back = hcp_('get', '/estimates/' + encodeURIComponent(e.id));
+      autoCrew = (back.assigned_employees || []).map(x => [x.first_name, x.last_name].filter(Boolean).join(' ')).join(', ');
+    } catch (_) {}
+  }
   const total = o => o.line_items.reduce((s, li) => s + li.unit_price * li.quantity, 0);
   console.log(`estimate ✅ ${e.estimate_number || e.id} for ${custOut.display_name} by ${who}; ${options.length} option(s); dropped: ${dropped.join(',') || 'none'}`);
   const lines = [`✅ Estimate ${e.estimate_number || ''} drafted${created ? ' with a new customer' : ''}.`, `${custOut.display_name} — ${addrText}`];
   options.forEach(o => lines.push(`${o.name}: $${(total(o) / 100).toFixed(2)}`));
   if (when && dropped.indexOf('schedule') === -1) lines.push(`Visit ${when}${emp ? ' · ' + emp.name : ''}`);
+  if (autoCrew) lines.push(`⚠️ HCP put ${autoCrew} on the visit by itself — change the tech in HCP if that's wrong.`);
   if (dropped.indexOf('schedule') !== -1) lines.push('⚠️ HCP wouldn’t take the visit time — set it in HCP.');
   if (dropped.indexOf('estimate_fields') !== -1) lines.push('⚠️ HCP wouldn’t take the Job Type/Business Unit — set those in HCP.');
   lines.push('Nothing was sent to the customer. Review and send it from HCP.');
