@@ -777,7 +777,7 @@ function njCreate_(p, who) {
 function njCreateLocked_(p, who) {
   const job = p.job || {};
   const desc = formatSentences_(String(job.description || '').trim());
-  if (!desc) throw new Error('Add a job description first.');
+  if (!desc) throw new Error('Add the private notes first.');
 
   // Check a typed/spoken address before creating anything, so a bad one can't leave a stray customer.
   let addr = null;

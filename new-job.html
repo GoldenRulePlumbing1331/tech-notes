@@ -201,7 +201,7 @@
 
   <!-- job -->
   <div class="sub">
-    <label for="desc">Job description</label>
+    <label for="desc">Private notes</label>
     <textarea id="desc" placeholder="What does the customer need?"></textarea>
     <button class="mic small" id="micDesc">
       <svg viewBox="0 0 24 24" fill="currentColor" width="22" height="22"><path d="M12 15a3 3 0 0 0 3-3V6a3 3 0 0 0-6 0v6a3 3 0 0 0 3 3zm5-3a5 5 0 0 1-10 0H5a7 7 0 0 0 6 6.92V21h2v-2.08A7 7 0 0 0 19 12h-2z"/></svg>
@@ -467,7 +467,7 @@
   $("jType").onchange = function () { var u = S.usualUnit[$("jType").value]; if (u && !$("jUnit").value) $("jUnit").value = u; };
   $("suggest").onclick = function () {
     var text = $("desc").value.trim();
-    if (!text) { say("submitMsg", "❌ Add a job description first.", "err"); return; }
+    if (!text) { say("submitMsg", "❌ Add the private notes first.", "err"); return; }
     var b = $("suggest"); b.disabled = true; b.textContent = "Suggesting…";
     api("classify", { text: text }).then(function (r) {
       b.disabled = false; b.textContent = "Suggest again";
@@ -756,7 +756,7 @@
     var data = { job: { description: $("desc").value.trim(), date: $("jDate").value, time: $("jTime").value,
                         arrival: $("jArrival").value, employee_id: $("jEmp").value,
                         job_type_id: $("jType").value, business_unit_id: $("jUnit").value } };
-    if (!data.job.description) { say("submitMsg", "❌ Add a job description.", "err"); $("desc").focus(); return; }
+    if (!data.job.description) { say("submitMsg", "❌ Add the private notes.", "err"); $("desc").focus(); return; }
     if (data.job.time && !data.job.date) { say("submitMsg", "❌ Pick a date for that time.", "err"); return; }
     data.job.tag_ids = S.tags.map(function (t) { return t.id; });
     data.job.line_items = S.items.filter(function (it) { return it.use && it.cand && String(it.cand.name).trim(); }).map(function (it) {
