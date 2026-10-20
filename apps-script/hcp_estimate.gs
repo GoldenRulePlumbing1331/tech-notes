@@ -282,27 +282,64 @@ function esPriceBookOk_() {
   catch (e) { console.warn('Price book services not reachable: ' + e.message); cache.put('es_pb_ok', '0', 3600); return false; }
 }
 
-/** Searches HCP price book services; returns up to PRICE_CANDIDATES with prices in cents. */
-function esPriceSearch_(q) {
-  q = String(q || '').trim().slice(0, 80);
-  if (!q || !esPriceBookOk_()) return [];
+/**
+ * The whole services price book (~100 items), cached 6 hours, searched locally — HCP's own q= search is loose
+ * ("50 gallon gas water heater" came back as an expansion tank). Same matching as the New Job page.
+ */
+function esCatalog_(fresh) {
   const cache = CacheService.getScriptCache();
-  const key = 'es_pb_' + Utilities.base64EncodeWebSafe(q.toLowerCase()).slice(0, 80);
-  const hit = cache.get(key);
-  if (hit) return JSON.parse(hit);
-  let rows = [];
+  const hit = !fresh && cache.get('es_catalog1');
+  if (hit) { try { return JSON.parse(hit); } catch (_) {} }
+  const out = [];
   try {
-    const r = hcp_('get', `/api/price_book/services?q=${encodeURIComponent(q)}&page_size=${ES.PRICE_CANDIDATES}`);
-    rows = (r.data || []).map(s => ({
-      uuid: s.uuid, name: s.name || '', description: String(s.description || '').slice(0, 300),
-      price: Number(s.price) || 0, cost: Number(s.cost) || 0, uom: s.unit_of_measure || '', strong: false,
-    }));
-  } catch (e) { console.warn('price search failed: ' + e.message); }
-  // "strong" = the query words all appear in the item name (safe to pre-fill the price).
-  const words = q.toLowerCase().split(/\s+/).filter(w => w.length > 2);
-  rows.forEach(c => { const n = c.name.toLowerCase(); c.strong = words.length > 0 && words.every(w => n.indexOf(w) !== -1); });
-  cache.put(key, JSON.stringify(rows), 1800);
-  return rows;
+    for (let page = 1; page <= 20; page++) {
+      const r = hcp_('get', `/api/price_book/services?page=${page}&page_size=100&sort_by=name&sort_direction=asc`);
+      (r.data || []).forEach(sv => out.push({
+        uuid: sv.uuid, name: String(sv.name || '').trim(), category: String((sv.category && sv.category.name) || '').trim(),
+        description: String(sv.description || '').replace(/\r\n?/g, '\n').replace(/[ \t]+\n/g, '\n').trim(),
+        price: Number(sv.price) || 0, cost: Number(sv.cost) || 0, uom: sv.unit_of_measure || '',
+      }));
+      const pages = r.total_pages_count || r.total_pages || 0;
+      if (!(r.data || []).length || page >= pages) break;
+    }
+  } catch (e) { console.warn('Price book services not reachable: ' + e.message); return []; }
+  const list = out.filter(c => c.uuid && c.name);
+  try { cache.put('es_catalog1', JSON.stringify(list), 6 * 3600); } catch (e) { console.warn('catalog too big to cache: ' + e.message); }
+  return list;
+}
+
+// Words the techs say → words in our price book names (same list as New Job).
+const ES_SYNONYMS_ = { gas: ['natural', 'propane'], ng: ['natural'], lp: ['propane'], gal: ['gallon'], gallons: ['gallon'],
+  ho: ['homeowner'], homeowner: ['ho'], customer: ['homeowner', 'ho'], gr: ['golden rule', 'gr'],
+  drain: ['clog'], snake: ['clog'], clogged: ['clog'], backed: ['clog'], bathroom: ['lavy'], vanity: ['lavy'],
+  disposal: ['garbage disposal'], prv: ['pressure reducing'], spigot: ['hose bib'], sillcock: ['hose bib'],
+  heater: ['water heater', 'gallon'], water: ['water', 'gallon'], tankless: ['tankless'], sewer: ['sewer', 'main'],
+  install: ['installation', 'install'], installation: ['install'], replace: ['replacement', 'replace'], replacement: ['replace'],
+  wh: ['gallon', 'water heater'] };
+
+/** Price book matches for a line, best first (prices in cents). "strong" = every word is in the item name. */
+function esPriceSearch_(q) {
+  q = String(q || '').trim().toLowerCase().slice(0, 80);
+  if (!q) return [];
+  const catalog = esCatalog_();
+  if (!catalog.length) return [];
+  const STOP = { a: 1, an: 1, the: 1, and: 1, or: 1, for: 1, of: 1, to: 1, new: 1, with: 1, in: 1, on: 1, unit: 1 };
+  const words = q.replace(/(\d)\s*-\s*(?=[a-z])/g, '$1 ').replace(/[^a-z0-9/.\s]/g, ' ').split(/\s+/).filter(w => w && !STOP[w]);
+  if (!words.length) return [];
+  const scored = catalog.map(c => {
+    const name = c.name.toLowerCase(), cat = c.category.toLowerCase(), desc = c.description.toLowerCase();
+    let score = 0, inName = 0;
+    words.forEach(w => {
+      const forms = [w].concat(ES_SYNONYMS_[w] || []);
+      if (/^\d+$/.test(w)) forms.push(w + ' gallon', w + 'in', w + ' gal');
+      if (forms.some(x => name.indexOf(x) !== -1)) { score += 2; inName++; }
+      else if (forms.some(x => cat.indexOf(x) !== -1)) score += 1.5;
+      else if (forms.some(x => desc.indexOf(x) !== -1)) score += 0.5;
+    });
+    return Object.assign({}, c, { score: score, strong: inName === words.length });
+  }).filter(c => c.score >= words.length)
+    .sort((a, b) => b.score - a.score || a.price - b.price);
+  return scored.slice(0, ES.PRICE_CANDIDATES).map(c => { delete c.score; c.description = c.description.slice(0, 2000); return c; });
 }
 
 /* ───────────── customer lookup (same as New Job) ───────────── */
@@ -471,6 +508,17 @@ function esCreateLocked_(p, who) {
     catch (err) { lastErr = err.message; if (!/→ 4\d\d/.test(err.message)) break; }
   }
   if (!e) return fail('Couldn’t create the estimate: ' + lastErr + (created ? '\nThe customer was created, so pick them as a repeat customer and try again.' : ''));
+  // HCP won't take a visit time on create (seen Oct 20, #2224) — set it per option with the schedule endpoint,
+  // notifications off and the crew exactly as picked (none = nobody, so HCP doesn't put the key's owner on it).
+  if (body.schedule && dropped.indexOf('schedule') !== -1) {
+    try {
+      const sched = { start_time: body.schedule.start_time, end_time: body.schedule.end_time,
+                      arrival_window_in_minutes: body.schedule.arrival_window_in_minutes, notify: false, notify_pro: false,
+                      dispatched_employees: emp ? [{ employee_id: emp.id }] : [] };
+      (e.options || []).forEach(o => hcp_('put', `/estimates/${e.id}/options/${o.id}/schedule`, sched));
+      if ((e.options || []).length) dropped = dropped.filter(k => k !== 'schedule');
+    } catch (err) { console.warn('estimate schedule failed: ' + err.message); }
+  }
   const total = o => o.line_items.reduce((s, li) => s + li.unit_price * li.quantity, 0);
   console.log(`estimate ✅ ${e.estimate_number || e.id} for ${custOut.display_name} by ${who}; ${options.length} option(s); dropped: ${dropped.join(',') || 'none'}`);
   const lines = [`✅ Estimate ${e.estimate_number || ''} drafted${created ? ' with a new customer' : ''}.`, `${custOut.display_name} — ${addrText}`];
