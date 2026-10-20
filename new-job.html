@@ -783,6 +783,14 @@
       b.textContent = "Create job";
       if (r.ok) {
         say("submitMsg", r.message, "ok");
+        if (r.display_name_todo) {   // HCP's API can't set the display name: make the hand fix one tap
+          var m = $("submitMsg"), box = el("div", null); box.style.marginTop = "10px";
+          var cp = el("button", "btn", "Copy “" + r.display_name_todo + "”"); cp.type = "button"; cp.style.marginTop = "0";
+          cp.onclick = function () { try { navigator.clipboard.writeText(r.display_name_todo); cp.textContent = "Copied ✓"; } catch (e) {} };
+          var op = document.createElement("a"); op.className = "btn"; op.textContent = "Open the customer in HCP"; op.href = r.customer_url; op.target = "_blank"; op.rel = "noopener";
+          op.style.display = "block"; op.style.textAlign = "center"; op.style.textDecoration = "none";
+          box.appendChild(cp); box.appendChild(op); m.appendChild(box);
+        }
         show(b, false); show($("again"), true);
         recent(r.message.split("\n").slice(0, 2).join(" — "));
         return;

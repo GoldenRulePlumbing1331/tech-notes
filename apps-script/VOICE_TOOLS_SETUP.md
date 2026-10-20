@@ -274,9 +274,14 @@ and 14 browser checks (real CSV parse → plan → untick → apply).
   The page shows them as chips (× to drop, type to add any other tag); on Create each one goes on the job with
   `POST /jobs/{id}/tags` and the message lists them. Building the tag list scans ~600 jobs (~15 s), so it's
   kept in script properties for 7 days (`NJ_TAGS_CACHE_*`); `verifyAccess()` refreshes it.
-- **Display name on new customers** is sent as `display_name: "DoeJohn"` when the page creates a customer. The
-  field isn't in HCP's documented API (and GET never returns it), so if HCP refuses it the customer is created
-  without it; check the first new customer after Oct 16 to see whether HCP took it.
+- **Display name on new customers — HCP's API can't set it** (confirmed Oct 20 on #49795: the `display_name`
+  sent on create is silently ignored, and the customer object has no such field). The success message now says
+  "Display name: set it to DoeJohn in HCP", with a **Copy** button and **Open the customer in HCP**.
+- **Unassigned really means unassigned** (Oct 20). HCP put the creator on #49795 by itself even though the page sent
+  no tech. After creating (and adding line items/tags) the script reads the job back; if anyone is on it and the
+  page said Unassigned, it sends an empty dispatch list (`PUT /jobs/{id}/dispatch`) and checks again. The message
+  says "(HCP added X by itself — taken back off.)", or a ⚠️ if HCP kept them. Every case is logged in script
+  property `NJ_UNASSIGN_LOG` (last 20).
 - **Parent / child accounts.** The public API has no field for HCP's "This customer bills to" link (checked
   2026-10-16 against the 24 Patrick Ave accounts: the customer object only carries `kind`, `tags`, `addresses`).
   What the tool can do: when two or more matches share a phone number or an address, each gets a

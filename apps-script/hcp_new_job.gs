@@ -897,11 +897,15 @@ function njCreateLocked_(p, who) {
   // 4. Line items from the price book (the job exists either way — a failure here is reported, not fatal)
   const li = njAddLineItems_(j.id, job.line_items);
   const tg = njAddTags_(j.id, job.tag_ids);
+  // 5. "Unassigned" means nobody. HCP puts someone on some API-created jobs by itself (seen on #49795, Oct 20) —
+  // check the saved job and take them back off. Done after the line items/tags so HCP has finished saving.
+  const unfix = emp ? null : njKeepUnassigned_(j);
   console.log(`newJob ✅ ${j.invoice_number} for ${custOut.display_name} by ${who}; dropped: ${dropped.join(',') || 'none'}; line items: ${li.added}${li.error ? ' ❌ ' + li.error : ''}`);
 
   const lines = [`✅ Job ${j.invoice_number || ''} created${created ? ' with a new customer' : ''}.`,
     `${custOut.display_name} — ${addrText}`];
-  const crew = emp && dropped.indexOf('assigned_employee_ids') === -1 ? 'Assigned to ' + emp.name : 'Unassigned';
+  const crew = emp && dropped.indexOf('assigned_employee_ids') === -1 ? 'Assigned to ' + emp.name
+             : unfix && unfix.stuck ? 'Assigned to ' + unfix.names + ' by HCP' : 'Unassigned';
   if (schedule && dropped.indexOf('schedule') === -1) lines.push(`Scheduled ${when} · ${crew}`);
   else lines.push(`Unscheduled — set the time in HCP · ${crew}`);
   if (body.job_fields && dropped.indexOf('job_fields') === -1) lines.push([jType && 'Type: ' + jType.name, jUnit && 'Unit: ' + jUnit.name].filter(Boolean).join(' · '));
@@ -913,9 +917,43 @@ function njCreateLocked_(p, who) {
   if (li.error) lines.push('⚠️ Couldn’t add the line items — add them in HCP. ' + li.error);
   if (tg.added.length) lines.push('Tags: ' + tg.added.join(', '));
   if (tg.failed.length) lines.push('⚠️ Couldn’t add tag ' + tg.failed.join('; '));
+  if (unfix && unfix.stuck) lines.push(`⚠️ HCP put ${unfix.names} on this job and wouldn’t take them off — set it to Unassigned in HCP.`);
+  else if (unfix && unfix.names) lines.push(`(HCP added ${unfix.names} by itself — taken back off.)`);
+  // HCP's API has no display-name field (it ignores one sent on create), so the office sets it by hand.
+  const dnTodo = created ? njDisplayName_(custOut.first_name, custOut.last_name, custOut.company) : '';
+  if (dnTodo) lines.push(`Display name: set it to ${dnTodo} in HCP (HCP’s API can’t set it).`);
   if (dropped.indexOf('schedule') !== -1) lines.push('⚠️ HCP wouldn’t take the schedule/assignment — set those in HCP.');
   if (dropped.indexOf('job_fields') !== -1) lines.push('⚠️ HCP wouldn’t take the Job Type/Business Unit — set those in HCP.');
-  return { ok: true, message: lines.join('\n'), invoice_number: j.invoice_number || '', job_id: j.id, dropped: dropped, line_items: li, tags: tg.added };
+  return { ok: true, message: lines.join('\n'), invoice_number: j.invoice_number || '', job_id: j.id, dropped: dropped, line_items: li, tags: tg.added,
+           display_name_todo: dnTodo, customer_url: 'https://pro.housecallpro.com/app/customers/' + cust.id, unassign: unfix };
+}
+
+/**
+ * Makes sure a job created as "Unassigned" has nobody on it. Reads the job back; if HCP put someone on it, sends
+ * an empty dispatch list (PUT /jobs/{id}/dispatch, allowed by the spec) and reads it again.
+ * Returns null when nobody was on it, else { names, stuck } — stuck = HCP kept them. Each case is logged in the
+ * script property NJ_UNASSIGN_LOG (last 20) so it can be checked without Cloud logs.
+ */
+function njKeepUnassigned_(created) {
+  const names = js => (js || []).map(e => [e.first_name, e.last_name].filter(Boolean).join(' ')).join(', ');
+  let job = created;
+  try { job = hcp_('get', '/jobs/' + encodeURIComponent(created.id)); } catch (_) {}
+  const on = (job.assigned_employees || []).length ? job.assigned_employees : (created.assigned_employees || []);
+  if (!on.length) return null;
+  const who = names(on);
+  let stuck = true, err = '';
+  try {
+    hcp_('put', `/jobs/${created.id}/dispatch`, { dispatched_employees: [] });
+    const after = hcp_('get', '/jobs/' + encodeURIComponent(created.id));
+    stuck = (after.assigned_employees || []).length > 0;
+  } catch (e) { err = e.message; }
+  try {
+    const p = props_(), log = JSON.parse(p.getProperty('NJ_UNASSIGN_LOG') || '[]');
+    log.unshift({ at: new Date().toISOString(), job: created.invoice_number, hcp_added: who, cleared: !stuck, err: err.slice(0, 200) });
+    p.setProperty('NJ_UNASSIGN_LOG', JSON.stringify(log.slice(0, 20)));
+  } catch (_) {}
+  console.log(`newJob ${created.invoice_number}: HCP assigned ${who} by itself → ${stuck ? 'could not clear' : 'cleared'} ${err}`);
+  return { names: who, stuck: stuck };
 }
 
 /* ───────────── access codes, HCP client, helpers ───────────── */
