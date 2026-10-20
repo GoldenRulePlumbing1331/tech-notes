@@ -341,3 +341,19 @@ The standalone `hcp_verify_voice_access.gs` from earlier is now redundant — ea
 
 ## Job Clock — live 2026-10-19
 Project "HCP Job Clock" (owner golden.rule.calendar): setupSheet / verifyAccess / installWeeklyTrigger run (Monday 6–7 AM report), web app deployed, URL in config.js `clock`.
+
+## End-to-end test on "Test Customer" — 2026-10-20
+Every job tool was run against Test Customer (1319 Pottstown Pike) with Kyle as the tech. All passed:
+New Job (unassigned kept, price-book lines, tags, schedule, new-customer display-name note), Job Notes
+(replace/append), Dispatch (move/assign/unschedule), Board + Unassigned list, Job Clock (stamps, notes,
+replay ignored), Estimate (with and without a visit time), Order preview (cart mode, nothing placed) and
+Job Inputs (post, $150 duplicate held, re-upload skipped, return netted 2 → 1).
+
+What HCP does on its own (not fixable from our side):
+- Anything scheduled through the API gets the key owner (Kyle) put on it. New Job takes him back off
+  automatically; on estimates HCP won't let go, so the Estimate tool warns instead.
+- Once line items are added, HCP renames the job after the first line item. What was dictated stays in
+  Private notes (the field is labelled that way in New Job now).
+- The customer display name can't be set by the API — New Job shows the LastFirst name to paste in.
+- Price-book matches only find parts that are in the 443-item Weinstein parts catalog (a flapper and a wax
+  ring weren't).
