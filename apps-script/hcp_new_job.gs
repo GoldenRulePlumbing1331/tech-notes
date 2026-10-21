@@ -692,7 +692,9 @@ function njFind_(f, raw) {
   list = njCollapseDupes_(list);
   njFlagRelated_(list);
   list.sort((a, b) => b.score - a.score || String(b.updated).localeCompare(String(a.updated)));
-  if (list.length && list[0].score >= 4) list = list.filter(c => c.score >= 2);   // strong match found: drop the noise
+  const top = list.length ? list[0].score : 0;                     // a good match found: drop the noise
+  if (top >= 4) list = list.filter(c => c.score >= 2);
+  else if (top >= 3) list = list.filter(c => c.score >= 1);
   return list.slice(0, NJ.MAX_MATCHES);
 }
 
@@ -734,7 +736,9 @@ function njStreetParts_(street) {
   let alt = '';
   const m = key.match(/^(north|south|east|west)([a-z]{4,})$/);
   if (m && words[0] !== m[1]) alt = m[2].charAt(0).toUpperCase() + m[2].slice(1);
-  return { num: num, key: key, bare: bare || key, alt: alt };
+  // direction: a separate word ("E. Woodbank") or one run into the name ("Eastwood Bank")
+  const dir = (words.find(w => /^(north|south|east|west)(east|west)?$/.test(w)) || '') || (m ? m[1] : '');
+  return { num: num, key: key, bare: bare || key, alt: alt, dir: dir };
 }
 
 /** True when two street names are the same street allowing for speech slips (spacing, E/East, a letter or two). */
@@ -799,7 +803,8 @@ function njScore_(c, f) {
     c.addresses.forEach(a => {
       const have = njStreetParts_(a.street);
       const same = njSameStreet_(want, have), numOk = want.num && have.num === want.num;
-      const pts = numOk && same ? 4 : (same && !want.num) ? 3 : same ? 1 : numOk ? 1 : 0;
+      const otherDir = want.dir && have.dir && want.dir !== have.dir;     // heard East, this one is W Woodbank
+      const pts = numOk && same ? (otherDir ? 2 : 4) : (same && !want.num) ? (otherDir ? 1 : 3) : same ? 1 : numOk ? 1 : 0;
       if (pts > best) { best = pts; bestAddr = a; }
     });
     s += best;
