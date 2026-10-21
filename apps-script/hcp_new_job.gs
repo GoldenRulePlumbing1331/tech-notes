@@ -42,7 +42,9 @@ const NJ = {
   CODE_LENGTH: 8,             // digits in each access code made by generateTechCodes()
   DEFAULT_STATE: 'PA',
   DEFAULT_ARRIVAL_MIN: 120,   // arrival window when a time is given
-  DEFAULT_DURATION_MIN: 60,   // scheduled_end = start + this
+  FIRST_CALL_TIME: '08:00',   // a job booked at this time gets FIRST_CALL_ARRIVAL_MIN instead
+  FIRST_CALL_ARRIVAL_MIN: 30,
+  DEFAULT_DURATION_MIN: 120,  // scheduled_end = start + this
   MAX_MATCHES: 6,
   SEARCH_PAGE_SIZE: 20,
   JOB_SCAN_PAGES: 10,         // recent jobs scanned (x100) to find Business Units, which have no list endpoint
@@ -533,11 +535,19 @@ function njAddLineItems_(jobId, items) {
     quantity: Number(li && li.quantity) > 0 ? Math.round(Number(li.quantity) * 100) / 100 : 1,
     unit_price: Math.max(0, Math.round(Number(li && li.unit_price) || 0)),
     unit_cost: Math.max(0, Math.round(Number(li && li.unit_cost) || 0)),
-    kind: (li && li.kind) === 'materials' ? 'materials' : 'labor',
+    kind: (li && li.kind) === 'materials' ? 'materials' : (li && li.kind) === 'fixed discount' ? 'fixed discount' : 'labor',
     taxable: li && li.taxable != null ? !!li.taxable : undefined,
-  })).filter(li => li.name);
-  if (!clean.length) return { added: 0, total: 0, linked: 0 };
-  const total = clean.reduce((s, li) => s + li.quantity * li.unit_price, 0);
+  })).filter(li => li.name && (li.kind !== 'fixed discount' || li.unit_price > 0));
+  // Discounts go on as HCP "fixed discount" lines (positive amount, HCP subtracts it). A percent discount is worked
+  // out on the page and sent as a fixed amount: HCP's own "percent discount" lines didn't total reliably via the API
+  // (tested on #49804, Oct 21).
+  clean.forEach(li => { if (li.kind === 'fixed discount') { li.uuid = ''; li.quantity = 1; li.unit_cost = 0; li.taxable = undefined; } });
+  if (!clean.length) return { added: 0, total: 0, linked: 0, priced: 0, discounts: 0, discount_total: 0 };
+  const isDisc = li => li.kind === 'fixed discount';
+  const gross = clean.filter(li => !isDisc(li)).reduce((s, li) => s + li.quantity * li.unit_price, 0);
+  const discTotal = Math.min(gross, clean.filter(isDisc).reduce((s, li) => s + li.unit_price, 0));
+  const total = gross - discTotal;
+  const extra = { discounts: clean.filter(isDisc).length, discount_total: discTotal };
   const payload = linked => ({ append_line_items: true, line_items: clean.map(li => {
     const o = { name: li.name, description: li.description || undefined, quantity: li.quantity, unit_price: li.unit_price, unit_cost: li.unit_cost, kind: li.kind };
     if (li.taxable !== undefined) o.taxable = li.taxable;
@@ -546,13 +556,13 @@ function njAddLineItems_(jobId, items) {
   }) });
   try {
     hcp_('put', `/jobs/${encodeURIComponent(jobId)}/line_items/bulk_update`, payload(true));
-    return { added: clean.length, total: total, linked: clean.filter(li => li.uuid).length, priced: clean.filter(li => li.uuid).length };
+    return Object.assign({ added: clean.length - extra.discounts, total: total, linked: clean.filter(li => li.uuid).length, priced: clean.filter(li => li.uuid).length }, extra);
   } catch (e1) {
     if (!/→ 4\d\d/.test(e1.message)) return { added: 0, total: total, linked: 0, error: e1.message };
     console.warn('line items with service_item_id rejected, retrying unlinked: ' + e1.message);
     try {
       hcp_('put', `/jobs/${encodeURIComponent(jobId)}/line_items/bulk_update`, payload(false));
-      return { added: clean.length, total: total, linked: 0, priced: clean.filter(li => li.uuid).length };
+      return Object.assign({ added: clean.length - extra.discounts, total: total, linked: 0, priced: clean.filter(li => li.uuid).length }, extra);
     } catch (e2) { return { added: 0, total: total, linked: 0, error: e2.message }; }
   }
 }
@@ -993,10 +1003,11 @@ function njCreateLocked_(p, who) {
     if (job.time && /^\d{2}:\d{2}$/.test(job.time)) {
       const start = Utilities.parseDate(job.date + ' ' + job.time, tz, 'yyyy-MM-dd HH:mm');
       const end = new Date(start.getTime() + NJ.DEFAULT_DURATION_MIN * 60000);
-      const arrival = job.arrival === '' || job.arrival == null ? NJ.DEFAULT_ARRIVAL_MIN : Number(job.arrival) || 0;
+      const arrival = job.arrival === '' || job.arrival == null
+        ? (job.time === NJ.FIRST_CALL_TIME ? NJ.FIRST_CALL_ARRIVAL_MIN : NJ.DEFAULT_ARRIVAL_MIN) : Number(job.arrival) || 0;
       const iso = d => Utilities.formatDate(d, 'UTC', "yyyy-MM-dd'T'HH:mm:ss'Z'");
       schedule = { scheduled_start: iso(start), scheduled_end: iso(end), arrival_window: arrival };
-      when = Utilities.formatDate(start, tz, 'EEE MMM d, h:mm a') + (arrival ? ` (${arrival / 60}-hr window)` : '');
+      when = Utilities.formatDate(start, tz, 'EEE MMM d, h:mm a') + (arrival ? ` (${arrival < 60 ? arrival + '-min' : arrival / 60 + '-hr'} window)` : '');
     } else {
       schedule = { anytime: true, anytime_start_date: job.date };
       when = Utilities.formatDate(Utilities.parseDate(job.date, tz, 'yyyy-MM-dd'), tz, 'EEE MMM d') + ', anytime';
@@ -1059,10 +1070,11 @@ function njCreateLocked_(p, who) {
   if (schedule && dropped.indexOf('schedule') === -1) lines.push(`Scheduled ${when} · ${crew}`);
   else lines.push(`Unscheduled — set the time in HCP · ${crew}`);
   if (body.job_fields && dropped.indexOf('job_fields') === -1) lines.push([jType && 'Type: ' + jType.name, jUnit && 'Unit: ' + jUnit.name].filter(Boolean).join(' · '));
-  if (li.added) {
+  if (li.added || li.discounts) {
     const custom = li.added - li.priced;
     const parts = [li.priced ? `${li.priced} from the price book` : '', custom ? `${custom} custom` : ''].filter(Boolean).join(', ');
-    lines.push(`${li.added} line item${li.added === 1 ? '' : 's'} added (${parts}) · $${(li.total / 100).toFixed(2)}` + (li.linked < li.priced ? ' — not linked to the price book entry' : ''));
+    const disc = li.discounts ? ` after −$${(li.discount_total / 100).toFixed(2)} discount` : '';
+    lines.push(`${li.added} line item${li.added === 1 ? '' : 's'} added${parts ? ' (' + parts + ')' : ''} · $${(li.total / 100).toFixed(2)}${disc}` + (li.linked < li.priced ? ' — not linked to the price book entry' : ''));
   }
   if (li.error) lines.push('⚠️ Couldn’t add the line items — add them in HCP. ' + li.error);
   if (tg.added.length) lines.push('Tags: ' + tg.added.join(', '));
@@ -1071,11 +1083,14 @@ function njCreateLocked_(p, who) {
   else if (unfix && unfix.names) lines.push(`(HCP added ${unfix.names} by itself — taken back off.)`);
   // HCP's API has no display-name field (it ignores one sent on create), so the office sets it by hand.
   const dnTodo = created ? njDisplayName_(custOut.first_name, custOut.last_name, custOut.company) : '';
-  if (dnTodo) lines.push(`Display name: set it to ${dnTodo} in HCP (HCP’s API can’t set it).`);
+  // Same for the billing address: every address the API adds is a service address (tested Oct 21 — a type sent on the
+  // address, or the address sent with the new customer, is ignored), so a new customer's address is ticked by hand.
+  const billingTodo = created && !p.address_id;
+  if (dnTodo || billingTodo) lines.push('Finish in HCP (its API can’t do these): ' + [dnTodo && `display name → ${dnTodo}`, billingTodo && 'tick “Set as billing” on the address'].filter(Boolean).join(' · ') + '.');
   if (dropped.indexOf('schedule') !== -1) lines.push('⚠️ HCP wouldn’t take the schedule/assignment — set those in HCP.');
   if (dropped.indexOf('job_fields') !== -1) lines.push('⚠️ HCP wouldn’t take the Job Type/Business Unit — set those in HCP.');
   return { ok: true, message: lines.join('\n'), invoice_number: j.invoice_number || '', job_id: j.id, dropped: dropped, line_items: li, tags: tg.added,
-           display_name_todo: dnTodo, customer_url: 'https://pro.housecallpro.com/app/customers/' + cust.id, unassign: unfix };
+           display_name_todo: dnTodo, billing_todo: billingTodo, customer_url: 'https://pro.housecallpro.com/app/customers/' + cust.id, unassign: unfix };
 }
 
 /**

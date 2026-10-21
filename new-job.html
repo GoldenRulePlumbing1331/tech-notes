@@ -85,6 +85,10 @@
   .shows { font-size: 15px; color: var(--muted); margin-top: 8px; }
   .shows b { color: var(--ink); }
   .match .warn { display: block; font-size: 14px; color: var(--warn-ink); margin-top: 4px; }
+  .todo { margin-top: 12px; padding: 12px; border-radius: 12px; background: var(--warn-bg, #fff7e6); border: 1px solid var(--warn-ink, #8a5a00); color: var(--ink); }
+  .todo ol { margin: 6px 0 8px 20px; padding: 0; font-size: 15px; }
+  .li.disc .x { width: 28px; height: 28px; border: 0; border-radius: 50%; background: var(--soft); color: var(--muted); font-size: 18px; line-height: 1; cursor: pointer; align-self: start; }
+  .li.disc .price { color: var(--ok-ink, #1b7a3a); }
   .match .note { display: block; font-size: 13px; color: var(--muted); font-style: italic; margin-top: 4px; }
   .match .tag.role { color: var(--brand); background: var(--soft); }
   .li { display: flex; gap: 10px; align-items: flex-start; padding: 10px 0; border-top: 1px solid var(--line); }
@@ -228,12 +232,12 @@
       <div><label for="jTime">Time</label><input id="jTime" type="time" step="900"></div>
       <div><label for="jArrival">Arrival window</label>
         <select id="jArrival">
-          <option value="0">None</option><option value="60">1 hour</option>
+          <option value="0">None</option><option value="30">30 min</option><option value="60">1 hour</option>
           <option value="120" selected>2 hours</option><option value="180">3 hours</option><option value="240">4 hours</option>
         </select></div>
       <div><label for="jEmp">Assign to</label><select id="jEmp"><option value="">Unassigned</option></select></div>
     </div>
-    <div class="hint">Leave the date blank to create it unscheduled. A date with no time books it as "anytime".</div>
+    <div class="hint">Leave the date blank to create it unscheduled. A date with no time books it as "anytime". Jobs are booked for 2 hours; an 8:00 AM start gets a 30-min arrival window.</div>
   </div>
 
   <!-- line items from the price book -->
@@ -245,6 +249,10 @@
     <div class="row" style="margin-top:10px">
       <input id="liSearch" placeholder="Add from the price book — e.g. hose bib" autocomplete="off" enterkeyhint="search">
       <button class="btn" id="liGo" style="width:auto;margin:0;padding:0 16px">Find</button>
+    </div>
+    <div class="row" style="margin-top:8px">
+      <button class="btn" id="liCustom" type="button" style="margin:0">+ Custom line item</button>
+      <button class="btn" id="liDisc" type="button" style="margin:0">+ Discount</button>
     </div>
     <div class="status" id="liMsg"></div>
   </div>
@@ -482,7 +490,16 @@
     if (f.job_description) $("desc").value = f.job_description;
     $("jDate").value = f.date || "";
     $("jTime").value = f.time || "";
+    autoArrival();
   }
+  // Arrival window follows the time until someone picks one by hand: 8:00 AM → 30 min, anything else → 2 hours.
+  function autoArrival() {
+    if (S.arrivalPicked) return;
+    $("jArrival").value = $("jTime").value === "08:00" ? "30" : "120";
+  }
+  $("jTime").addEventListener("change", autoArrival);
+  $("jTime").addEventListener("input", autoArrival);
+  $("jArrival").addEventListener("change", function () { S.arrivalPicked = true; });
 
   // ---------- step 2: matches ----------
   function matchButton(c, best, onPick) {
@@ -681,6 +698,7 @@
   function renderItems() {
     var box = $("liList"); box.innerHTML = "";
     S.items.forEach(function (it) {
+      if (it.discount) { box.appendChild(discountRow(it)); return; }
       var row = el("div", "li" + (it.use ? "" : " off"));
       var cb = el("input"); cb.type = "checkbox"; cb.checked = !!it.use;
       cb.onchange = function () { it.use = cb.checked; row.classList.toggle("off", !it.use); sumItems(); };
@@ -691,7 +709,7 @@
         var nm = el("input", "nm"); nm.value = it.cand.name; nm.title = "Line item name"; nm.autocomplete = "off";
         nm.oninput = function () { it.cand.name = nm.value; };
         body.appendChild(nm);
-        body.appendChild(el("span", "tag2", "Not in the price book — enter a price"));
+        body.appendChild(el("span", "tag2", it.cand.price ? "Custom — not from the price book" : "Not in the price book — enter a price"));
         ctl.appendChild(el("span", "ql", "$"));
         var pr = el("input", "pr"); pr.type = "number"; pr.min = "0"; pr.step = "0.01"; pr.inputMode = "decimal"; pr.placeholder = "0.00"; pr.title = "Price each";
         if (it.cand.price) pr.value = (it.cand.price / 100).toFixed(2);
@@ -720,11 +738,47 @@
     });
     sumItems();
   }
+  // A discount: "$" off, or "%" of the ticked line items (sent to HCP as a fixed-dollar discount line).
+  function discountRow(it) {
+    var row = el("div", "li disc");
+    var x = el("button", "x", "×"); x.type = "button"; x.title = "Remove the discount";
+    x.onclick = function () { S.items.splice(S.items.indexOf(it), 1); renderItems(); };
+    row.appendChild(x);
+    var body = el("div", "body");
+    var nm = el("input", "nm"); nm.value = it.name; nm.title = "Discount name"; nm.autocomplete = "off";
+    nm.oninput = function () { it.name = nm.value; };
+    body.appendChild(nm);
+    row.appendChild(body);
+    row.appendChild(el("div", "price", ""));
+    var ctl = el("div", "ctl");
+    var mode = el("select"); mode.title = "Dollars or percent";
+    [["$", "$ off"], ["%", "% off"]].forEach(function (o) { var op = el("option", null, o[1]); op.value = o[0]; if (it.mode === o[0]) op.selected = true; mode.appendChild(op); });
+    mode.onchange = function () { it.mode = mode.value; sumItems(); };
+    ctl.appendChild(mode);
+    var v = el("input", "pr"); v.type = "number"; v.min = "0"; v.step = "0.01"; v.inputMode = "decimal"; v.placeholder = "0"; v.title = "Amount";
+    if (it.value) v.value = String(it.value);
+    v.oninput = function () { it.value = Math.max(0, Number(v.value) || 0); sumItems(); };
+    ctl.appendChild(v);
+    row.appendChild(ctl);
+    return row;
+  }
+  function grossItems() {
+    var sum = 0;
+    S.items.forEach(function (it) { if (!it.discount && it.use && it.cand) sum += it.cand.price * it.qty; });
+    return sum;
+  }
+  function discountCents(it, gross) {
+    var c = it.mode === "%" ? Math.round(gross * Math.min(it.value || 0, 100) / 100) : Math.round((it.value || 0) * 100);
+    return Math.max(0, c);
+  }
   function sumItems() {
-    var n = 0, sum = 0;
-    S.items.forEach(function (it) { if (it.use && it.cand) { n++; sum += it.cand.price * it.qty; } });
-    Array.prototype.forEach.call($("liList").querySelectorAll(".li"), function (row, i) { var it = S.items[i]; row.querySelector(".price").textContent = it.cand ? money(it.cand.price * it.qty) : ""; });
-    show($("liTotal"), n > 0); $("liSum").textContent = money(sum) + (n ? " · " + n + " line item" + (n === 1 ? "" : "s") : "");
+    var n = 0, gross = grossItems(), off = 0;
+    S.items.forEach(function (it) { if (!it.discount && it.use && it.cand) n++; });
+    S.items.forEach(function (it) { if (it.discount) { it.cents = Math.min(discountCents(it, gross), Math.max(0, gross - off)); off += it.cents; } });
+    var sum = gross - off;
+    Array.prototype.forEach.call($("liList").querySelectorAll(".li"), function (row, i) { var it = S.items[i];
+      row.querySelector(".price").textContent = it.discount ? (it.cents ? "−" + money(it.cents) : "") : it.cand ? money(it.cand.price * it.qty) : ""; });
+    show($("liTotal"), n > 0 || off > 0); $("liSum").textContent = money(sum) + (n ? " · " + n + " line item" + (n === 1 ? "" : "s") : "") + (off ? " · " + money(off) + " off" : "");
     $("liHint").textContent = S.items.length ? "Picked from what you said. Ticked = clearly asked for; tick the others if they apply, change the match, or price the custom ones." : "Nothing picked yet — search the price book below to add line items.";
   }
   $("liGo").onclick = function () {
@@ -746,6 +800,20 @@
     });
   };
   $("liSearch").onkeydown = function (e) { if (e.key === "Enter") $("liGo").click(); };
+  $("liCustom").onclick = function () {
+    var q = $("liSearch").value.trim();
+    var it = customItem(q ? q.charAt(0).toUpperCase() + q.slice(1) : "", 1);
+    S.items.push(it); $("liSearch").value = ""; say("liMsg", "Name it and enter the price — it goes on the job as typed (not from the price book).", "");
+    renderItems();
+    var rows = $("liList").querySelectorAll(".li"), inp = rows[rows.length - 1] && rows[rows.length - 1].querySelector(".nm");
+    if (inp) inp.focus();
+  };
+  $("liDisc").onclick = function () {
+    S.items.push({ discount: true, name: "Discount", mode: "$", value: 0, cand: null, use: true });
+    say("liMsg", ""); renderItems();
+    var rows = $("liList").querySelectorAll(".li"), inp = rows[rows.length - 1] && rows[rows.length - 1].querySelector(".pr");
+    if (inp) inp.focus();
+  };
 
   // ---------- submit ----------
   $("submit").onclick = function () { stopAll(submit); };
@@ -761,9 +829,16 @@
     if (!data.job.description) { say("submitMsg", "❌ Add the private notes.", "err"); $("desc").focus(); return; }
     if (data.job.time && !data.job.date) { say("submitMsg", "❌ Pick a date for that time.", "err"); return; }
     data.job.tag_ids = S.tags.map(function (t) { return t.id; });
-    data.job.line_items = S.items.filter(function (it) { return it.use && it.cand && String(it.cand.name).trim(); }).map(function (it) {
+    sumItems();   // works out each discount's dollars from the current lines
+    data.job.line_items = S.items.filter(function (it) { return !it.discount && it.use && it.cand && String(it.cand.name).trim(); }).map(function (it) {
       return { uuid: it.cand.uuid || "", name: String(it.cand.name).trim(), description: it.cand.description || "", quantity: it.qty, unit_price: it.cand.price, unit_cost: it.cand.cost, kind: "labor", taxable: it.cand.taxable };
-    });
+    }).concat(S.items.filter(function (it) { return it.discount && it.cents > 0; }).map(function (it) {
+      var nm = String(it.name || "").trim() || "Discount";
+      if (it.mode === "%" && nm.indexOf("%") === -1) nm += " (" + it.value + "%)";
+      return { name: nm, quantity: 1, unit_price: it.cents, kind: "fixed discount" };
+    }));
+    var unpriced = S.items.filter(function (it) { return it.custom && it.use && !it.cand.price; });
+    if (unpriced.length) { say("submitMsg", "❌ Enter a price for “" + (unpriced[0].cand.name || "the custom line item") + "”, or untick it.", "err"); return; }
     if (S.isNew) {
       if (!$("nFirst").value.trim() && !$("nLast").value.trim()) { need(["nFirst", "nLast"]); say("submitMsg", "❌ Add the customer's name.", "err"); return; }
       if (!addrOk("na")) { say("submitMsg", "❌ Fill in the street and the city — the ZIP is looked up for you.", "err"); return; }
@@ -784,14 +859,23 @@
     api("create", data).then(function (r) {
       b.textContent = "Create job";
       if (r.ok) {
-        say("submitMsg", r.message, "ok");
-        if (r.display_name_todo) {   // HCP's API can't set the display name: make the hand fix one tap
-          var m = $("submitMsg"), box = el("div", null); box.style.marginTop = "10px";
-          var cp = el("button", "btn", "Copy “" + r.display_name_todo + "”"); cp.type = "button"; cp.style.marginTop = "0";
-          cp.onclick = function () { try { navigator.clipboard.writeText(r.display_name_todo); cp.textContent = "Copied ✓"; } catch (e) {} };
+        var shown = (r.display_name_todo || r.billing_todo) ? r.message.split("\n").filter(function (l) { return !/^Finish in HCP/.test(l); }).join("\n") : r.message;
+        say("submitMsg", shown, "ok");
+        if (r.display_name_todo || r.billing_todo) {   // HCP's API can't do these two: make the hand fixes quick
+          var m = $("submitMsg"), box = el("div", "todo");
+          box.appendChild(el("b", null, "Finish the new customer in HCP"));
+          var ol = el("ol");
+          if (r.display_name_todo) ol.appendChild(el("li", null, "Edit the customer → Display name → " + r.display_name_todo));
+          if (r.billing_todo) ol.appendChild(el("li", null, "Addresses → ⋮ → Edit → tick “Set as billing” → Update"));
+          box.appendChild(ol);
+          if (r.display_name_todo) {
+            var cp = el("button", "btn", "Copy “" + r.display_name_todo + "”"); cp.type = "button"; cp.style.marginTop = "0";
+            cp.onclick = function () { try { navigator.clipboard.writeText(r.display_name_todo); cp.textContent = "Copied ✓"; } catch (e) {} };
+            box.appendChild(cp);
+          }
           var op = document.createElement("a"); op.className = "btn"; op.textContent = "Open the customer in HCP"; op.href = r.customer_url; op.target = "_blank"; op.rel = "noopener";
           op.style.display = "block"; op.style.textAlign = "center"; op.style.textDecoration = "none";
-          box.appendChild(cp); box.appendChild(op); m.appendChild(box);
+          box.appendChild(op); m.appendChild(box);
         }
         show(b, false); show($("again"), true);
         recent(r.message.split("\n").slice(0, 2).join(" — "));
@@ -811,7 +895,7 @@
   $("again").onclick = function () {
     S.fields = null; S.cust = null; resetSubmit();
     $("heard").value = ""; $("desc").value = ""; $("jDate").value = ""; $("jTime").value = "";
-    $("jArrival").value = "120"; setAssign(); $("searchBox").value = ""; setJobFields("", ""); setItems([]); setTags([]); $("liSearch").value = "";
+    $("jArrival").value = "120"; S.arrivalPicked = false; setAssign(); $("searchBox").value = ""; setJobFields("", ""); setItems([]); setTags([]); $("liSearch").value = "";
     say("talkMsg", ""); show($("matchCard"), false); show($("confirmCard"), false);
     window.scrollTo({ top: 0, behavior: "smooth" });
   };
