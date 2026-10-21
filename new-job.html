@@ -85,6 +85,7 @@
   .shows { font-size: 15px; color: var(--muted); margin-top: 8px; }
   .shows b { color: var(--ink); }
   .match .warn { display: block; font-size: 14px; color: var(--warn-ink); margin-top: 4px; }
+  .match .note { display: block; font-size: 13px; color: var(--muted); font-style: italic; margin-top: 4px; }
   .match .tag.role { color: var(--brand); background: var(--soft); }
   .li { display: flex; gap: 10px; align-items: flex-start; padding: 10px 0; border-top: 1px solid var(--line); }
   .li:first-child { border-top: 0; padding-top: 2px; }
@@ -497,7 +498,8 @@
     if (c.phones.length) sub.push(c.phones[0].text);
     b.appendChild(el("span", null, sub.join(" · ") || "No phone on file"));
     b.appendChild(el("span", null, c.addresses.length ? c.addresses[0].text + (c.addresses.length > 1 ? "  (+" + (c.addresses.length - 1) + " more)" : "") : "No address on file"));
-    if (c.related && c.related.length) b.appendChild(el("span", "warn", "⚠️ " + (c.related.length + 1) + " accounts share this phone or address" + (c.created ? " · this one added " + c.created.slice(0, 4) : "") + (c.tags && c.tags.length ? " · tags: " + c.tags.join(", ") : "")));
+    if (c.dupes) b.appendChild(el("span", "note", "HCP has " + (c.dupes + 1) + " accounts for this person — showing " + (c.role === "parent" ? "the billing account" : "the one used most recently")));
+    if (c.related && c.related.length) b.appendChild(el("span", "warn", "⚠️ Also at this phone or address: " + c.related.slice(0, 3).join(", ") + (c.related.length > 3 ? " +" + (c.related.length - 3) : "") + (c.tags && c.tags.length ? " · tags: " + c.tags.join(", ") : "")));
     b.onclick = function () { onPick(c); };
     return b;
   }

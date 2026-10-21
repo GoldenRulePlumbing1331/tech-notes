@@ -44,7 +44,7 @@ const NJ = {
   DEFAULT_ARRIVAL_MIN: 120,   // arrival window when a time is given
   DEFAULT_DURATION_MIN: 60,   // scheduled_end = start + this
   MAX_MATCHES: 6,
-  SEARCH_PAGE_SIZE: 10,
+  SEARCH_PAGE_SIZE: 20,
   JOB_SCAN_PAGES: 10,         // recent jobs scanned (x100) to find Business Units, which have no list endpoint
   MIN_PAGE_VERSION: 5,        // new-job.html sends its version; older copies still open on a phone are turned away
   PRICE_CANDIDATES: 6,        // price book hits kept per suggested line item
@@ -649,35 +649,134 @@ function njSearchText_(q) {
 }
 
 /**
- * Runs a few targeted HCP searches (phone, email, name, street) and ranks the combined hits.
- * HCP's q searches name, email, mobile number and address.
+ * Runs targeted HCP searches in parallel and ranks the combined hits. HCP's q searches name, email, phone and
+ * address, but only on exact text, so speech slips ("Krause" for Crouse, "Eastwood Bank Way" for E. Woodbank Way)
+ * find nothing on their own. To catch those it also searches:
+ *   · the house number alone ("1507"), keeping only customers whose address starts with that number;
+ *   · the street name with a run-in direction split off ("Eastwood Bank" → "Woodbank");
+ *   · the last name alone when a full name was heard.
+ * Scoring then treats sound-alike names and street spellings as matches (njScore_), same-name duplicate accounts
+ * are folded into one card (njCollapseDupes_), and when there is a strong match the unrelated hits are dropped.
  */
 function njFind_(f, raw) {
-  const queries = [];
-  const add = q => { q = String(q || '').trim(); if (q && queries.indexOf(q) === -1) queries.push(q); };
+  const queries = [];   // [q, kind]
+  const add = (q, kind) => { q = String(q || '').trim(); if (q && !queries.some(x => x[0] === q)) queries.push([q, kind || '']); };
   if (f.phone && f.phone.length >= 7) add(f.phone);
   if (f.email) add(f.email);
   const name = [f.first_name, f.last_name].filter(Boolean).join(' ');
   add(name);
   if (f.company) add(f.company);
-  if (f.street) add(f.street);
+  if (f.street) {
+    add(f.street);
+    const st = njStreetParts_(f.street);
+    if (st.num) add(st.num, 'num');
+    if (st.alt) add(st.alt);
+  }
+  if (f.first_name && f.last_name) add(f.last_name);
   if (!queries.length && raw) add(raw.slice(0, 80));
 
   const byId = {};
-  const run = q => {
-    const r = hcp_('get', `/customers?q=${encodeURIComponent(q)}&page_size=${NJ.SEARCH_PAGE_SIZE}&sort_by=created_at&sort_direction=desc`);
-    (r.customers || []).forEach(c => { if (c.id) byId[c.id] = c; });
-    return (r.customers || []).length;
-  };
-  queries.slice(0, 5).forEach(q => {
-    const n = run(q);
-    // Full name found nothing: try the last name alone (speech often garbles first names).
-    if (!n && q === name && f.first_name && f.last_name) run(f.last_name);
+  const results = njGetAll_(queries.slice(0, 7).map(q =>
+    `/customers?q=${encodeURIComponent(q[0])}&page_size=${q[1] === 'num' ? 50 : NJ.SEARCH_PAGE_SIZE}&sort_by=created_at&sort_direction=desc`));
+  results.forEach((r, i) => {
+    const kind = queries[i][1], q = queries[i][0];
+    ((r && r.customers) || []).forEach(c => {
+      if (!c.id) return;
+      // a bare house number also hits phone numbers and other streets: keep only addresses that start with it
+      if (kind === 'num' && !(c.addresses || []).some(a => njStreetParts_(a.street).num === q)) return;
+      byId[c.id] = c;
+    });
   });
 
-  const list = Object.keys(byId).map(id => { const c = njCustomer_(byId[id]); c.score = njScore_(c, f); return c; });
+  let list = Object.keys(byId).map(id => { const c = njCustomer_(byId[id]); c.score = njScore_(c, f); return c; });
+  list = njCollapseDupes_(list);
   njFlagRelated_(list);
-  return list.sort((a, b) => b.score - a.score).slice(0, NJ.MAX_MATCHES);
+  list.sort((a, b) => b.score - a.score || String(b.updated).localeCompare(String(a.updated)));
+  if (list.length && list[0].score >= 4) list = list.filter(c => c.score >= 2);   // strong match found: drop the noise
+  return list.slice(0, NJ.MAX_MATCHES);
+}
+
+/** Parallel GETs to HCP. Returns one parsed body (or null on failure) per path; 429s are retried one at a time. */
+function njGetAll_(paths) {
+  if (!paths.length) return [];
+  const headers = { Authorization: 'Token ' + apiKey_(), Accept: 'application/json' };
+  let res;
+  try {
+    res = UrlFetchApp.fetchAll(paths.map(p => ({ url: NJ.BASE + p, method: 'get', headers: headers, muteHttpExceptions: true })));
+  } catch (e) { res = paths.map(() => null); }
+  return paths.map((p, i) => {
+    const r = res[i];
+    if (r && r.getResponseCode() >= 200 && r.getResponseCode() < 300) { try { return JSON.parse(r.getContentText() || '{}'); } catch (_) { return null; } }
+    try { return hcp_('get', p); } catch (e) { console.warn('customer search failed: ' + e.message); return null; }
+  });
+}
+
+const NJ_DIRS_ = { n: 'north', s: 'south', e: 'east', w: 'west', ne: 'northeast', nw: 'northwest', se: 'southeast', sw: 'southwest' };
+const NJ_SUFFIX_ = { road: 'rd', street: 'st', avenue: 'ave', av: 'ave', lane: 'ln', drive: 'dr', court: 'ct', circle: 'cir',
+  boulevard: 'blvd', place: 'pl', pike: 'pk', pk: 'pk', way: 'way', terrace: 'ter', trail: 'trl', highway: 'hwy', parkway: 'pkwy',
+  rd: 'rd', st: 'st', ave: 'ave', ln: 'ln', dr: 'dr', ct: 'ct', cir: 'cir', blvd: 'blvd', pl: 'pl', ter: 'ter', trl: 'trl',
+  hwy: 'hwy', pkwy: 'pkwy', run: 'run', xing: 'xing', crossing: 'xing', sq: 'sq', square: 'sq', aly: 'aly', alley: 'aly' };
+
+/**
+ * Breaks a street into comparable parts. "1507 E. Woodbank Way" and "1507 Eastwood Bank Way" both give
+ * num "1507" and key "eastwoodbank" (directions spelled out, suffix dropped, spaces removed); bare = key without
+ * separate direction words ("woodbank" for the first, "eastwoodbank" for the second).
+ * alt = a search word for a direction run into the name ("Eastwood Bank" → "Woodbank"), else "".
+ */
+function njStreetParts_(street) {
+  const s = String(street || '').toLowerCase().replace(/[.,#]/g, ' ').trim();
+  const num = (s.match(/^(\d+)[a-z]?\b/) || [])[1] || '';
+  let words = s.replace(/^\d+[a-z]?\s*/, '').split(/\s+/).filter(Boolean);
+  if (words.length > 1 && NJ_SUFFIX_[words[words.length - 1]]) words = words.slice(0, -1);
+  words = words.map(w => NJ_DIRS_[w] || w);
+  const key = words.join('');
+  const bare = words.filter(w => !/^(north|south|east|west)(east|west)?$/.test(w)).join('');
+  let alt = '';
+  const m = key.match(/^(north|south|east|west)([a-z]{4,})$/);
+  if (m && words[0] !== m[1]) alt = m[2].charAt(0).toUpperCase() + m[2].slice(1);
+  return { num: num, key: key, bare: bare || key, alt: alt };
+}
+
+/** True when two street names are the same street allowing for speech slips (spacing, E/East, a letter or two). */
+function njSameStreet_(a, b) {
+  if (!a.key || !b.key) return false;
+  if (a.key === b.key || a.bare === b.bare) return true;
+  const inside = (x, y) => Math.min(x.length, y.length) >= 5 && (x.indexOf(y) !== -1 || y.indexOf(x) !== -1);
+  if (inside(a.key, b.key) || inside(a.bare, b.bare) || inside(a.bare, b.key) || inside(a.key, b.bare)) return true;
+  return njEditDist_(a.key, b.key) <= Math.max(1, Math.floor(Math.max(a.key.length, b.key.length) / 5));
+}
+
+function njEditDist_(a, b) {
+  if (Math.abs(a.length - b.length) > 3) return 99;
+  let prev = Array.from({ length: b.length + 1 }, (_, j) => j);
+  for (let i = 1; i <= a.length; i++) {
+    const cur = [i];
+    for (let j = 1; j <= b.length; j++) cur[j] = Math.min(prev[j] + 1, cur[j - 1] + 1, prev[j - 1] + (a[i - 1] === b[j - 1] ? 0 : 1));
+    prev = cur;
+  }
+  return prev[b.length];
+}
+
+/** Sound-alike key for a name (Soundex-style, first letter coded too, so Krause, Crouse and Krouse all give "262"). */
+function njSoundKey_(s) {
+  const code = { b: 1, f: 1, p: 1, v: 1, c: 2, g: 2, j: 2, k: 2, q: 2, s: 2, x: 2, z: 2, d: 3, t: 3, l: 4, m: 5, n: 5, r: 6 };
+  s = String(s || '').toLowerCase().replace(/[^a-z]/g, '').replace(/^ph/, 'f').replace(/^kn/, 'n').replace(/^wr/, 'r');
+  let out = '', last = '';
+  for (const ch of s) {
+    const c = code[ch];
+    if (!c) { if (!/[hw]/.test(ch)) last = ''; continue; }
+    if (String(c) !== last) out += c;
+    last = String(c);
+  }
+  return out.slice(0, 4);
+}
+
+function njSoundsLike_(heard, actual) {
+  const a = String(heard || '').toLowerCase().replace(/[^a-z]/g, ''), b = String(actual || '').toLowerCase().replace(/[^a-z]/g, '');
+  if (!a || !b) return false;
+  if (a === b) return true;
+  if (a.length >= 4 && njSoundKey_(a) && njSoundKey_(a) === njSoundKey_(b) && Math.abs(a.length - b.length) <= 3) return true;
+  return a.length >= 5 && njEditDist_(a, b) <= 2;
 }
 
 function njScore_(c, f) {
@@ -685,15 +784,60 @@ function njScore_(c, f) {
   const low = v => String(v || '').toLowerCase().trim();
   if (f.phone && c.phones.some(p => p.number.slice(-10) === f.phone.slice(-10))) s += 5;
   if (f.email && low(c.email) === low(f.email)) s += 4;
-  if (f.last_name && low(c.last_name) === low(f.last_name)) s += 3;
-  if (f.first_name && low(c.first_name) === low(f.first_name)) s += 1;
+  if (f.last_name) {
+    if (low(c.last_name) === low(f.last_name)) s += 3;
+    else if (njSoundsLike_(f.last_name, c.last_name)) s += 2;            // "Krause" heard, "Crouse" on file
+  }
+  if (f.first_name) {
+    if (low(c.first_name) === low(f.first_name)) s += 1;
+    else if (njSoundsLike_(f.first_name, c.first_name)) s += 0.5;
+  }
   if (f.company && low(c.company) === low(f.company)) s += 2;
   if (f.street) {
-    const num = (f.street.match(/^\s*(\d+)/) || [])[1];
-    const word = low(f.street.replace(/^\s*\d+\s*/, '')).split(/\s+/)[0];
-    if (c.addresses.some(a => (!num || low(a.street).indexOf(num) === 0) && word && low(a.street).indexOf(word) !== -1)) s += 3;
+    const want = njStreetParts_(f.street);
+    let best = 0, bestAddr = null;
+    c.addresses.forEach(a => {
+      const have = njStreetParts_(a.street);
+      const same = njSameStreet_(want, have), numOk = want.num && have.num === want.num;
+      const pts = numOk && same ? 4 : (same && !want.num) ? 3 : same ? 1 : numOk ? 1 : 0;
+      if (pts > best) { best = pts; bestAddr = a; }
+    });
+    s += best;
+    if (bestAddr && best >= 3) {   // show (and book at) the address that matched
+      c.addresses = [bestAddr].concat(c.addresses.filter(a => a !== bestAddr));
+      c.matched_address = true;
+    }
   }
   return s;
+}
+
+/**
+ * Folds duplicate accounts into one card: same name (or company) AND a shared phone or address. The card kept is
+ * a PARENT_TAGS account if there is one, else the one changed most recently in HCP; it gets dupes = how many
+ * were folded in, so the page can say so.
+ */
+function njCollapseDupes_(list) {
+  const who = c => (String(c.first_name || '') + String(c.last_name || '')).toLowerCase().replace(/[^a-z]/g, '') ||
+    String(c.company || '').toLowerCase().replace(/[^a-z0-9]/g, '');
+  const addrKey = a => njStreetParts_(a.street).num + '|' + njStreetParts_(a.street).key;
+  const sameInfo = (a, b) =>
+    a.phones.some(p => p.number && b.phones.some(q => q.number === p.number)) ||
+    a.addresses.some(x => x.street && b.addresses.some(y => y.street && addrKey(x) === addrKey(y)));
+  const parentTags = String(props_().getProperty('PARENT_TAGS') || NJ.DEFAULT_PARENT_TAGS).split(/[,\n]/).map(t => t.trim().toLowerCase()).filter(Boolean);
+  const isParent = c => (c.tags || []).some(t => parentTags.indexOf(String(t).toLowerCase()) !== -1);
+  const rank = c => [isParent(c) ? 1 : 0, c.score, String(c.updated || c.created || '')];
+  const better = (a, b) => { const x = rank(a), y = rank(b); return x[0] - y[0] || x[1] - y[1] || x[2].localeCompare(y[2]); };
+  const groups = [];
+  list.forEach(c => {
+    const g = who(c) && groups.find(g => who(g[0]) === who(c) && g.some(o => sameInfo(o, c)));
+    if (g) g.push(c); else groups.push([c]);
+  });
+  return groups.map(g => {
+    const keep = g.slice().sort((a, b) => better(b, a))[0];
+    keep.dupes = g.length - 1;
+    keep.score = Math.max.apply(null, g.map(c => c.score));
+    return keep;
+  });
 }
 
 /**
@@ -713,7 +857,7 @@ function njFlagRelated_(list) {
       o.phones.some(p => c.phones.some(q => q.number && q.number === p.number)) ||
       o.addresses.some(a => c.addresses.some(b => b.street && keyAddr(a) === keyAddr(b)))));
     if (!others.length) return;
-    c.related = others.map(o => o.display_name);
+    c.related = others.map(o => o.display_name);   // different names on the same phone/address (same-name dupes are already folded)
     if (c.role === 'parent') c.score += 2;
     else if (c.role === 'child') c.score -= 2;
   });
@@ -757,6 +901,7 @@ function njCustomer_(c) {
     tags: (c.tags || []).map(t => (t && typeof t === 'object') ? t.name : t).filter(Boolean).map(String),
     kind: c.kind || '',
     created: String(c.created_at || '').slice(0, 10),
+    updated: String(c.updated_at || c.created_at || ''),
   };
 }
 
