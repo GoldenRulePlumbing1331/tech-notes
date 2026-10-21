@@ -357,3 +357,21 @@ What HCP does on its own (not fixable from our side):
 - The customer display name can't be set by the API — New Job shows the LastFirst name to paste in.
 - Price-book matches only find parts that are in the 443-item Weinstein parts catalog (a flapper and a wax
   ring weren't).
+
+## New Job updates — 2026-10-21
+- **Customer search** casts a wider net: it also searches the house number on its own and the street with a
+  run-in direction split off, and counts sound-alike names ("Krause" heard → Crouse found) and street spellings
+  ("Eastwood Bank Way" = "E. Woodbank Way"). An address on the opposite side (W vs E) ranks lower. Same-name
+  accounts that share a phone or address show as one card ("HCP has N accounts for this person").
+- **Arrival window**: 30 min added. An 8:00 AM start defaults to 30 min (until a window is picked by hand); other
+  times default to 2 hours. **Jobs are booked for 2 hours** (`DEFAULT_DURATION_MIN`).
+- **+ Custom line item** (any name and price, not from the price book) and **+ Discount** ($ off, or % of the ticked
+  lines). Discounts go on as HCP "fixed discount" lines; a % is worked out on the page and sent in dollars, named
+  "Discount (10%)". HCP's own percent-discount lines didn't total reliably through the API (tested on #49804).
+- **Billing address and display name can't be set through HCP's API** (tested Oct 21: a type sent on the address,
+  an address sent with the new customer, or a display name on create/update are all ignored — every API address is
+  a service address). For a new customer the success screen shows a "Finish the new customer in HCP" checklist:
+  display name (with a Copy button) and tick "Set as billing" on the address, plus a button to open the customer.
+- Test records from the Oct 21 checks to delete in HCP: customers "ZZBilling Test" and "ZZBilling2 Test", and the
+  addresses "1 Billing Test A" / "2 Billing Test B" on Test Customer (gone when Test Customer is deleted). Job #49804
+  now has ZZ test line items (also on the delete list already).
