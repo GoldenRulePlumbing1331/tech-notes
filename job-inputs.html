@@ -95,7 +95,7 @@
     <label>Weinstein material → HCP Job Inputs</label>
     <div class="drop" id="drop">
       <b>Drop the Weinstein CSV here, or tap to choose it</b>
-      <span class="hint">Weinstein web store → Order History → <i>Order History Detail</i> → Export CSV. Any date range; lines already posted are skipped.</span>
+      <span class="hint">Weinstein web store → Order History → <i>Order History Detail</i> → Export CSV. Any date range; lines already posted are skipped. Inventory / truck-stock POs go to that month's Inventory Management job.</span>
       <input type="file" id="file" accept=".csv,text/csv,text/plain">
     </div>
     <div class="status" id="fileMsg"></div>
@@ -176,7 +176,8 @@
     desc: ["Description", "Item Description"], comment: ["Comment", "Comments", "Notes"], qty: ["Quantity", "Qty Shipped", "Qty"],
     price: ["Price", "Unit Price", "Net Price"], ext: ["Ext Price", "Extension", "Extended Price", "Line Total"], uom: ["Qty UOM", "UOM", "U/M"]
   };
-  var STOCK_WORDS = ["inventory", "stock", "truck", "shop", "van", "warehouse"];
+  var STOCK_WORDS = ["inventory", "inventor", "stock", "restock", "truck", "shop", "van", "warehouse"];   // → monthly Inventory Management job
+  function isStockPO(t) { var low = String(t || "").trim().replace(/^\s*PO\s*#?\s*/i, "").trim().toLowerCase(); if (!low) return false; for (var i = 0; i < STOCK_WORDS.length; i++) if (low.indexOf(STOCK_WORDS[i]) !== -1) return true; return false; }
   function norm(s) { return String(s || "").toLowerCase().replace(/[^a-z0-9]/g, ""); }
   function splitLine(line) {
     var s = line.replace(/[\r\n]+$/, "");
@@ -204,7 +205,7 @@
     var body = String(t || "").trim().replace(/^\s*PO\s*#?\s*/i, "").trim(), low = body.toLowerCase();
     if (/^return/.test(low) || low === "rtn" || /^credit/.test(low)) return { kind: "return", ref: "" };
     var ref = jobRef(body); if (ref) return { kind: "purchase", ref: ref };
-    for (var i = 0; i < STOCK_WORDS.length; i++) if (low.indexOf(STOCK_WORDS[i]) !== -1) return { kind: "stock", ref: "" };
+    if (isStockPO(low)) return { kind: "stock", ref: "" };
     return { kind: "unknown", ref: "" };
   }
   function parseCsv(text) {
@@ -226,15 +227,16 @@
       if (qty === 0 && ext === 0) continue;
       if (!part) { warns.push("Row " + (n + 1) + ": no part number — skipped"); continue; }
       if (ext === 0 && qty !== 0) { var up = toFloat(g("price")); if (up) ext = up * qty; }
-      var po = g("po"), comment = g("comment"), cls = classifyPO(po), orig = "", ref = cls.ref, kind = cls.kind;
+      var po = g("po"), comment = g("comment"), cls = classifyPO(po), orig = "", ref = cls.ref, kind = cls.kind, stock = kind === "stock";
       if (kind === "return" || qty < 0) {
         kind = "return";
         var m1 = /Original\s+Sale\s*:\s*([A-Za-z0-9.\-]+)/i.exec(comment); orig = m1 ? m1[1] : "";
-        var m2 = /Cus\s*PO\s*:\s*([^*]+?)\s*(?:\*|$)/i.exec(comment); if (m2) ref = jobRef(m2[1]);
+        var m2 = /Cus\s*PO\s*:\s*([^*]+?)\s*(?:\*|$)/i.exec(comment); if (m2) { ref = jobRef(m2[1]); if (!ref && isStockPO(m2[1])) stock = true; }   // return of truck / shop stock
         if (!ref) ref = jobRef(po);
+        if (!ref && isStockPO(po)) stock = true;
         qty = -Math.abs(qty); ext = -Math.abs(ext);
       }
-      lines.push({ order: g("order"), date: g("date"), po: po, ref: ref, part: part, desc: g("desc") || part, qty: qty, ext: ext, uom: g("uom"), kind: kind, orig: orig, row: n + 1 });
+      lines.push({ order: g("order"), date: g("date"), po: po, ref: ref, part: part, desc: g("desc") || part, qty: qty, ext: ext, uom: g("uom"), kind: kind, orig: orig, stock: stock, row: n + 1 });
     }
     return { lines: lines, warns: warns };
   }
@@ -314,7 +316,7 @@
     if (t.held) box.appendChild(el("span", "chip flag", t.held + " held (duplicate part)"));
     if (t.flag) box.appendChild(el("span", "chip flag", t.flag + " need a job number"));
     if (t.skip) box.appendChild(el("span", "chip", t.skip + " already on HCP / skipped"));
-    if (t.info) box.appendChild(el("span", "chip", t.info + " stock, not for a job"));
+    if (t.info) box.appendChild(el("span", "chip", t.info + " not for a job"));
     var can = (t.add + t.net) > 0 && !S.applied;
     $("applyBtn").disabled = !can;
     $("applyBtn").textContent = S.applied ? "Applied" : can ? "Apply all — post " + (t.add + t.net) + " line" + (t.add + t.net === 1 ? "" : "s") + " to " + t.jobCount + " job" + (t.jobCount === 1 ? "" : "s") : "Nothing to post";
@@ -336,7 +338,7 @@
   var STLABEL = { ready: "ready", pending: "waiting", flag: "needs attention", skipped: "nothing to do", info: "not for a job" };
   function renderGroup(g, i) {
     var wrap = el("div", "grp"), hd = el("div", "hd");
-    var title = g.job ? "Job #" + g.job.number + " · " + g.job.customer : (g.ref ? "Job " + g.ref : (g.state === "flag" ? "No job number" : g.reason));
+    var title = g.job ? "Job #" + g.job.number + " · " + g.job.customer + (g.label ? " · " + g.label : "") : (g.label ? g.label : g.ref ? "Job " + g.ref : (g.state === "flag" ? "No job number" : g.reason));
     hd.appendChild(el("b", null, title));
     if (g.job) hd.appendChild(el("span", "hint", [g.job.status, g.job.scheduled].filter(Boolean).join(" · ")));
     hd.appendChild(el("span", "st " + g.state, STLABEL[g.state] || g.state));

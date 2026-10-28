@@ -17,6 +17,11 @@
  *   • Duplicate-part guard: the same part already on the job (any order) and the line is $100+ → held, shown
  *     with an "upload anyway" box. Cheaper repeats post normally.
  *   • Several segments (49040-1, 49040-2) for a bare "49040" → the one scheduled closest to the ship date.
+ *   • Inventory / truck / shop stock POs ("Inventory", "TRUCK STOCK", "Truck Restock", "shop stock"…) go to the
+ *     MONTHLY job on the customer "Inventory Management" (property INVENTORY_CUSTOMER): the customer's job whose
+ *     scheduled (or created) date is in the order's ship month. Nothing to edit each month — just create the
+ *     month's job in HCP. These post even while that job is still open, and the $100 duplicate-part hold is off
+ *     for them. A stock return nets against this month's inventory job, or last month's if it was bought there.
  *
  * ───────────── ONE-TIME SETUP ─────────────
  *  1. script.google.com → New project "HCP Job Inputs" → paste this file (owner: golden.rule.calendar@gmail.com).
@@ -24,6 +29,10 @@
  *  3. Script Properties:  HCP_API_KEY, TECH_CODES (same as the other tools), REPORT_TO (office email for the
  *     morning summary when the retry posts something).  Optional: WARRANTY_TAGS = Bradford White Warranty
  *     (comma-separated job tags whose water-heater UNIT should be left off; empty = off, same as the old config).
+ *     Inventory routing: INVENTORY_CUSTOMER (default "Inventory Management"; set to "off" to go back to just
+ *     logging stock lines), INVENTORY_CUSTOMER_ID (optional — pins the HCP customer id if the name search is
+ *     ambiguous), INVENTORY_START = 2026-10 (stock shipped before this month is only logged, not posted).
+ *     Override one month's job from the page ("Use this job") or with property INV_2026-11 = <job #>.
  *  4. Run setupSheet() → creates the "Job Inputs Uploads" spreadsheet (Posted + Pending tabs) and saves its ID.
  *  5. Run verifyAccess() (read-only). Run installDailyTrigger() once (retryPending every morning 6–7 AM).
  *  6. Deploy → Web app (Execute as Me, Anyone) → URL into config.js as "jobInputs".
@@ -44,6 +53,10 @@ const JI = {
   DUP_MIN_CENTS: 10000,          // duplicate-part guard kicks in at a $100 line total
   JOB_SCAN_PAGES: 25,            // 2,500 most recent jobs
   TAG_RE: /Weinstein\s*#\s*([A-Za-z0-9.\-/]+)/i,
+  INV_PREFIX: 'INV:',            // synthetic ref for stock lines: INV:2026-10 = the Inventory Management job for Oct 2026
+  INV_DEFAULT_CUSTOMER: 'Inventory Management',
+  INV_DEFAULT_START: '2026-10',
+  STOCK_WORDS: ['inventory', 'inventor', 'stock', 'restock', 'truck', 'shop', 'van', 'warehouse'],
   WH_UNIT_RE: /WATER\s*HEATER|WTR\s*HTR/i,
   WH_TANK_RE: /(?:BRADFORD|BRADWHIT|\bBW\b|RHEEM|A\.?\s?O\.?\s?SMITH|\bSTATE\b|RUUD).*\b\d{2,3}\s*-?\s*GAL|\b\d{2,3}\s*-?\s*GAL.*(?:WATER\s*HEATER|WTR\s*HTR)/i,
   WH_ACCESSORY_RE: /\bPAN\b|DESCAL|VALVE|SENSOR|CONNECT|\bFLEX|STAND|\bKIT\b|STRAP|EXPANSION|THERMOCOUPLE|ANODE|ELEMENT|THERMOSTAT|DRAIN|BLANKET|TOILET|FLUSH|\bGPF\b/i,
@@ -90,12 +103,23 @@ function jiCleanLines_(raw) {
     const qty = Number(l.qty) || 0, ext = Number(l.ext) || 0;
     const line = { order: String(l.order || '').trim(), date: String(l.date || '').trim(), po: String(l.po || '').trim(),
                    ref: l.ref ? String(l.ref).trim() : '', part: String(l.part || '').trim(), desc: String(l.desc || l.part || '').trim(),
-                   qty: qty, ext: ext, uom: String(l.uom || '').trim(), kind: String(l.kind || 'purchase'), orig: String(l.orig || '').trim(), row: Number(l.row) || 0 };
+                   qty: qty, ext: ext, uom: String(l.uom || '').trim(), kind: String(l.kind || 'purchase'), orig: String(l.orig || '').trim(), row: Number(l.row) || 0,
+                   stock: !!l.stock };
+    if (line.kind === 'return-stock') { line.kind = 'return'; line.stock = true; }      // how the Pending tab stores a stock return
+    if (line.kind === 'stock' || (!line.ref && line.kind !== 'return' && jiIsStockPo_(line.po))) line.stock = true;
     if (!line.part) throw new Error('A line has no part number (row ' + line.row + ').');
     return line;
   });
 }
 function jiKey_(l) { return `${l.order}|${l.part.toUpperCase()}|${l.qty}|${l.ext}`; }
+function jiIsStockPo_(po) { const b = String(po || '').trim().replace(/^\s*PO\s*#?\s*/i, '').trim().toLowerCase(); return !!b && JI.STOCK_WORDS.some(w => b.indexOf(w) !== -1); }
+function jiInvOn_() { const v = String(props_().getProperty('INVENTORY_CUSTOMER') || JI.INV_DEFAULT_CUSTOMER).trim(); return /^(off|no|none|0|false)$/i.test(v) ? '' : v; }
+function jiInvStart_() { return String(props_().getProperty('INVENTORY_START') || JI.INV_DEFAULT_START).trim(); }
+function jiInvRef_(shipDate) { const m = /^(\d{1,2})\/(\d{1,2})\/(\d{4})/.exec(String(shipDate || '').trim()); return m ? JI.INV_PREFIX + m[3] + '-' + ('0' + m[1]).slice(-2) : ''; }
+function jiInvMonth_(ref) { return String(ref || '').slice(JI.INV_PREFIX.length); }           // 'INV:2026-10' -> '2026-10'
+function jiInvLabel_(ref) { const m = jiInvMonth_(ref); const d = new Date(Date.UTC(+m.slice(0, 4), +m.slice(5, 7) - 1, 1)); return isNaN(d) ? ref : Utilities.formatDate(d, 'UTC', 'MMM yyyy') + ' inventory'; }
+function jiInvPrev_(ref) { const m = jiInvMonth_(ref); let y = +m.slice(0, 4), mo = +m.slice(5, 7) - 1; if (mo < 1) { mo = 12; y--; } return JI.INV_PREFIX + y + '-' + ('0' + mo).slice(-2); }
+function jiIsInvRef_(ref) { return String(ref || '').indexOf(JI.INV_PREFIX) === 0; }
 function jiIsReturn_(l) { return l.qty < 0 || l.ext < 0; }
 function jiMatchOrder_(l) { return l.orig || l.order; }
 function jiCents_(l) { const q = Math.abs(l.qty); return q ? Math.round(Math.abs(l.ext) * 100 / q) : 0; }
@@ -114,9 +138,18 @@ function jiPlan_(lines, opts) {
   const byRef = {};
   const loose = { skipped: [], info: [], flag: [] };
 
+  const invName = jiInvOn_(), invStart = jiInvStart_();
+  const invRefs = {};        // refs (incl. job numbers typed on the page) whose lines are inventory / truck stock
   lines.forEach(l => {
     const key = jiKey_(l);
     if (posted[key]) { loose.skipped.push(jiItem_('skip', l, 'already posted to HCP on ' + posted[key])); return; }
+    if (!l.ref && invName && l.stock) {
+      const ref = jiInvRef_(l.date);
+      if (!ref) { loose.flag.push(jiItem_('flag', l, 'stock line (PO "' + l.po + '") has no usable ship date — type the job number')); return; }
+      if (invStart && jiInvMonth_(ref) < invStart) { loose.info.push(jiItem_('info', l, 'stock / truck shipped before ' + invStart + ' — not posted (PO text "' + l.po + '")')); return; }
+      l.ref = ref;
+    }
+    if (l.ref && l.stock) invRefs[l.ref] = true;
     if (!l.ref) {
       if (l.kind === 'stock') loose.info.push(jiItem_('info', l, 'stock / truck — no job (PO text "' + l.po + '")'));
       else if (l.kind === 'return' || jiIsReturn_(l)) loose.flag.push(jiItem_('flag', l, 'return whose comment doesn’t name a job — type the job number'));
@@ -126,11 +159,23 @@ function jiPlan_(lines, opts) {
     (byRef[l.ref] = byRef[l.ref] || []).push(l);
   });
 
-  // resolve every job number in one go
+  // resolve every job number in one go (inventory months through the Inventory Management customer)
   const refs = Object.keys(byRef);
-  const resolved = refs.length ? jiResolveRefs_(refs) : {};
-  const work = [];       // [{ref, job, lines, note}]
-  refs.forEach(ref => {
+  const invMonths = refs.filter(jiIsInvRef_), jobRefs = refs.filter(r => !jiIsInvRef_(r));
+  const resolved = jobRefs.length ? jiResolveRefs_(jobRefs) : {};
+  const work = [];       // [{ref, job, lines, note, inv}]
+  invMonths.forEach(ref => {
+    const ls = byRef[ref], label = jiInvLabel_(ref);
+    let r;
+    try { r = jiResolveInventory_(ref); } catch (e) { r = { error: e.message }; }
+    if (r.job) { work.push({ ref: String(r.job.invoice_number || ref), job: r.job, lines: ls, note: r.note || '', fresh: true, inv: true, label: label, invRef: ref }); return; }
+    const why = r.error ? 'HCP error: ' + r.error + ' — saved; retried every morning'
+      : r.ambiguous ? `${invName} has several jobs in ${label.replace(' inventory', '')} (${r.ambiguous.join(', ')}) — type the one to use`
+      : r.noCustomer ? `no HCP customer named "${invName}" — create it (or set INVENTORY_CUSTOMER_ID); saved; retried every morning`
+      : `no ${invName} job in ${label.replace(' inventory', '')} yet — create one in HCP (any day that month); saved; retried every morning`;
+    groups.push(Object.assign(jiGroup_(ref, null, r.ambiguous ? 'flag' : 'pending', why, ls.map(l => jiItem_(r.ambiguous ? 'flag' : 'pending', l, r.ambiguous ? 'which job?' : 'waiting for the month’s inventory job'))), { label: label }));
+  });
+  jobRefs.forEach(ref => {
     const r = resolved[ref];
     const ls = byRef[ref];
     if (!r) { groups.push(jiGroup_(ref, null, 'pending', 'job ' + ref + ' isn’t in HCP yet (looked through the ' + JI.JOB_SCAN_PAGES * 100 + ' most recent jobs) — saved; retried every morning', ls.map(l => jiItem_('pending', l, 'waiting for the job to appear')))); return; }
@@ -146,11 +191,11 @@ function jiPlan_(lines, opts) {
       Object.keys(buckets).forEach(inv => work.push({ ref: inv, job: buckets[inv].job, lines: buckets[inv].lines, note: 'auto-picked segment: ' + buckets[inv].note }));
       return;
     }
-    work.push({ ref: ref, job: r.job, lines: ls, note: r.note || '', fresh: !!r.fresh });
+    work.push({ ref: ref, job: r.job, lines: ls, note: r.note || '', fresh: !!r.fresh, inv: !!invRefs[ref], label: invRefs[ref] ? 'inventory (job typed on the page)' : '' });
   });
 
   work.sort((a, b) => a.ref.localeCompare(b.ref, undefined, { numeric: true }));
-  work.forEach(w => { try { groups.push(jiPlanJob_(w)); } catch (e) { groups.push(jiGroup_(w.ref, jiJobOut_(w.job), 'pending', 'HCP error: ' + e.message + ' — saved; retried every morning', w.lines.map(l => jiItem_('pending', l, 'retry')))); } });
+  work.forEach(w => { try { jiPlanJob_(w).forEach(g => groups.push(g)); } catch (e) { groups.push(jiGroup_(w.ref, jiJobOut_(w.job), 'pending', 'HCP error: ' + e.message + ' — saved; retried every morning', w.lines.map(l => jiItem_('pending', l, 'retry')))); } });
 
   // lines already sitting in the Pending tab from an earlier upload: say so (they're saved once, never twice)
   groups.forEach(g => g.items.forEach(it => { if ((it.k === 'pending' || it.k === 'held') && it.keys.some(k => pendingKeys[k])) it.reason += ' — already saved from an earlier upload'; }));
@@ -177,14 +222,16 @@ function jiJobOut_(j) {
            status: j.work_status || '', scheduled: s.scheduled_start ? Utilities.formatDate(jiParse_(s.scheduled_start), jiTz_(), 'MM/dd/yy') : '', tags: jiTags_(j) };
 }
 
-/** One job's lines → group with add / net / skip / held / warranty / flag items. */
+/** One job's lines → [group] with add / net / skip / held / warranty / flag items (plus, for an inventory job, a
+ *  second group when a stock return has to be netted on the previous month's inventory job). */
 function jiPlanJob_(w) {
   const job = w.fresh ? w.job : hcp_('get', '/jobs/' + encodeURIComponent(w.job.id));   // status and tags as of right now
-  const ref = w.ref, lines = w.lines;
+  const ref = w.ref, lines = w.lines, inv = !!w.inv;
   const out = jiJobOut_(job);
+  const tag = g => { if (w.label) g.label = w.label; return [g]; };
   const status = String(job.work_status || '').toLowerCase();
-  if (JI.CANCELED.indexOf(status) !== -1) return jiGroup_(ref, out, 'flag', 'job is canceled in HCP — decide by hand', lines.map(l => jiItem_('flag', l, 'job canceled')));
-  if (JI.COMPLETED.indexOf(status) === -1) return jiGroup_(ref, out, 'pending', `job isn’t finished yet (HCP status "${job.work_status}") — saved; posts automatically once it’s complete`, lines.map(l => jiItem_('pending', l, 'waiting for the job to be completed')));
+  if (JI.CANCELED.indexOf(status) !== -1) return tag(jiGroup_(ref, out, 'flag', 'job is canceled in HCP — decide by hand', lines.map(l => jiItem_('flag', l, 'job canceled'))));
+  if (!inv && JI.COMPLETED.indexOf(status) === -1) return tag(jiGroup_(ref, out, 'pending', `job isn’t finished yet (HCP status "${job.work_status}") — saved; posts automatically once it’s complete`, lines.map(l => jiItem_('pending', l, 'waiting for the job to be completed'))));
 
   const netted = jiNetAndMerge_(lines);
   let items = netted.items, unmatched = netted.unmatched;
@@ -209,26 +256,40 @@ function jiPlanJob_(w) {
     const legacy = (idx.byPart[it.part.toUpperCase()] || []).filter(e => !JI.TAG_RE.test(e.description || '') && Number(e.unit_cost || 0) === it.cents && Math.abs(Number(e.quantity || 0) - it.qty) < 0.001);
     if (legacy.length) { result.push(Object.assign(jiItem_('skip', it.line, 'an untagged entry with the same part / qty / cost is already on the job (older upload)'), base)); return; }
     const payload = jiMakeInput_(it);
-    const dup = jiDupReason_(it, idx.byPart, adds);
+    const dup = inv ? '' : jiDupReason_(it, idx.byPart, adds);     // stock gets restocked all month — no duplicate hold on the inventory job
     if (dup) { result.push(Object.assign(jiItem_('held', it.line, dup), base, { use: false, payload: payload })); return; }
     const item = Object.assign(jiItem_('add', it.line, w.note || ''), base, { payload: payload });
     adds.push(item); result.push(item);
   });
 
+  const prevGroup = { job: null, out: null, items: [] };     // stock returns that belong on last month's inventory job
   unmatched.forEach(rt => {
     const k = rt.order + '|' + rt.part.toUpperCase();
     let target = idx.tagged[k], how = 'same order #';
     if (!target) { const c = idx.byPart[rt.part.toUpperCase()] || []; if (c.length === 1) { target = c[0]; how = 'part # only (different order #)'; } }
     const base = { order: rt.order, date: rt.line.date, part: rt.part, name: rt.desc, qty: -rt.qty, cents: rt.cents, total: -Math.round(rt.qty * rt.cents), keys: rt.lines.map(jiKey_), line: rt.line };
-    if (!target) { result.push(Object.assign(jiItem_('flag', rt.line, 'return with no purchase of this part in the file or on the HCP job'), base)); return; }
+    let bucket = result;
+    if (!target && inv && jiIsInvRef_(w.invRef || '')) {
+      // bought on last month's inventory job? look there once
+      const pm = jiInvPrevJob_(w.invRef);
+      if (pm.job) {
+        if (!prevGroup.job) { prevGroup.job = pm.job; prevGroup.out = jiJobOut_(pm.job); prevGroup.idx = jiIndexExisting_((hcp_('get', `/jobs/${pm.job.id}/job_input_materials`) || {}).job_input_materials || []); }
+        let t2 = prevGroup.idx.tagged[k]; how = 'same order #, on last month’s inventory job';
+        if (!t2) { const c = prevGroup.idx.byPart[rt.part.toUpperCase()] || []; if (c.length === 1) { t2 = c[0]; how = 'part # only, on last month’s inventory job'; } }
+        if (t2) { target = t2; bucket = prevGroup.items; }
+      }
+    }
+    if (!target) { result.push(Object.assign(jiItem_('flag', rt.line, 'return with no purchase of this part in the file or on the HCP job' + (inv ? ' (this month’s or last month’s inventory job)' : '')), base)); return; }
     const newQty = Math.max(Math.round((Number(target.quantity || 0) - rt.qty) * 100) / 100, 0);
     const upd = { uuid: target.uuid, name: target.name, description: target.description, part_number: target.part_number, unit_cost: Number(target.unit_cost || 0), quantity: newQty };
     if (newQty === 0) upd.name = String(upd.name || rt.part).slice(0, 100) + ' (RETURNED)';
-    result.push(Object.assign(jiItem_('net', rt.line, `return netted against the HCP entry (${how}): qty ${target.quantity} → ${newQty}`), base, { payload: upd, old_qty: target.quantity }));
+    bucket.push(Object.assign(jiItem_('net', rt.line, `return netted against the HCP entry (${how}): qty ${target.quantity} → ${newQty}`), base, { payload: upd, old_qty: target.quantity }));
   });
 
   const state = result.some(it => it.k === 'add' || it.k === 'net' || it.k === 'held') ? 'ready' : 'skipped';
-  return jiGroup_(ref, out, state, w.note || '', result);
+  const groups = tag(jiGroup_(ref, out, state, w.note || '', result));
+  if (prevGroup.items.length) groups.push(Object.assign(jiGroup_(String(prevGroup.job.invoice_number || ''), prevGroup.out, 'ready', 'stock returned this month, bought last month', prevGroup.items), { label: jiInvLabel_(jiInvPrev_(w.invRef)) }));
+  return groups;
 }
 
 /** Net returns against purchases with the same (original order #, part), merge same (order, part, unit cost). */
@@ -339,6 +400,83 @@ function jiPickSegment_(segments, shipDate) {
   return { job: best, why: why };
 }
 
+/* ───────────── the monthly Inventory Management job ───────────── */
+
+/** The HCP customer id for INVENTORY_CUSTOMER (cached in script properties). '' when not found. */
+function jiInvCustomerId_() {
+  const props = props_();
+  const pinned = String(props.getProperty('INVENTORY_CUSTOMER_ID') || '').trim();
+  if (pinned) return pinned;
+  const name = jiInvOn_();
+  if (!name) return '';
+  const cacheKey = 'inv_customer_' + name.toLowerCase().replace(/[^a-z0-9]/g, '');
+  const cached = props.getProperty(cacheKey);
+  if (cached) return cached;
+  const want = name.toLowerCase().replace(/[^a-z0-9]/g, '');
+  const hits = {}, seen = {};
+  [name, name.split(/\s+/)[0]].forEach(q => {
+    for (let page = 1; page <= 3; page++) {
+      const r = hcp_('get', `/customers?q=${encodeURIComponent(q)}&page=${page}&page_size=50`);
+      const cs = r.customers || [];
+      cs.forEach(c => {
+        if (seen[c.id]) return; seen[c.id] = true;
+        const names = [[c.first_name, c.last_name].filter(Boolean).join(' '), c.company || '', c.first_name || '', c.last_name || ''];
+        if (names.some(n => { const k = String(n).toLowerCase().replace(/[^a-z0-9]/g, ''); return k && (k === want || jiSimilar_(k, want) >= 0.88); })) hits[c.id] = c;
+      });
+      if (!cs.length || page >= (r.total_pages || 0)) break;
+    }
+  });
+  const ids = Object.keys(hits);
+  if (ids.length !== 1) { console.log(`inventory customer "${name}": ${ids.length} match(es)` + (ids.length ? ' — ' + ids.map(i => jiCustName_(hits[i]) + ' (' + i + ')').join(', ') + ' — set INVENTORY_CUSTOMER_ID' : '')); return ''; }
+  props.setProperty(cacheKey, ids[0]);
+  return ids[0];
+}
+function jiCustName_(c) { c = c || {}; return [c.first_name, c.last_name].filter(Boolean).join(' ') || c.company || '(no name)'; }
+/** Cheap similarity (tolerates "Managment" vs "Management"): 1 - edit distance / longer length. */
+function jiSimilar_(a, b) {
+  const m = a.length, n = b.length; if (!m || !n) return 0;
+  let prev = []; for (let j = 0; j <= n; j++) prev[j] = j;
+  for (let i = 1; i <= m; i++) { const cur = [i]; for (let j = 1; j <= n; j++) cur[j] = Math.min(prev[j] + 1, cur[j - 1] + 1, prev[j - 1] + (a[i - 1] === b[j - 1] ? 0 : 1)); prev = cur; }
+  return 1 - prev[n] / Math.max(m, n);
+}
+/** 'YYYY-MM' a job belongs to: scheduled start (local if given), else created. */
+function jiJobMonth_(j) {
+  const s = j.schedule || {};
+  const v = [s.scheduled_start_local, s.scheduled_start, j.created_at].find(x => x && String(x).length >= 7);
+  return v ? String(v).slice(0, 7) : '';
+}
+/** Every job on the inventory customer, grouped by month (one HCP listing per request, cached 10 min). */
+function jiInvJobsByMonth_(fresh) {
+  const cache = CacheService.getScriptCache();
+  if (!fresh) { const c = cache.get('inv_jobs_by_month'); if (c) { try { return JSON.parse(c); } catch (_) {} } }
+  const cid = jiInvCustomerId_();
+  if (!cid) return null;
+  const by = {};
+  for (let page = 1; page <= 10; page++) {
+    const r = hcp_('get', `/jobs?customer_id=${encodeURIComponent(cid)}&page=${page}&page_size=100&sort_by=created_at&sort_direction=desc`);
+    const jobs = r.jobs || [];
+    jobs.forEach(j => { const m = jiJobMonth_(j); if (m) (by[m] = by[m] || []).push(j); });
+    if (!jobs.length || page >= (r.total_pages || 0)) break;
+  }
+  Object.keys(by).forEach(m => { const live = by[m].filter(j => JI.CANCELED.indexOf(String(j.work_status || '').toLowerCase()) === -1); if (live.length) by[m] = live; });
+  try { cache.put('inv_jobs_by_month', JSON.stringify(by), 600); } catch (_) {}
+  return by;
+}
+/** 'INV:2026-10' → {job} | {ambiguous:[numbers]} | {noCustomer:true} | {} (no job that month). Property INV_2026-10 = job # pins a month. */
+function jiResolveInventory_(ref) {
+  const month = jiInvMonth_(ref);
+  const pin = String(props_().getProperty('INV_' + month) || '').trim();
+  if (pin) { const r = jiResolveRefs_([pin])[pin]; if (r && r.job) return { job: r.job, note: 'pinned by property INV_' + month }; }
+  let by = jiInvJobsByMonth_();
+  if (by === null) return { noCustomer: true };
+  if (!(by[month] || []).length) by = jiInvJobsByMonth_(true) || {};     // maybe the month's job was just created — look again
+  const jobs = by[month] || [];
+  if (!jobs.length) return {};
+  if (jobs.length > 1) return { ambiguous: jobs.map(j => String(j.invoice_number || j.id)) };
+  return { job: jobs[0] };
+}
+function jiInvPrevJob_(ref) { try { const r = jiResolveInventory_(jiInvPrev_(ref)); return r.job ? r : {}; } catch (_) { return {}; } }
+
 /* ───────────── apply ───────────── */
 
 function jiApply_(p, who) {
@@ -395,7 +533,8 @@ function jiSavePending_(lines, who, reasons) {
     const key = jiKey_(l);
     if (have[key] || posted[key]) return;
     have[key] = 'saved';
-    rows.push([new Date(), who, l.ref, l.order, l.date, l.po, l.part, l.desc, l.qty, l.ext, l.uom, l.kind, l.orig, String(reasons[key] || reasons[l.ref] || 'waiting'), key]);
+    const kind = l.stock && l.kind === 'return' ? 'return-stock' : (l.stock ? 'stock' : l.kind);
+    rows.push([new Date(), who, jiIsInvRef_(l.ref) ? '' : l.ref, l.order, l.date, l.po, l.part, l.desc, l.qty, l.ext, l.uom, kind, l.orig, String(reasons[key] || reasons[l.ref] || 'waiting'), key]);
   });
   if (rows.length) jiAppendRows_('Pending', rows);
   CacheService.getScriptCache().remove('ji_pending_keys');
@@ -435,7 +574,7 @@ function jiPostedKeys_(fresh) {
 function retryPending() {
   const rows = jiPendingRows_();
   if (!rows.length) { console.log('Nothing pending.'); return; }
-  const plan = jiPlan_(rows.map(r => r.line), { fromPending: true });
+  const plan = jiPlan_(jiCleanLines_(rows.map(r => r.line)), { fromPending: true });
   const groups = plan.groups.filter(g => g.state === 'ready' && g.job).map(g => ({ job_id: g.job.id, ref: g.job.number, customer: g.job.customer, items: g.items.filter(it => it.use && it.payload) })).filter(g => g.items.length);
   const res = groups.length ? withLock_(() => jiApplyLocked_({ groups: groups }, 'morning retry')) : { posted: 0, netted: 0, failed: 0, results: [] };
 
@@ -575,6 +714,12 @@ function verifyAccess() {
   console.log(`✅ Access codes for ${Object.keys(techCodes_()).length} people`);
   console.log(props_().getProperty('REPORT_TO') ? `✅ Morning summary → ${props_().getProperty('REPORT_TO')}` : '⚠️ REPORT_TO not set — retryPending() will only log.');
   console.log(props_().getProperty('WARRANTY_TAGS') ? `Warranty tags: ${props_().getProperty('WARRANTY_TAGS')}` : 'Warranty skip: off (set WARRANTY_TAGS to turn on)');
+  if (jiInvOn_()) {
+    const cid = jiInvCustomerId_();
+    console.log(cid ? `✅ Inventory customer "${jiInvOn_()}" → ${cid}` : `❌ Inventory customer "${jiInvOn_()}" not found in HCP (or several match) — create it or set INVENTORY_CUSTOMER_ID`);
+    if (cid) { const by = jiInvJobsByMonth_() || {}; const months = Object.keys(by).sort(); console.log(months.length ? 'Inventory jobs by month: ' + months.map(m => m + ' → #' + by[m].map(j => j.invoice_number).join('/#')).join(', ') : '⚠️ No jobs on the inventory customer yet.'); }
+    console.log(`Stock shipped before ${jiInvStart_()} is only logged.`);
+  } else console.log('Inventory routing: off');
   console.log(`Time zone: ${jiTz_()} (should be America/New_York)`);
   console.log(ScriptApp.getProjectTriggers().some(t => t.getHandlerFunction() === 'retryPending') ? '✅ Morning retry installed.' : '⚠️ Run installDailyTrigger() so pending lines post themselves.');
 }
