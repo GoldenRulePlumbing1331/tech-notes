@@ -229,6 +229,8 @@ Replays are safe (`req_id`), and the script re-reads the job's inputs before pos
 double-add. There is still no API to delete a Job Input — fix mistakes in HCP; the description says which
 order the line came from.
 
+Morning retry (`retryPending`, 6–7 AM) works job by job: it posts each finished job as soon as it's checked, stops after ~4 minutes, saves the Pending tab in one write, and schedules `retryPendingContinue` a minute later to finish (up to 15 runs). One summary email when the whole list has been checked. (Before 2026-10-28 it checked everything first and posted at the end, so a long list hit Apps Script's 6-minute limit and nothing was saved.)
+
 Setup: new Apps Script project **HCP Job Inputs** ← `hcp_job_inputs.gs`; properties `HCP_API_KEY`,
 `TECH_CODES`, `REPORT_TO` (optional `REPORT_CC`, `WARRANTY_TAGS`); run `setupSheet()` → `verifyAccess()` →
 `installDailyTrigger()`; deploy as web app (Execute as Me, Anyone) → URL into `config.js` as `jobInputs`.

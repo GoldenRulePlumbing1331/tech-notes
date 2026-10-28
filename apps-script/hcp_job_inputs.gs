@@ -369,7 +369,15 @@ function jiTags_(j) { return (j.tags || []).map(t => (t && typeof t === 'object'
 /* ───────────── finding jobs ───────────── */
 
 /** ref → {job} | {job, note} | {segments:[jobs]} | null, for every ref at once (one scan of recent jobs). */
+const JI_RUN = { resolved: {} };     // job lookups remembered for the rest of this execution (found or not)
 function jiResolveRefs_(refs) {
+  const memo = {}; refs = refs.filter(r => { if (Object.prototype.hasOwnProperty.call(JI_RUN.resolved, r)) { memo[r] = JI_RUN.resolved[r]; return false; } return true; });
+  if (!refs.length) return memo;
+  const res = jiResolveRefsUncached_(refs);
+  Object.keys(res).forEach(r => { JI_RUN.resolved[r] = res[r]; });
+  return Object.assign(memo, res);
+}
+function jiResolveRefsUncached_(refs) {
   const cache = CacheService.getScriptCache();      // job # -> id, kept 6 h (NOT in script properties - those cap at 50 editable rows)
   const out = {}, need = [];
   refs.forEach(ref => {
@@ -700,7 +708,7 @@ function jiApplyLocked_(p, who) {
   // lines for jobs that aren't finished / found yet: keep them, retryPending() posts them when the job completes
   const saved = (Array.isArray(p.pending) && p.pending.length) ? jiSavePending_(jiCleanLines_(p.pending), who, p.pending_reasons || {}) : 0;
 
-  const postedAll = jiPostedKeys_(true);
+  const postedAll = p.no_total ? {} : jiPostedKeys_(true);
   const msg = [`✅ Posted ${posted} line${posted === 1 ? '' : 's'}` + (netted ? ` and netted ${netted} return${netted === 1 ? '' : 's'}` : ''),
                saved ? `saved ${saved} line${saved === 1 ? '' : 's'} for jobs that aren’t finished yet (they post automatically)` : '',
                failed ? `${failed} job${failed === 1 ? '' : 's'} failed — see below` : ''].filter(Boolean).join('; ') + '.';
@@ -754,45 +762,116 @@ function jiPostedKeys_(fresh) {
   return out;
 }
 
-/** Morning job: re-plan every Pending line, post what's ready, keep the rest with an updated reason. */
-function retryPending() {
+/**
+ * Morning job: re-plan the Pending lines job by job, post what's ready, keep the rest with an updated reason.
+ * Works in slices so it never hits Apps Script's 6-minute limit: after ~4 minutes it saves what it has done and
+ * schedules retryPendingContinue() a minute later to carry on. The summary email goes out once, when every job
+ * has been checked.
+ */
+function retryPending() { jiRetry_(false); }
+function retryPendingContinue() { jiRetry_(true); }
+
+const JI_RETRY = { BUDGET_MS: 4 * 60 * 1000, MAX_RUNS: 15 };
+
+function jiRetry_(isContinue) {
+  const started = Date.now(), props = props_();
+  ScriptApp.getProjectTriggers().filter(t => t.getHandlerFunction() === 'retryPendingContinue').forEach(t => ScriptApp.deleteTrigger(t));
+  let state = null;
+  if (isContinue) { try { state = JSON.parse(props.getProperty('ji_retry_state') || 'null'); } catch (_) { state = null; } }
+  if (!state) state = { posted: 0, netted: 0, failed: 0, results: [], attention: [], done: [], runs: 0 };
+  state.runs++;
+
   const rows = jiPendingRows_();
-  if (!rows.length) { console.log('Nothing pending.'); return; }
-  const plan = jiPlan_(jiCleanLines_(rows.map(r => r.line)), { fromPending: true });
-  const groups = plan.groups.filter(g => g.state === 'ready' && g.job).map(g => ({ job_id: g.job.id, ref: g.job.number, customer: g.job.customer, items: g.items.filter(it => it.use && it.payload) })).filter(g => g.items.length);
-  const res = groups.length ? withLock_(() => jiApplyLocked_({ groups: groups }, 'morning retry')) : { posted: 0, netted: 0, failed: 0, results: [] };
+  if (!rows.length) { props.deleteProperty('ji_retry_state'); console.log('Nothing pending.'); return; }
 
-  // what got posted (or was already posted) leaves the Pending tab; everything else gets its current reason
-  const posted = jiPostedKeys_(true);
-  const reasonByKey = {};
-  plan.groups.forEach(g => g.items.forEach(it => (it.keys || []).forEach(k => { reasonByKey[k] = (g.job ? `job ${g.job.number}: ` : '') + (it.k === 'add' || it.k === 'net' ? 'ready' : it.reason || g.reason || it.k); })));
-  const sh = jiSheet_('Pending');
-  const keep = [], gone = [], attention = [];
-  rows.forEach(r => {
-    const key = r.key || jiKey_(r.line);
-    if (posted[key]) { gone.push(r); return; }
-    const reason = reasonByKey[key] || r.reason;
-    keep.push(r);
-    if (sh && reason !== r.reason) sh.getRange(r.rowIndex, 14).setValue(reason);
-    if (/held|flag|canceled|which segment|type the job/.test(reason)) attention.push(`job ${r.line.ref || '?'} · order ${r.line.order} · ${r.line.part} × ${r.line.qty}: ${reason}`);
+  // one slice per job number (stock / no-number lines together); jobs already handled earlier in this cycle are skipped
+  const chunks = {};
+  rows.forEach(r => { const k = r.line.ref || '(stock / no job #)'; (chunks[k] = chunks[k] || []).push(r); });
+  const keys = Object.keys(chunks).sort((a, b) => a.localeCompare(b, undefined, { numeric: true })).filter(k => state.done.indexOf(k) === -1);
+
+  // look every job number up in ONE scan of HCP (remembered for the rest of this run)
+  try { const refs = keys.filter(k => k.charAt(0) !== '('); if (refs.length) jiResolveRefs_(refs); } catch (e) { console.log('retry: job lookup failed: ' + e.message); }
+
+  const gone = {}, reasonByKey = {};
+  let i = 0, outOfTime = false;
+  for (; i < keys.length; i++) {
+    if (Date.now() - started > JI_RETRY.BUDGET_MS) { outOfTime = true; break; }
+    const chunk = chunks[keys[i]];
+    try {
+      const plan = jiPlan_(jiCleanLines_(chunk.map(r => r.line)), { fromPending: true });
+      const groups = plan.groups.filter(g => g.state === 'ready' && g.job)
+        .map(g => ({ job_id: g.job.id, ref: g.job.number, customer: g.job.customer, items: g.items.filter(it => it.use && it.payload) })).filter(g => g.items.length);
+      const okRefs = {};
+      if (groups.length) {
+        const res = withLock_(() => jiApplyLocked_({ groups: groups, no_total: true }, 'morning retry'));
+        state.posted += res.posted; state.netted += res.netted; state.failed += res.failed;
+        res.results.forEach(r => { state.results.push(r); if (r.ok) okRefs[r.ref] = true; });
+      }
+      plan.groups.forEach(g => g.items.forEach(it => (it.keys || []).forEach(k => {
+        const posted = g.job && okRefs[g.job.number] && it.use && it.payload;
+        const alreadyThere = it.k === 'skip';                       // already on the job / already posted / nets to zero
+        if (posted || alreadyThere) { gone[k] = true; return; }
+        reasonByKey[k] = (g.job ? `job ${g.job.number}: ` : '') + (it.k === 'add' || it.k === 'net' ? 'ready' : it.reason || g.reason || it.k);
+      })));
+    } catch (e) {
+      console.log(`retry ${keys[i]} \u274c ${e.message}`);
+      chunk.forEach(r => { reasonByKey[r.key || jiKey_(r.line)] = 'retry error: ' + e.message; });
+    }
+    state.done.push(keys[i]);
+  }
+
+  jiRewritePending_(gone, reasonByKey);
+  Object.keys(reasonByKey).forEach(k => {
+    const reason = reasonByKey[k];
+    if (/held|flag|canceled|which segment|type the job|retry error/.test(reason)) {
+      const r = rows.filter(x => (x.key || jiKey_(x.line)) === k)[0];
+      if (r) state.attention.push(`job ${r.line.ref || '?'} \u00b7 order ${r.line.order} \u00b7 ${r.line.part} \u00d7 ${r.line.qty}: ${reason}`);
+    }
   });
-  if (sh && gone.length) gone.map(r => r.rowIndex).sort((a, b) => b - a).forEach(i => sh.deleteRow(i));
-  CacheService.getScriptCache().remove('ji_pending_keys');
+  console.log(`retry slice ${state.runs}: checked ${i} job(s) in ${Math.round((Date.now() - started) / 1000)} s; ${keys.length - i} left; posted so far ${state.posted}`);
 
-  const summary = `Job Inputs retry: posted ${res.posted} line(s), netted ${res.netted}, ${keep.length} still waiting, ${attention.length} need attention.`;
+  if (outOfTime && state.runs < JI_RETRY.MAX_RUNS) {
+    state.results = state.results.slice(-150); state.attention = state.attention.slice(-150);
+    props.setProperty('ji_retry_state', JSON.stringify(state));
+    ScriptApp.newTrigger('retryPendingContinue').timeBased().after(60 * 1000).create();
+    console.log('\u23f3 Out of time for this run - continuing in about a minute.');
+    return;
+  }
+  props.deleteProperty('ji_retry_state');
+
+  const waiting = jiPendingRows_().length;
+  const summary = `Job Inputs retry: posted ${state.posted} line(s), netted ${state.netted}, ${waiting} still waiting, ${state.attention.length} need attention` + (state.runs > 1 ? ` (${state.runs} runs)` : '') + (outOfTime ? ' - stopped after the run limit, the rest is checked tomorrow' : '') + '.';
   console.log(summary);
-  const to = props_().getProperty('REPORT_TO');
-  if (to && (res.posted || res.netted || res.failed)) {
+  const to = props.getProperty('REPORT_TO');
+  if (to && (state.posted || state.netted || state.failed)) {
     const lines = [summary, ''];
-    res.results.forEach(r => lines.push(r.ok ? `✅ Job ${r.ref}: ${r.count} line(s) posted` : `❌ Job ${r.ref}: ${r.error}`));
-    if (attention.length) { lines.push('', 'Needs attention (open the Job Inputs page or the sheet):'); attention.forEach(a => lines.push('  • ' + a)); }
-    lines.push('', 'Sheet: https://docs.google.com/spreadsheets/d/' + props_().getProperty('JI_SHEET_ID'));
-    GmailApp.sendEmail(to, `Job Inputs — ${res.posted + res.netted} line(s) posted this morning`, lines.join('\n'), { cc: props_().getProperty('REPORT_CC') || '', name: 'Golden Rule Job Inputs' });
+    state.results.forEach(r => lines.push(r.ok ? `\u2705 Job ${r.ref}: ${r.count} line(s) posted` : `\u274c Job ${r.ref}: ${r.error}`));
+    if (state.attention.length) { lines.push('', 'Needs attention (open the Job Inputs page or the sheet):'); state.attention.forEach(a => lines.push('  \u2022 ' + a)); }
+    lines.push('', 'Sheet: https://docs.google.com/spreadsheets/d/' + props.getProperty('JI_SHEET_ID'));
+    GmailApp.sendEmail(to, `Job Inputs \u2014 ${state.posted + state.netted} line(s) posted this morning`, lines.join('\n'), { cc: props.getProperty('REPORT_CC') || '', name: 'Golden Rule Job Inputs' });
   }
 }
 
+/** One write to the Pending tab: drop the finished lines, refresh the reasons. Matched by line key, under the lock,
+ *  so lines a page upload saved in the meantime are kept. */
+function jiRewritePending_(gone, reasonByKey) {
+  if (!Object.keys(gone).length && !Object.keys(reasonByKey).length) return;
+  withLock_(() => {
+    const sh = jiSheet_('Pending');
+    if (!sh || sh.getLastRow() < 2) return;
+    const n = sh.getLastRow() - 1, w = JI.PENDING_HEADERS.length;
+    const v = sh.getRange(2, 1, n, w).getValues();
+    const keyOf = r => String(r[14] || '') || jiKey_({ order: String(r[3] || ''), part: String(r[6] || ''), qty: Number(r[8]) || 0, ext: Number(r[9]) || 0 });
+    const keep = v.filter(r => !gone[keyOf(r)]).map(r => { const k = keyOf(r); if (reasonByKey[k] !== undefined) r[13] = reasonByKey[k]; return r; });
+    sh.getRange(2, 1, n, w).clearContent();
+    if (keep.length) sh.getRange(2, 1, keep.length, w).setValues(keep);
+    if (n > keep.length) sh.deleteRows(2 + keep.length, n - keep.length);
+  });
+  CacheService.getScriptCache().remove('ji_pending_keys');
+}
+
 function installDailyTrigger() {
-  ScriptApp.getProjectTriggers().filter(t => t.getHandlerFunction() === 'retryPending').forEach(t => ScriptApp.deleteTrigger(t));
+  ScriptApp.getProjectTriggers().filter(t => t.getHandlerFunction() === 'retryPending' || t.getHandlerFunction() === 'retryPendingContinue').forEach(t => ScriptApp.deleteTrigger(t));
   ScriptApp.newTrigger('retryPending').timeBased().everyDays(1).atHour(6).create();
   console.log('✅ retryPending() runs every morning between 6 and 7 AM.');
 }
