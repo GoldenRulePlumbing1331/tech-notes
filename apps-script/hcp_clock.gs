@@ -192,8 +192,16 @@ function ckPhoto_(p, who) {
  */
 function verifyNotesAndPhotos() {
   const TEST_JOB_NUMBER = '';   // ← the job number of a job on the "Test Customer" (not a real customer)
-  if (!TEST_JOB_NUMBER) { console.log('❌ Type a test job number into TEST_JOB_NUMBER at the top of verifyNotesAndPhotos(), then run it again.'); return; }
-  const job = ckJobByNumber_(TEST_JOB_NUMBER);
+  let job = null;
+  if (TEST_JOB_NUMBER) job = ckJobByNumber_(TEST_JOB_NUMBER);
+  else {   // no number typed: use the newest job on the customer named "Test Customer"
+    for (let page = 1; page <= 10 && !job; page++) {
+      const r = hcp_('get', `/jobs?page=${page}&page_size=100&sort_by=created_at&sort_direction=desc`);
+      job = (r.jobs || []).filter(j => { const c = j.customer || {}; return String(c.first_name || '').trim().toLowerCase() === 'test' && String(c.last_name || '').trim().toLowerCase() === 'customer'; })[0] || null;
+      if (page >= (r.total_pages || 0)) break;
+    }
+    if (!job) { console.log('❌ No job found for "Test Customer" in the 1,000 newest jobs. Create one in HCP or type its job number into TEST_JOB_NUMBER.'); return; }
+  }
   const cust = job.customer || {};
   console.log(`Job ${job.invoice_number} · customer: ${[cust.first_name, cust.last_name].filter(Boolean).join(' ')} — make sure this is the Test Customer.`);
   try {
