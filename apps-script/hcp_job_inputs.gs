@@ -39,6 +39,7 @@
  *     logging stock lines), INVENTORY_CUSTOMER_ID (optional — pins the HCP customer id if the name search is
  *     ambiguous), INVENTORY_START = 2026-10 (stock shipped before this month is only logged, not posted).
  *     Override one month's job from the page ("Use this job") or with property INV_2026-11 = <job #>.
+ *     If the Script properties page is read-only ("more than 50 properties"), run cleanupProperties() once.
  *  4. Run setupSheet() → creates the "Job Inputs Uploads" spreadsheet (Posted + Pending tabs) and saves its ID.
  *  5. Run verifyAccess() (read-only). Run installDailyTrigger() once (retryPending every morning 6–7 AM).
  *  6. Deploy → Web app (Execute as Me, Anyone) → URL into config.js as "jobInputs".
@@ -369,11 +370,11 @@ function jiTags_(j) { return (j.tags || []).map(t => (t && typeof t === 'object'
 
 /** ref → {job} | {job, note} | {segments:[jobs]} | null, for every ref at once (one scan of recent jobs). */
 function jiResolveRefs_(refs) {
-  const props = props_();
+  const cache = CacheService.getScriptCache();      // job # -> id, kept 6 h (NOT in script properties - those cap at 50 editable rows)
   const out = {}, need = [];
   refs.forEach(ref => {
-    const id = props.getProperty('job_' + ref);
-    if (id) { try { out[ref] = { job: hcp_('get', '/jobs/' + encodeURIComponent(id)), fresh: true }; return; } catch (_) { props.deleteProperty('job_' + ref); } }
+    const id = cache.get('job_' + ref) || props_().getProperty('job_' + ref);   // old property entries still honoured until cleanupProperties() runs
+    if (id) { try { out[ref] = { job: hcp_('get', '/jobs/' + encodeURIComponent(id)), fresh: true }; return; } catch (_) { cache.remove('job_' + ref); } }
     need.push(ref);
   });
   if (!need.length) return out;
@@ -388,7 +389,7 @@ function jiResolveRefs_(refs) {
   }
   need.forEach(r => {
     const base = r.split('-')[0];
-    if (found[r]) { out[r] = { job: found[r] }; props.setProperty('job_' + r, found[r].id); }
+    if (found[r]) { out[r] = { job: found[r] }; try { cache.put('job_' + r, found[r].id, 21600); } catch (_) {} }
     else if (r !== base && found[base]) out[r] = { job: found[base], note: `job ${r} not found — used ${base}` };
     else if (r === base && segs[r]) out[r] = segs[r].length === 1 ? { job: segs[r][0], note: `only segment ${segs[r][0].invoice_number} exists — used it` } : { segments: segs[r] };
     else out[r] = null;
@@ -746,18 +747,11 @@ function jiSheet_(tab) {
 function jiRecall_(rid) {
   const c = CacheService.getScriptCache().get('ji_req_' + rid);
   if (c) { try { return JSON.parse(c); } catch (_) {} }
-  const v = props_().getProperty('ji_req_' + rid);
-  try { return v ? JSON.parse(v).r : null; } catch (_) { return null; }
+  return null;
 }
 function jiRemember_(rid, result) {
+  // replay guard for a double-submitted "Apply" - 6 h in the cache is plenty; never stored in script properties
   try { CacheService.getScriptCache().put('ji_req_' + rid, JSON.stringify(Object.assign({}, result, { replay: true })), 21600); } catch (_) {}
-  try {
-    const props = props_();
-    props.setProperty('ji_req_' + rid, JSON.stringify({ t: Date.now(), r: { ok: true, message: result.message, replay: true, posted: result.posted, netted: result.netted, saved: result.saved, failed: result.failed, results: result.results } }));
-    const old = Date.now() - 3 * 86400000;
-    const all = props.getProperties();
-    Object.keys(all).forEach(k => { if (k.indexOf('ji_req_') !== 0) return; let t = 0; try { t = JSON.parse(all[k]).t; } catch (_) {} if (!t || t < old) props.deleteProperty(k); });
-  } catch (_) {}
 }
 function jiTz_() { return Session.getScriptTimeZone() || 'America/New_York'; }
 function jiParse_(s) {
@@ -817,6 +811,17 @@ function setupSheet() {
   const first = ss.getSheets()[0];
   if (first.getName() === 'Sheet1' && ss.getSheets().length > 1) ss.deleteSheet(first);
   console.log(`✅ Sheet ready: ${ss.getUrl()}`);
+}
+
+/** Removes the job_… and ji_req_… cache entries that older versions kept in Script Properties (the settings page goes
+ *  read-only past 50 properties). Safe any time - they are only caches and are rebuilt as needed. */
+function cleanupProperties() {
+  const props = props_();
+  const all = props.getProperties();
+  let n = 0;
+  Object.keys(all).forEach(k => { if (/^(job_|ji_req_)/.test(k)) { props.deleteProperty(k); n++; } });
+  const left = Object.keys(props.getProperties());
+  console.log(`✅ Removed ${n} cache propert${n === 1 ? 'y' : 'ies'}; ${left.length} left: ${left.sort().join(', ')}`);
 }
 
 /** Read-only check. */
