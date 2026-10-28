@@ -95,7 +95,7 @@
     <label>Material receipts → HCP Job Inputs</label>
     <div class="drop" id="drop">
       <b>Drop the Weinstein CSV or a vendor receipt here, or tap to choose</b>
-      <span class="hint">Weinstein: web store → Order History → <i>Order History Detail</i> → Export CSV. Amazon: the Business <i>Orders</i> report CSV, or any order's PDF. Other vendors: the receipt as a PDF, a photo, or a Word / Excel file. Sales tax on receipts is added into the cost. Lines already posted are skipped. A job number in the PO field goes to that job; everything else on a vendor receipt (Inventory, Office, Truck, tools…) goes to that month's Inventory Management job.</span>
+      <span class="hint">Weinstein: web store → Order History → <i>Order History Detail</i> → Export CSV. Amazon: the Business <i>Orders</i> report CSV, or any order's PDF. Other vendors: the receipt as a PDF, a photo, or a Word / Excel file. Sales tax and freight on receipts are added into the cost. Lines already posted are skipped. A job number in the PO field goes to that job; everything else on a vendor receipt (Inventory, Office, Truck, tools…) goes to that month's Inventory Management job.</span>
       <input type="file" id="file" accept=".csv,text/csv,text/plain,.pdf,application/pdf,image/*,.docx,.xlsx,application/vnd.openxmlformats-officedocument.wordprocessingml.document,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet">
     </div>
     <div class="status" id="fileMsg"></div>
@@ -200,6 +200,7 @@
     var f = parseFloat(s); if (isNaN(f)) return 0;
     return neg ? -f : f;
   }
+  function jobRefStrict(raw) { var m = /(?:^|[^A-Za-z0-9])(\d{4,6})(?:\s*-\s*(\d{1,2}))?(?![A-Za-z0-9])/.exec(String(raw || "")); return m ? (m[2] ? m[1] + "-" + parseInt(m[2], 10) : m[1]) : ""; }   // receipts: "W536961" is not job 536961
   function jobRef(raw) { var m = /(?:^|[^\d])(\d{4,6})(?:\s*-\s*(\d{1,2}))?(?!\d)/.exec(String(raw || "")); return m ? (m[2] ? m[1] + "-" + parseInt(m[2], 10) : m[1]) : ""; }
   function classifyPO(t) {
     var body = String(t || "").trim().replace(/^\s*PO\s*#?\s*/i, "").trim(), low = body.toLowerCase();
@@ -282,7 +283,7 @@
       if (/cancel/i.test(o.status)) { warns.push("Order " + id + " is " + o.status + " — left out"); return; }
       // the same item shipped twice on one order -> one line (qty and cost added up)
       var merged = {}; keep.forEach(function (x) { var k = x.asin; if (merged[k]) { merged[k].qty += x.qty; merged[k].net += x.net; } else merged[k] = { asin: x.asin, title: x.title, part: x.part, qty: x.qty, net: x.net, row: x.row }; });
-      var cls = classifyPO(o.po), usedPart = {};
+      var strict = jobRefStrict(o.po), cls = strict ? { kind: "purchase", ref: strict } : { kind: "stock", ref: "" }, usedPart = {};
       Object.keys(merged).forEach(function (k, n) {
         var x = merged[k], part = x.part; if (usedPart[part.toUpperCase()]) part = part + "-" + (n + 1); usedPart[part.toUpperCase()] = 1;
         lines.push({ order: id, date: o.date, po: o.po, ref: cls.ref, part: part, desc: x.title, qty: x.qty, ext: Math.round(x.net * 100) / 100, uom: "ea",
@@ -336,7 +337,7 @@
       p.lines.forEach(function (l) { orders[l.order] = 1; if (l.ref) refs[l.ref] = 1; var m = /^(\d{1,2})\/(\d{1,2})\/(\d{4})/.exec(l.date); if (m) dates.push(new Date(+m[3], +m[1] - 1, +m[2])); });
       dates.sort(function (a, b) { return a - b; });
       var span = dates.length ? dates[0].toLocaleDateString() + (dates.length > 1 ? " – " + dates[dates.length - 1].toLocaleDateString() : "") : "";
-      var head = p.amazon ? "🧾 Amazon order report " + file.name + ": " + p.lines.length + " item" + (p.lines.length === 1 ? "" : "s") + " on " + p.amazon.orders + " order" + (p.amazon.orders === 1 ? "" : "s") + " · item sales tax included in the costs" : p.receipt ? "🧾 " + p.receipt.vendor + " order " + p.receipt.order + (p.receipt.po ? " · PO \"" + p.receipt.po + "\"" : " · no PO on the receipt") + ": " + p.lines.length + " item" + (p.lines.length === 1 ? "" : "s") + (p.receipt.tax ? " · " + money(Math.round(p.receipt.tax * 100)) + " sales tax added into the costs" : " · no sales tax shown") : "📄 " + file.name + ": " + p.lines.length + " lines · " + Object.keys(orders).length + " orders · " + Object.keys(refs).length + " job numbers";
+      var head = p.amazon ? "🧾 Amazon order report " + file.name + ": " + p.lines.length + " item" + (p.lines.length === 1 ? "" : "s") + " on " + p.amazon.orders + " order" + (p.amazon.orders === 1 ? "" : "s") + " · item sales tax included in the costs" : p.receipt ? "🧾 " + p.receipt.vendor + " order " + p.receipt.order + (p.receipt.po ? " · PO \"" + p.receipt.po + "\"" : " · no PO on the receipt") + ": " + p.lines.length + " item" + (p.lines.length === 1 ? "" : "s") + (p.receipt.tax || p.receipt.shipping ? " · " + [p.receipt.tax ? money(Math.round(p.receipt.tax * 100)) + " sales tax" : "", p.receipt.shipping ? money(Math.round(p.receipt.shipping * 100)) + " freight" : ""].filter(Boolean).join(" + ") + " added into the costs" : " · no sales tax shown") : "📄 " + file.name + ": " + p.lines.length + " lines · " + Object.keys(orders).length + " orders · " + Object.keys(refs).length + " job numbers";
       say("fileMsg", head + (span ? " · shipped " + span : "") + (p.warns.length ? "\n⚠️ " + p.warns.join("\n⚠️ ") : ""), p.warns.length ? "wait" : "ok");
       preview();
     }).catch(function (e) { say("fileMsg", "❌ " + e.message, "err"); });
@@ -351,7 +352,7 @@
     }).then(function (r) {
       if (!r.ok) throw new Error(r.error || "Couldn't read that receipt.");
       var lines = (r.lines || []).map(function (l) { l.row = l.row || 0; return l; });
-      return { lines: lines, warns: [], receipt: { vendor: r.vendor, order: r.order, po: r.po, tax: r.tax } };
+      return { lines: lines, warns: [], receipt: { vendor: r.vendor, order: r.order, po: r.po, tax: r.tax, shipping: r.shipping } };
     });
   }
 

@@ -24,7 +24,7 @@
  *     for them. A stock return nets against this month's inventory job, or last month's if it was bought there.
  *   • Receipts from other vendors (Amazon, Home Depot, SupplyHouse… as a PDF, photo, Word .docx or Excel .xlsx) are read by Claude
  *     Haiku (property ANTHROPIC_API_KEY) into the same line shape and follow the same rules. Sales tax shown on
- *     the receipt is spread across the lines so the posted cost is what was actually paid. Dedupe tag becomes
+ *     the receipt (and any freight / shipping charge) is spread across the lines so the posted cost is what was actually paid. Dedupe tag becomes
  *     "<Vendor> #<order> <date>". A job number in the receipt's PO field -> that job; anything else (Inventory, Office,
  *     Truck, a tool name, or no PO) -> the month's Inventory Management job. The Amazon Business "Orders" report CSV
  *     is parsed by the page itself (per-item tax, part numbers, duplicate payment rows reconciled) - no Claude needed.
@@ -497,12 +497,15 @@ Return ONLY a JSON object, no prose, shaped exactly like:
  "subtotal":130.32,"shipping":0,"tax":7.82,"total":138.14,
  "lines":[{"description":"EZARC Carbide Reciprocating Saw Blades, 6-Inch 8TPI, Thick Metal, 10-Pack","part":"","qty":1,"unit_price":66.47,"line_total":66.47}]}
 Rules:
-- vendor: short store name (Amazon, Home Depot, SupplyHouse, Ferguson, Lowe's, Walmart…). order: the vendor's order / invoice number.
+- Read order acknowledgements / confirmations / quotes-turned-orders too, even if they say "NOT AN INVOICE" or "DO NOT PAY" - they still list what was bought.
+- Plumbing and drain-cleaning parts with odd descriptions are real items (e.g. ".66 X 2 LEADER" is a drain-machine leader cable, "C-6 CUTTER", "3/8 X 50 CABLE").
+- vendor: short store name (Amazon, Home Depot, SupplyHouse, Ferguson, Lowe's, Spartan Tool…). order: the vendor's order / invoice / acknowledgement number.
 - Dates as MM/DD/YYYY. ship_date = when it shipped or was picked up / delivered if shown, else "".
 - po: the customer PO / job / reference text exactly as printed (Amazon Business "PO number", a "Job" or "Reference" field); "" if none.
-- lines: every physical item across ALL shipments / pages, in order. qty is the number of units ("2 of:" = 2). unit_price is per unit before tax; line_total = qty x unit_price. Do not include shipping, tax, discounts, gift cards, subscriptions, or returns as lines.
+- lines: every physical item across ALL shipments / pages, in order. qty is the number of units ("2 of:" = 2). unit_price is per unit before tax; line_total = qty x unit_price. Do not include tax, discounts, gift cards, subscriptions, or returns as lines.
+- Freight / shipping / delivery / handling / fuel surcharge charges are NOT lines, even when printed as a row in the item table: add them all up into "shipping".
 - part: a model / SKU / item number if printed next to the item, else "".
-- subtotal / shipping / tax / total: numbers from the receipt summary (0 when not shown). tax is the sales tax actually charged for the whole order.
+- subtotal / shipping / tax / total: numbers from the receipt (0 when not shown). tax is the sales tax actually charged for the whole order; shipping is every freight / shipping / handling charge.
 - Numbers are plain numbers (no $ or commas). Unknown text fields are "". Never invent items.`;
 
 function jiReceipt_(p, who) {
@@ -535,8 +538,8 @@ function jiReceipt_(p, who) {
   let r; try { r = JSON.parse(m[0]); } catch (_) { throw new Error('The receipt reader returned something unreadable — try again or use a clearer file.'); }
   const lines = jiReceiptLines_(r, name);
   if (!lines.length) throw new Error('No purchasable items found on that receipt.');
-  console.log(`jobinputs receipt ${r.vendor || '?'} #${r.order || '?'}: ${lines.length} line(s), tax ${r.tax || 0}, by ${who}`);
-  return { lines: lines, vendor: lines[0].vendor, order: lines[0].order, date: lines[0].date, po: lines[0].po, tax: Number(r.tax) || 0, total: Number(r.total) || 0 };
+  console.log(`jobinputs receipt ${r.vendor || '?'} #${r.order || '?'} PO "${r.po || ''}": ${lines.length} line(s), tax ${r.tax || 0}, shipping ${r.shipping || 0}, by ${who}`);
+  return { lines: lines, vendor: lines[0].vendor, order: lines[0].order, date: lines[0].date, po: lines[0].po, tax: Number(r.tax) || 0, shipping: Number(r.shipping) || 0, total: Number(r.total) || 0 };
 }
 
 /** .docx / .xlsx (both are zip files of XML) → plain text for the receipt reader. Tables keep their rows / columns. */
@@ -558,6 +561,8 @@ function jiDocxText_(byName) {
   const rank = n => /header/.test(n) ? 0 : /document/.test(n) ? 1 : 2;                 // header (vendor name, logo text) → body → footer
   const parts = Object.keys(byName).filter(n => /^word\/(document|header\d*|footer\d*)\.xml$/.test(n)).sort((a, b) => rank(a) - rank(b) || a.localeCompare(b));
   return parts.map(n => jiXmlDecode_(byName[n]
+    .replace(/<mc:Fallback>[\s\S]*?<\/mc:Fallback>/g, '')                       // text boxes are stored twice (new + old format) - keep one copy
+    .replace(/<\/w:txbxContent>/g, '\n')
     .replace(/<w:tc[ >][\s\S]*?<\/w:tc>/g, tc => tc.replace(/<\/w:p>/g, ' ').replace(/<w:br[^>]*\/>/g, ' ').replace(/<w:tab\/>/g, ' '))   // a cell's own paragraphs stay in the cell
     .replace(/<w:tab\/>/g, '\t').replace(/<w:br[^>]*\/>/g, '\n')
     .replace(/<\/w:tc>/g, '\t').replace(/<\/w:tr>/g, '\n').replace(/<\/w:p>/g, '\n')
@@ -610,12 +615,12 @@ function jiReceiptLines_(r, fileName) {
     return { desc: String(l.description || '').replace(/\s+/g, ' ').trim(), part: String(l.part || '').trim(), qty: qty, total: Math.round(total * 100) / 100 };
   }).filter(i => i.desc && i.total > 0);
   const sub = items.reduce((s, i) => s + i.total, 0);
-  const tax = Math.max(Number(r.tax) || 0, 0);
-  let taxLeft = Math.round(tax * 100);
+  const tax = Math.max(Number(r.tax) || 0, 0), ship = Math.max(Number(r.shipping) || 0, 0);
+  let taxLeft = Math.round((tax + ship) * 100);      // sales tax + freight are spread over the items, so the posted cost is what was paid
   const cls = po ? jiClassifyPo_(po) : { kind: 'stock', ref: '' };
   const seen = {};
   return items.map((i, n) => {
-    let add = n === items.length - 1 ? taxLeft : Math.round(tax * 100 * i.total / (sub || 1));   // cents of tax for this line; last line takes the rounding
+    let add = n === items.length - 1 ? taxLeft : Math.round((tax + ship) * 100 * i.total / (sub || 1));   // cents of tax + freight for this line; last line takes the rounding
     taxLeft -= add;
     const ext = Math.round(i.total * 100 + add) / 100;
     const gen = !i.part;
@@ -635,7 +640,8 @@ function jiMdy_(v) {
   m = /^(\d{4})-(\d{2})-(\d{2})/.exec(v); if (m) return m[2] + '/' + m[3] + '/' + m[1];
   const d = new Date(v); return isNaN(d) ? '' : Utilities.formatDate(d, 'UTC', 'MM/dd/yyyy');
 }
-function jiJobRef_(raw) { const m = /(?:^|[^\d])(\d{4,6})(?:\s*-\s*(\d{1,2}))?(?!\d)/.exec(String(raw || '')); return m ? (m[2] ? m[1] + '-' + parseInt(m[2], 10) : m[1]) : ''; }
+/** A job number standing on its own ("49652", "Job 49652-2", "PO#49652"), never digits inside another code like "W536961". */
+function jiJobRef_(raw) { const m = /(?:^|[^A-Za-z0-9])(\d{4,6})(?:\s*-\s*(\d{1,2}))?(?![A-Za-z0-9])/.exec(String(raw || '')); return m ? (m[2] ? m[1] + '-' + parseInt(m[2], 10) : m[1]) : ''; }
 function jiClassifyPo_(t) {
   const body = String(t || '').trim().replace(/^\s*PO\s*#?\s*/i, '').trim(), low = body.toLowerCase();
   if (/^return/.test(low) || low === 'rtn' || /^credit/.test(low)) return { kind: 'return', ref: '' };
