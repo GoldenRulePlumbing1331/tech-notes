@@ -7,7 +7,7 @@
  * real times where it can and tells the office what to fix:
  *   • a row in the "Job Clock" spreadsheet (Log tab)
  *   • a private note on the HCP job ("⏱ ON MY WAY 8:02 AM — pressed on the voice page by Mike Smith")
- *   • an email every morning to REPORT_TO (dailyReport): every finished job from the last few days where HCP
+ *   • an email every 3 business days to REPORT_TO (dailyReport): every finished job since the last email where HCP
  *     has no Start/Finish — so it carries NO labor cost — with the travel/job time to type into Field Tech
  *     Details when the page has it; plus times that differ by more than REPORT_TOLERANCE_MIN and jobs still open.
  *
@@ -41,7 +41,8 @@ const CK = {
   EVENTS: { omw: 'ON MY WAY', start: 'START', finish: 'FINISH' },
   HCP_FIELD: { omw: 'on_my_way_at', start: 'started_at', finish: 'completed_at' },
   REPORT_TOLERANCE_MIN: 15,
-  REPORT_BACK_DAYS: 3,        // dailyReport re-checks the last 3 days so late presses and late Finishes get caught
+  REPORT_BACK_DAYS: 3,        // a report always covers at least the last 3 days so late presses and late Finishes get caught
+  REPORT_EVERY_BUSINESS_DAYS: 3,   // the trigger runs daily; an email goes out once this many business days have passed
   JOB_SCAN_PAGES: 15,
   CODE_LENGTH: 8,
 };
@@ -151,8 +152,26 @@ function ckStampLocked_(p, who) {
  *   • matched — HCP's times are there and agree with the page (or nobody used the page).
  * Only unfinished items are repeated day to day. Safe to re-run.
  */
-function dailyReport() { ckReport_(CK.REPORT_BACK_DAYS); }
-function weeklyReport() { ckReport_(7); }   // kept for a manual wider sweep
+/** Runs daily; emails only every REPORT_EVERY_BUSINESS_DAYS business days, covering everything since the last email. */
+function dailyReport() {
+  const tz = ckTz_();
+  const today = Utilities.formatDate(ckNow_(), tz, 'yyyy-MM-dd');
+  const last = props_().getProperty('CK_LAST_REPORT') || '';
+  const since = last ? ckBusinessDays_(last, today) : CK.REPORT_EVERY_BUSINESS_DAYS;
+  if (since < CK.REPORT_EVERY_BUSINESS_DAYS) { console.log(`Last report ${last}; ${since} business day(s) since — next one after ${CK.REPORT_EVERY_BUSINESS_DAYS}.`); return; }
+  const calDays = last ? Math.round((Utilities.parseDate(today + ' 00:00', tz, 'yyyy-MM-dd HH:mm') - Utilities.parseDate(last + ' 00:00', tz, 'yyyy-MM-dd HH:mm')) / 86400000) : 0;
+  if (ckReport_(Math.max(CK.REPORT_BACK_DAYS, calDays))) props_().setProperty('CK_LAST_REPORT', today);
+}
+function weeklyReport() { ckReport_(7); }   // manual wider sweep, doesn't move the schedule
+function sendReportNow() { if (ckReport_(CK.REPORT_BACK_DAYS)) props_().setProperty('CK_LAST_REPORT', Utilities.formatDate(ckNow_(), ckTz_(), 'yyyy-MM-dd')); }
+/** Mon–Fri days after `from` up to and including `to` (yyyy-MM-dd). */
+function ckBusinessDays_(from, to) {
+  const tz = ckTz_();
+  let d = Utilities.parseDate(from + ' 12:00', tz, 'yyyy-MM-dd HH:mm'), n = 0;
+  const end = Utilities.parseDate(to + ' 12:00', tz, 'yyyy-MM-dd HH:mm');
+  while (d < end) { d = new Date(d.getTime() + 86400000); const wd = Utilities.formatDate(d, tz, 'EEE'); if (wd !== 'Sat' && wd !== 'Sun') n++; }
+  return n;
+}
 
 function ckNow_() { return new Date(); }
 function ckReport_(days) {
@@ -242,7 +261,7 @@ function ckReport_(days) {
   const to = props_().getProperty('REPORT_TO');
   const span = Utilities.formatDate(from, tz, 'EEE MM/d') + ' – ' + Utilities.formatDate(until, tz, 'EEE MM/d');
   console.log(`Job Clock ${span}: ${noLabor.length} with no labor cost, ${differ.length} differ, ${open.length} still open, ${matched.length} matched.`);
-  if (!to) { console.log('REPORT_TO not set — nothing emailed.'); return; }
+  if (!to) { console.log('REPORT_TO not set — nothing emailed.'); return false; }
   const esc = x => String(x == null ? '' : x).replace(/[&<>"]/g, ch => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[ch]));
   const F = 'font-family:Arial,sans-serif';
   const table = (heads, body) => `<table border="1" cellpadding="6" style="border-collapse:collapse;${F};font-size:14px"><tr>${heads.map(h => '<th>' + esc(h) + '</th>').join('')}</tr>${body}</table>`;
@@ -279,15 +298,16 @@ function ckReport_(days) {
     try { if (sh) sh.getRange(presses[id][tech][k].row, 10).setValue(stamp + ' ' + (verdict[id] || 'ok')); } catch (_) {}
   })));
   console.log(`✅ Report sent to ${to}.`);
+  return true;
 }
 function ckHm_(min) { min = Number(min) || 0; return Math.floor(min / 60) + 'h ' + String(min % 60).padStart(2, '0') + 'm'; }
 function ckEventKey_(label) { return Object.keys(CK.EVENTS).filter(k => CK.EVENTS[k] === label)[0] || 'omw'; }
 
-/** Nightly report every morning between 6 and 7 AM (replaces the Monday one). */
+/** Checks every morning 6–7 AM; emails every REPORT_EVERY_BUSINESS_DAYS business days. */
 function installDailyTrigger() {
   ScriptApp.getProjectTriggers().filter(t => ['weeklyReport', 'dailyReport'].indexOf(t.getHandlerFunction()) !== -1).forEach(t => ScriptApp.deleteTrigger(t));
   ScriptApp.newTrigger('dailyReport').timeBased().everyDays(1).atHour(6).create();
-  console.log('✅ dailyReport runs every day between 6 and 7 AM.');
+  console.log(`✅ dailyReport checks every day 6–7 AM and emails every ${CK.REPORT_EVERY_BUSINESS_DAYS} business days.`);
 }
 function installWeeklyTrigger() { installDailyTrigger(); }
 

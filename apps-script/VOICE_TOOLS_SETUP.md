@@ -390,8 +390,9 @@ instead — so HCP's buttons are the system of record and the Job Clock is the c
 3. Techs press OMW / Start / Finish in the HCP app on every job (the page's Job Clock is a backup, not a
    replacement). Don't post labor as job inputs — it would count twice.
 
-**What the Job Clock does now (`dailyReport`, every morning 6–7 AM, replaces the Monday email):**
-- Looks at every job due in the last 3 days and emails REPORT_TO:
+**What the Job Clock does now (`dailyReport` checks every morning 6–7 AM and emails every 3 business days, replacing
+the Monday email):**
+- Looks at every job due since the last email (at least the last 3 days) and emails REPORT_TO:
   - **No labor cost** — finished in HCP but no Start/Finish there, so it's costing $0 labor. When someone
     pressed the page buttons, the email gives the travel and job time to type into **Field Tech Details**
     (job → tech's row → Edit → Total Travel Time / Total Job Time) with a direct link; otherwise "ask the tech".
@@ -399,5 +400,6 @@ instead — so HCP's buttons are the system of record and the Job Clock is the c
   - **Still open** — the day is over and Finish was never pressed in HCP.
 - The email's hidden `JOBCLOCK-DATA` block still feeds the Chrome `apply-job-clock-times` run if Claude is
   asked to type the times in.
-- Setup: run `installDailyTrigger()` once in the Job Clock editor (it removes the Monday trigger).
-  `weeklyReport()` is still there for a manual 7-day sweep.
+- Setup: run `installDailyTrigger()` once in the Job Clock editor (it removes the Monday trigger). The last send
+  date is script property `CK_LAST_REPORT`; `sendReportNow()` emails straight away and restarts the 3-day count;
+  `weeklyReport()` is a manual 7-day sweep that doesn't.
