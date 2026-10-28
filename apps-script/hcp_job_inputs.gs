@@ -22,6 +22,10 @@
  *     scheduled (or created) date is in the order's ship month. Nothing to edit each month — just create the
  *     month's job in HCP. These post even while that job is still open, and the $100 duplicate-part hold is off
  *     for them. A stock return nets against this month's inventory job, or last month's if it was bought there.
+ *   • Receipts from other vendors (Amazon, Home Depot, SupplyHouse… as a PDF or a photo) are read by Claude
+ *     Haiku (property ANTHROPIC_API_KEY) into the same line shape and follow the same rules. Sales tax shown on
+ *     the receipt is spread across the lines so the posted cost is what was actually paid. Dedupe tag becomes
+ *     "<Vendor> #<order> <date>". The PO field on the receipt works like Weinstein's (job number, or Inventory).
  *
  * ───────────── ONE-TIME SETUP ─────────────
  *  1. script.google.com → New project "HCP Job Inputs" → paste this file (owner: golden.rule.calendar@gmail.com).
@@ -41,6 +45,7 @@
  *   init     {}                         → who, sheet url, pending count
  *   preview  {lines:[…]}                → plan: groups per job with add / net / skip / held / flag items
  *   apply    {req_id, groups:[{job_id, ref, items:[…]}], pending:[lines]} → posts, logs, saves pending
+ *   receipt  {name, mime, data(base64)}   → lines parsed from a vendor receipt (PDF / image), ready for preview
  */
 
 const JI = {
@@ -52,7 +57,9 @@ const JI = {
   CANCELED: ['user canceled', 'pro canceled', 'canceled'],
   DUP_MIN_CENTS: 10000,          // duplicate-part guard kicks in at a $100 line total
   JOB_SCAN_PAGES: 25,            // 2,500 most recent jobs
-  TAG_RE: /Weinstein\s*#\s*([A-Za-z0-9.\-/]+)/i,
+  TAG_RE: /^\s*(?:[A-Za-z][A-Za-z0-9 .&'-]{0,40}?)\s*#\s*([A-Za-z0-9.\-/]+)/,   // "Weinstein #S039… 10/02/2026", "Amazon #112-… 10/19/2026"
+  CLAUDE_MODEL: 'claude-haiku-5-5',
+  RECEIPT_MAX_BYTES: 8 * 1024 * 1024,
   INV_PREFIX: 'INV:',            // synthetic ref for stock lines: INV:2026-10 = the Inventory Management job for Oct 2026
   INV_DEFAULT_CUSTOMER: 'Inventory Management',
   INV_DEFAULT_START: '2026-10',
@@ -78,6 +85,7 @@ function jiAction_(p) {
       case 'init':    return Object.assign({ ok: true }, jiInit_(who));
       case 'preview': return Object.assign({ ok: true }, jiPlan_(jiCleanLines_(p.lines), {}));
       case 'apply':   return jiApply_(p, who);
+      case 'receipt': return Object.assign({ ok: true }, jiReceipt_(p, who));
       default:        throw new Error('Unknown action.');
     }
   } catch (err) {
@@ -104,7 +112,8 @@ function jiCleanLines_(raw) {
     const line = { order: String(l.order || '').trim(), date: String(l.date || '').trim(), po: String(l.po || '').trim(),
                    ref: l.ref ? String(l.ref).trim() : '', part: String(l.part || '').trim(), desc: String(l.desc || l.part || '').trim(),
                    qty: qty, ext: ext, uom: String(l.uom || '').trim(), kind: String(l.kind || 'purchase'), orig: String(l.orig || '').trim(), row: Number(l.row) || 0,
-                   stock: !!l.stock };
+                   stock: !!l.stock, vendor: String(l.vendor || '').trim(), gen: !!l.gen };
+    if (line.orig.indexOf('vendor=') === 0) { line.vendor = line.orig.slice(7); line.orig = ''; }   // how the Pending tab stores the vendor
     if (line.kind === 'return-stock') { line.kind = 'return'; line.stock = true; }      // how the Pending tab stores a stock return
     if (line.kind === 'stock' || (!line.ref && line.kind !== 'return' && jiIsStockPo_(line.po))) line.stock = true;
     if (!line.part) throw new Error('A line has no part number (row ' + line.row + ').');
@@ -325,9 +334,9 @@ function jiIndexExisting_(existing) {
 }
 
 function jiMakeInput_(it) {
-  let desc = 'Weinstein #' + it.order; if (it.line.date) desc += ' ' + it.line.date;
+  let desc = (it.line.vendor || 'Weinstein') + ' #' + it.order; if (it.line.date) desc += ' ' + it.line.date;
   let name = (it.desc || it.part).slice(0, 120);
-  if (name.toUpperCase().indexOf(it.part.toUpperCase()) === -1) name = (it.part + ' ' + name).slice(0, 120);
+  if (!it.line.gen && name.toUpperCase().indexOf(it.part.toUpperCase()) === -1) name = (it.part + ' ' + name).slice(0, 120);   // generated stand-in part #s stay out of the name
   return { name: name, description: desc, part_number: it.part, unit_cost: Math.round(it.cents), quantity: Number(it.qty) };
 }
 
@@ -477,6 +486,107 @@ function jiResolveInventory_(ref) {
 }
 function jiInvPrevJob_(ref) { try { const r = jiResolveInventory_(jiInvPrev_(ref)); return r.job ? r : {}; } catch (_) { return {}; } }
 
+/* ───────────── vendor receipts (Amazon, Home Depot…) via Claude ───────────── */
+
+const JI_RECEIPT_PROMPT = `You read purchase receipts / order confirmations / invoices for a plumbing company and return the line items as JSON.
+Return ONLY a JSON object, no prose, shaped exactly like:
+{"vendor":"Amazon","order":"112-3977429-7899424","order_date":"10/16/2026","ship_date":"10/19/2026","po":"Pat Truck & Inventory",
+ "subtotal":130.32,"shipping":0,"tax":7.82,"total":138.14,
+ "lines":[{"description":"EZARC Carbide Reciprocating Saw Blades, 6-Inch 8TPI, Thick Metal, 10-Pack","part":"","qty":1,"unit_price":66.47,"line_total":66.47}]}
+Rules:
+- vendor: short store name (Amazon, Home Depot, SupplyHouse, Ferguson, Lowe's, Walmart…). order: the vendor's order / invoice number.
+- Dates as MM/DD/YYYY. ship_date = when it shipped or was picked up / delivered if shown, else "".
+- po: the customer PO / job / reference text exactly as printed (Amazon Business "PO number", a "Job" or "Reference" field); "" if none.
+- lines: every physical item across ALL shipments / pages, in order. qty is the number of units ("2 of:" = 2). unit_price is per unit before tax; line_total = qty x unit_price. Do not include shipping, tax, discounts, gift cards, subscriptions, or returns as lines.
+- part: a model / SKU / item number if printed next to the item, else "".
+- subtotal / shipping / tax / total: numbers from the receipt summary (0 when not shown). tax is the sales tax actually charged for the whole order.
+- Numbers are plain numbers (no $ or commas). Unknown text fields are "". Never invent items.`;
+
+function jiReceipt_(p, who) {
+  const name = String(p.name || 'receipt'), mime = String(p.mime || '').toLowerCase();
+  const data = String(p.data || '');
+  if (!data) throw new Error('No file data received.');
+  if (data.length * 0.75 > JI.RECEIPT_MAX_BYTES) throw new Error('That file is over 8 MB — take a smaller photo or export the receipt as a PDF.');
+  const key = props_().getProperty('ANTHROPIC_API_KEY');
+  if (!key) throw new Error('ANTHROPIC_API_KEY is not set in the HCP Job Inputs script properties — needed to read receipts that aren’t Weinstein CSVs.');
+  let block;
+  if (mime === 'application/pdf' || /\.pdf$/i.test(name)) block = { type: 'document', source: { type: 'base64', media_type: 'application/pdf', data: data } };
+  else if (/^image\/(jpeg|png|gif|webp)$/.test(mime)) block = { type: 'image', source: { type: 'base64', media_type: mime, data: data } };
+  else if (/^text\//.test(mime) || /\.(txt|htm|html)$/i.test(name)) block = { type: 'text', text: Utilities.newBlob(Utilities.base64Decode(data)).getDataAsString().slice(0, 60000) };
+  else throw new Error('Receipts can be a PDF, a photo (JPG / PNG), or a text file. Got: ' + (mime || name));
+
+  const res = UrlFetchApp.fetch('https://api.anthropic.com/v1/messages', {
+    method: 'post', contentType: 'application/json',
+    headers: { 'x-api-key': key, 'anthropic-version': '2023-06-01' },
+    payload: JSON.stringify({ model: JI.CLAUDE_MODEL, max_tokens: 4000, system: JI_RECEIPT_PROMPT,
+      messages: [{ role: 'user', content: [block, { type: 'text', text: 'Receipt file: ' + name + '. Return the JSON.' }] }] }),
+    muteHttpExceptions: true,
+  });
+  if (res.getResponseCode() !== 200) throw new Error('Could not read the receipt (Claude ' + res.getResponseCode() + '): ' + res.getContentText().slice(0, 160));
+  const text = (JSON.parse(res.getContentText()).content || []).filter(b => b.type === 'text').map(b => b.text).join('');
+  const m = /\{[\s\S]*\}/.exec(text);
+  if (!m) throw new Error('Could not find any line items on that receipt.');
+  let r; try { r = JSON.parse(m[0]); } catch (_) { throw new Error('The receipt reader returned something unreadable — try again or use a clearer file.'); }
+  const lines = jiReceiptLines_(r, name);
+  if (!lines.length) throw new Error('No purchasable items found on that receipt.');
+  console.log(`jobinputs receipt ${r.vendor || '?'} #${r.order || '?'}: ${lines.length} line(s), tax ${r.tax || 0}, by ${who}`);
+  return { lines: lines, vendor: lines[0].vendor, order: lines[0].order, date: lines[0].date, po: lines[0].po, tax: Number(r.tax) || 0, total: Number(r.total) || 0 };
+}
+
+/** Haiku's JSON → page-shaped lines, with the receipt's sales tax spread across the items by their share of the subtotal. */
+function jiReceiptLines_(r, fileName) {
+  const vendor = String(r.vendor || 'Receipt').replace(/[#|]/g, '').trim().slice(0, 30) || 'Receipt';
+  const order = String(r.order || '').replace(/[\s|]/g, '').trim() || ('file-' + String(fileName).replace(/[^A-Za-z0-9]+/g, '-').slice(0, 24));
+  const date = jiMdy_(r.ship_date) || jiMdy_(r.order_date) || '';
+  const po = String(r.po || '').trim();
+  const items = (Array.isArray(r.lines) ? r.lines : []).map(l => {
+    const qty = Math.abs(Number(l.qty) || 0) || 1;
+    let total = Number(l.line_total) || 0; const unit = Number(l.unit_price) || 0;
+    if (!total && unit) total = unit * qty;
+    return { desc: String(l.description || '').replace(/\s+/g, ' ').trim(), part: String(l.part || '').trim(), qty: qty, total: Math.round(total * 100) / 100 };
+  }).filter(i => i.desc && i.total > 0);
+  const sub = items.reduce((s, i) => s + i.total, 0);
+  const tax = Math.max(Number(r.tax) || 0, 0);
+  let taxLeft = Math.round(tax * 100);
+  const cls = po ? jiClassifyPo_(po) : { kind: 'unknown', ref: '' };
+  const seen = {};
+  return items.map((i, n) => {
+    let add = n === items.length - 1 ? taxLeft : Math.round(tax * 100 * i.total / (sub || 1));   // cents of tax for this line; last line takes the rounding
+    taxLeft -= add;
+    const ext = Math.round(i.total * 100 + add) / 100;
+    const gen = !i.part;
+    let part = i.part || jiPartFromDesc_(vendor, i.desc);
+    if (seen[part.toUpperCase()]) part = part + '-' + (n + 1);            // two different items that slug the same
+    seen[part.toUpperCase()] = true;
+    return { order: order, date: date, po: po, ref: cls.ref, part: part, desc: i.desc, qty: i.qty, ext: ext, uom: 'ea', kind: cls.kind,
+             orig: '', stock: cls.kind === 'stock', vendor: vendor, row: n + 1, tax_added: add / 100, gen: gen };
+  });
+}
+function jiMdy_(v) {
+  v = String(v || '').trim(); if (!v) return '';
+  let m = /^(\d{1,2})\/(\d{1,2})\/(\d{4})$/.exec(v); if (m) return ('0' + m[1]).slice(-2) + '/' + ('0' + m[2]).slice(-2) + '/' + m[3];
+  m = /^(\d{4})-(\d{2})-(\d{2})/.exec(v); if (m) return m[2] + '/' + m[3] + '/' + m[1];
+  const d = new Date(v); return isNaN(d) ? '' : Utilities.formatDate(d, 'UTC', 'MM/dd/yyyy');
+}
+function jiJobRef_(raw) { const m = /(?:^|[^\d])(\d{4,6})(?:\s*-\s*(\d{1,2}))?(?!\d)/.exec(String(raw || '')); return m ? (m[2] ? m[1] + '-' + parseInt(m[2], 10) : m[1]) : ''; }
+function jiClassifyPo_(t) {
+  const body = String(t || '').trim().replace(/^\s*PO\s*#?\s*/i, '').trim(), low = body.toLowerCase();
+  if (/^return/.test(low) || low === 'rtn' || /^credit/.test(low)) return { kind: 'return', ref: '' };
+  const ref = jiJobRef_(body); if (ref) return { kind: 'purchase', ref: ref };
+  if (jiIsStockPo_(body)) return { kind: 'stock', ref: '' };
+  return { kind: 'unknown', ref: '' };
+}
+/** "EZARC Carbide Reciprocating Saw Blades, 6-Inch 8TPI…" → "AMZ-EZARC-CARBIDE-RECIP" — a stable, readable stand-in part number. */
+function jiPartFromDesc_(vendor, desc) {
+  const prefix = { amazon: 'AMZ', 'home depot': 'HD', lowes: 'LOW', "lowe's": 'LOW', supplyhouse: 'SH', 'supplyhouse.com': 'SH', ferguson: 'FERG', walmart: 'WMT', ebay: 'EBAY', grainger: 'GRNG', zoro: 'ZORO' }[vendor.toLowerCase()]
+    || vendor.replace(/[^A-Za-z]/g, '').slice(0, 4).toUpperCase() || 'RCPT';
+  const stop = /^(the|a|an|of|for|with|and|in|to|x|by|pack|pcs|piece|pieces|set|new|inch|in|ft|feet)$/i;
+  const all = desc.split(/[^A-Za-z0-9]+/).filter(w => w && !stop.test(w));
+  const words = all.filter(w => /[A-Za-z]{2,}/.test(w)).slice(0, 4);        // real words first ("25 Pack, 9 inch, 14/18 TPI…" → RECIPROCATING-SAW-BLADE)
+  const use = (words.length >= 2 ? words : all.slice(0, 4)).map(w => w.toUpperCase().slice(0, 8));
+  return (prefix + '-' + (use.join('-') || 'ITEM')).slice(0, 30);
+}
+
 /* ───────────── apply ───────────── */
 
 function jiApply_(p, who) {
@@ -534,7 +644,8 @@ function jiSavePending_(lines, who, reasons) {
     if (have[key] || posted[key]) return;
     have[key] = 'saved';
     const kind = l.stock && l.kind === 'return' ? 'return-stock' : (l.stock ? 'stock' : l.kind);
-    rows.push([new Date(), who, jiIsInvRef_(l.ref) ? '' : l.ref, l.order, l.date, l.po, l.part, l.desc, l.qty, l.ext, l.uom, kind, l.orig, String(reasons[key] || reasons[l.ref] || 'waiting'), key]);
+    const orig = l.orig || (l.vendor ? 'vendor=' + l.vendor : '');
+    rows.push([new Date(), who, jiIsInvRef_(l.ref) ? '' : l.ref, l.order, l.date, l.po, l.part, l.desc, l.qty, l.ext, l.uom, kind, orig, String(reasons[key] || reasons[l.ref] || 'waiting'), key]);
   });
   if (rows.length) jiAppendRows_('Pending', rows);
   CacheService.getScriptCache().remove('ji_pending_keys');
@@ -720,6 +831,7 @@ function verifyAccess() {
     if (cid) { const by = jiInvJobsByMonth_() || {}; const months = Object.keys(by).sort(); console.log(months.length ? 'Inventory jobs by month: ' + months.map(m => m + ' → #' + by[m].map(j => j.invoice_number).join('/#')).join(', ') : '⚠️ No jobs on the inventory customer yet.'); }
     console.log(`Stock shipped before ${jiInvStart_()} is only logged.`);
   } else console.log('Inventory routing: off');
+  console.log(props_().getProperty('ANTHROPIC_API_KEY') ? '✅ ANTHROPIC_API_KEY set — vendor receipts (PDF / photo) can be read.' : '⚠️ ANTHROPIC_API_KEY not set — only Weinstein CSVs will load; set it to read Amazon / other receipts.');
   console.log(`Time zone: ${jiTz_()} (should be America/New_York)`);
   console.log(ScriptApp.getProjectTriggers().some(t => t.getHandlerFunction() === 'retryPending') ? '✅ Morning retry installed.' : '⚠️ Run installDailyTrigger() so pending lines post themselves.');
 }

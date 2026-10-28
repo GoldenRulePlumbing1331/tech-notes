@@ -92,11 +92,11 @@
 
 <div id="app" class="hidden">
   <div class="card">
-    <label>Weinstein material → HCP Job Inputs</label>
+    <label>Material receipts → HCP Job Inputs</label>
     <div class="drop" id="drop">
-      <b>Drop the Weinstein CSV here, or tap to choose it</b>
-      <span class="hint">Weinstein web store → Order History → <i>Order History Detail</i> → Export CSV. Any date range; lines already posted are skipped. Inventory / truck-stock POs go to that month's Inventory Management job.</span>
-      <input type="file" id="file" accept=".csv,text/csv,text/plain">
+      <b>Drop the Weinstein CSV or a vendor receipt here, or tap to choose</b>
+      <span class="hint">Weinstein: web store → Order History → <i>Order History Detail</i> → Export CSV. Other vendors (Amazon, Home Depot, SupplyHouse…): the receipt as a PDF or a photo — sales tax on it is added into the cost. Lines already posted are skipped. A job number in the PO field goes to that job; Inventory / truck-stock POs go to that month's Inventory Management job.</span>
+      <input type="file" id="file" accept=".csv,text/csv,text/plain,.pdf,application/pdf,image/*">
     </div>
     <div class="status" id="fileMsg"></div>
     <div class="hint" id="pendingNote"></div>
@@ -240,6 +240,15 @@
     }
     return { lines: lines, warns: warns };
   }
+  function readBase64(file) {
+    return new Promise(function (resolve, reject) {
+      var fr = new FileReader();
+      fr.onerror = function () { reject(new Error("Couldn't read that file.")); };
+      fr.onload = function () { var s = String(fr.result || ""); resolve(s.slice(s.indexOf(",") + 1)); };
+      fr.readAsDataURL(file);
+    });
+  }
+  function isCsv(file) { var n = (file.name || "").toLowerCase(); return /\.(csv|txt)$/.test(n) || /^text\/(csv|plain)$/.test(file.type || ""); }
   function readFile(file) {
     return new Promise(function (resolve, reject) {
       var fr = new FileReader();
@@ -265,17 +274,30 @@
   function load(file) {
     S.over = {}; S.applied = false; S.fileName = file.name;
     say("fileMsg", "Reading " + file.name + "…", "busy"); show($("planCard"), false);
-    readFile(file).then(function (text) {
-      var p = parseCsv(text);
+    var job = isCsv(file) ? readFile(file).then(function (text) { return parseCsv(text); }) : loadReceipt(file);
+    job.then(function (p) {
       if (!p.lines.length) throw new Error("No material lines in " + file.name + "." + (p.warns.length ? "\n" + p.warns.join("\n") : ""));
       S.lines = p.lines;
       var orders = {}, refs = {}, dates = [];
       p.lines.forEach(function (l) { orders[l.order] = 1; if (l.ref) refs[l.ref] = 1; var m = /^(\d{1,2})\/(\d{1,2})\/(\d{4})/.exec(l.date); if (m) dates.push(new Date(+m[3], +m[1] - 1, +m[2])); });
       dates.sort(function (a, b) { return a - b; });
       var span = dates.length ? dates[0].toLocaleDateString() + (dates.length > 1 ? " – " + dates[dates.length - 1].toLocaleDateString() : "") : "";
-      say("fileMsg", "📄 " + file.name + ": " + p.lines.length + " lines · " + Object.keys(orders).length + " orders · " + Object.keys(refs).length + " job numbers" + (span ? " · shipped " + span : "") + (p.warns.length ? "\n⚠️ " + p.warns.join("\n⚠️ ") : ""), p.warns.length ? "wait" : "ok");
+      var head = p.receipt ? "🧾 " + p.receipt.vendor + " order " + p.receipt.order + (p.receipt.po ? " · PO \"" + p.receipt.po + "\"" : " · no PO on the receipt") + ": " + p.lines.length + " item" + (p.lines.length === 1 ? "" : "s") + (p.receipt.tax ? " · " + money(Math.round(p.receipt.tax * 100)) + " sales tax added into the costs" : " · no sales tax shown") : "📄 " + file.name + ": " + p.lines.length + " lines · " + Object.keys(orders).length + " orders · " + Object.keys(refs).length + " job numbers";
+      say("fileMsg", head + (span ? " · shipped " + span : "") + (p.warns.length ? "\n⚠️ " + p.warns.join("\n⚠️ ") : ""), p.warns.length ? "wait" : "ok");
       preview();
     }).catch(function (e) { say("fileMsg", "❌ " + e.message, "err"); });
+  }
+  // a vendor receipt (PDF / photo): the server has Claude read it into the same line shape as the Weinstein CSV
+  function loadReceipt(file) {
+    if (file.size > 8 * 1024 * 1024) return Promise.reject(new Error("That file is over 8 MB — take a smaller photo or export the receipt as a PDF."));
+    say("fileMsg", "🧾 Reading the receipt " + file.name + " — about 15 seconds…", "busy");
+    return readBase64(file).then(function (b64) {
+      return api("receipt", { name: file.name, mime: file.type || "", data: b64 }, 120000);
+    }).then(function (r) {
+      if (!r.ok) throw new Error(r.error || "Couldn't read that receipt.");
+      var lines = (r.lines || []).map(function (l) { l.row = l.row || 0; return l; });
+      return { lines: lines, warns: [], receipt: { vendor: r.vendor, order: r.order, po: r.po, tax: r.tax } };
+    });
   }
 
   function linesForServer() { return S.lines.map(function (l) { var o = {}; for (var k in l) o[k] = l[k]; if (S.over[lineKey(l)]) { o.ref = S.over[lineKey(l)]; if (o.kind === "unknown") o.kind = "purchase"; } return o; }); }
@@ -373,7 +395,7 @@
       tr.appendChild(el("td", "n", String(it.qty)));
       tr.appendChild(el("td", "n hide", money(it.cents)));
       tr.appendChild(el("td", "n", it.k === "net" || it.k === "add" || it.k === "held" ? money(it.total) : ""));
-      tr.appendChild(el("td", "hide", (it.order || "") + (it.date ? " · " + it.date : "")));
+      tr.appendChild(el("td", "hide", ((it.line && it.line.vendor) ? it.line.vendor + " " : "") + (it.order || "") + (it.date ? " · " + it.date : "")));
       t.appendChild(tr);
     });
     wrap.appendChild(t);
