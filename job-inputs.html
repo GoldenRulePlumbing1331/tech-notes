@@ -95,8 +95,8 @@
     <label>Material receipts → HCP Job Inputs</label>
     <div class="drop" id="drop">
       <b>Drop the Weinstein CSV or a vendor receipt here, or tap to choose</b>
-      <span class="hint">Weinstein: web store → Order History → <i>Order History Detail</i> → Export CSV. Amazon: the Business <i>Orders</i> report CSV, or any order's PDF. Other vendors: the receipt as a PDF or a photo. Sales tax on receipts is added into the cost. Lines already posted are skipped. A job number in the PO field goes to that job; everything else on a vendor receipt (Inventory, Office, Truck, tools…) goes to that month's Inventory Management job.</span>
-      <input type="file" id="file" accept=".csv,text/csv,text/plain,.pdf,application/pdf,image/*">
+      <span class="hint">Weinstein: web store → Order History → <i>Order History Detail</i> → Export CSV. Amazon: the Business <i>Orders</i> report CSV, or any order's PDF. Other vendors: the receipt as a PDF, a photo, or a Word / Excel file. Sales tax on receipts is added into the cost. Lines already posted are skipped. A job number in the PO field goes to that job; everything else on a vendor receipt (Inventory, Office, Truck, tools…) goes to that month's Inventory Management job.</span>
+      <input type="file" id="file" accept=".csv,text/csv,text/plain,.pdf,application/pdf,image/*,.docx,.xlsx,application/vnd.openxmlformats-officedocument.wordprocessingml.document,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet">
     </div>
     <div class="status" id="fileMsg"></div>
     <div class="hint" id="pendingNote"></div>
@@ -344,6 +344,7 @@
   // a vendor receipt (PDF / photo): the server has Claude read it into the same line shape as the Weinstein CSV
   function loadReceipt(file) {
     if (file.size > 8 * 1024 * 1024) return Promise.reject(new Error("That file is over 8 MB — take a smaller photo or export the receipt as a PDF."));
+    if (/\.(doc|xls)$/i.test(file.name || "")) return Promise.reject(new Error("That's an old-style Office file (.doc / .xls). Open it and Save As .docx / .xlsx or PDF, then upload that."));
     say("fileMsg", "🧾 Reading the receipt " + file.name + " — about 15 seconds…", "busy");
     return readBase64(file).then(function (b64) {
       return api("receipt", { name: file.name, mime: file.type || "", data: b64 }, 120000);

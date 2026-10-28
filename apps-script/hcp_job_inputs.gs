@@ -22,7 +22,7 @@
  *     scheduled (or created) date is in the order's ship month. Nothing to edit each month — just create the
  *     month's job in HCP. These post even while that job is still open, and the $100 duplicate-part hold is off
  *     for them. A stock return nets against this month's inventory job, or last month's if it was bought there.
- *   • Receipts from other vendors (Amazon, Home Depot, SupplyHouse… as a PDF or a photo) are read by Claude
+ *   • Receipts from other vendors (Amazon, Home Depot, SupplyHouse… as a PDF, photo, Word .docx or Excel .xlsx) are read by Claude
  *     Haiku (property ANTHROPIC_API_KEY) into the same line shape and follow the same rules. Sales tax shown on
  *     the receipt is spread across the lines so the posted cost is what was actually paid. Dedupe tag becomes
  *     "<Vendor> #<order> <date>". A job number in the receipt's PO field -> that job; anything else (Inventory, Office,
@@ -48,7 +48,7 @@
  *   init     {}                         → who, sheet url, pending count
  *   preview  {lines:[…]}                → plan: groups per job with add / net / skip / held / flag items
  *   apply    {req_id, groups:[{job_id, ref, items:[…]}], pending:[lines]} → posts, logs, saves pending
- *   receipt  {name, mime, data(base64)}   → lines parsed from a vendor receipt (PDF / image), ready for preview
+ *   receipt  {name, mime, data(base64)}   → lines parsed from a vendor receipt (PDF / image / .docx / .xlsx), ready for preview
  */
 
 const JI = {
@@ -516,7 +516,10 @@ function jiReceipt_(p, who) {
   if (mime === 'application/pdf' || /\.pdf$/i.test(name)) block = { type: 'document', source: { type: 'base64', media_type: 'application/pdf', data: data } };
   else if (/^image\/(jpeg|png|gif|webp)$/.test(mime)) block = { type: 'image', source: { type: 'base64', media_type: mime, data: data } };
   else if (/^text\//.test(mime) || /\.(txt|htm|html)$/i.test(name)) block = { type: 'text', text: Utilities.newBlob(Utilities.base64Decode(data)).getDataAsString().slice(0, 60000) };
-  else throw new Error('Receipts can be a PDF, a photo (JPG / PNG), or a text file. Got: ' + (mime || name));
+  else if (/\.docx$/i.test(name) || mime === 'application/vnd.openxmlformats-officedocument.wordprocessingml.document') block = { type: 'text', text: 'Word document ' + name + ':\n' + jiOfficeText_(data, 'docx') };
+  else if (/\.xlsx$/i.test(name) || mime === 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet') block = { type: 'text', text: 'Excel workbook ' + name + ' (tab-separated, one block per sheet):\n' + jiOfficeText_(data, 'xlsx') };
+  else if (/\.(doc|xls)$/i.test(name)) throw new Error('That\u2019s an old-style Office file (.doc / .xls). Open it and Save As .docx / .xlsx or PDF, then upload that.');
+  else throw new Error('Receipts can be a PDF, a photo (JPG / PNG), a Word (.docx) or Excel (.xlsx) file, or a text file. Got: ' + (mime || name));
 
   const res = UrlFetchApp.fetch('https://api.anthropic.com/v1/messages', {
     method: 'post', contentType: 'application/json',
@@ -534,6 +537,64 @@ function jiReceipt_(p, who) {
   if (!lines.length) throw new Error('No purchasable items found on that receipt.');
   console.log(`jobinputs receipt ${r.vendor || '?'} #${r.order || '?'}: ${lines.length} line(s), tax ${r.tax || 0}, by ${who}`);
   return { lines: lines, vendor: lines[0].vendor, order: lines[0].order, date: lines[0].date, po: lines[0].po, tax: Number(r.tax) || 0, total: Number(r.total) || 0 };
+}
+
+/** .docx / .xlsx (both are zip files of XML) → plain text for the receipt reader. Tables keep their rows / columns. */
+function jiOfficeText_(b64, kind) {
+  let files;
+  try { files = Utilities.unzip(Utilities.newBlob(Utilities.base64Decode(b64), 'application/zip', 'f.zip')); }
+  catch (e) { throw new Error('Couldn\u2019t open that ' + (kind === 'docx' ? 'Word' : 'Excel') + ' file \u2014 is it password-protected or damaged? Try saving it as a PDF.'); }
+  const byName = {}; files.forEach(f => { byName[f.getName()] = f.getDataAsString('UTF-8'); });
+  const text = kind === 'docx' ? jiDocxText_(byName) : jiXlsxText_(byName);
+  if (!text.replace(/\s/g, '')) throw new Error('No text found in that file. If it\u2019s a scanned receipt pasted in as a picture, upload the picture or a PDF instead.');
+  return text.slice(0, 60000);
+}
+function jiXmlDecode_(s) {
+  return String(s).replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&quot;/g, '"').replace(/&apos;/g, "'")
+    .replace(/&#(\d+);/g, (_, n) => String.fromCharCode(+n)).replace(/&#x([0-9a-f]+);/gi, (_, n) => String.fromCharCode(parseInt(n, 16))).replace(/&amp;/g, '&');
+}
+/** Word: body + headers/footers; paragraphs → lines, table cells → tabs, rows → lines. */
+function jiDocxText_(byName) {
+  const rank = n => /header/.test(n) ? 0 : /document/.test(n) ? 1 : 2;                 // header (vendor name, logo text) → body → footer
+  const parts = Object.keys(byName).filter(n => /^word\/(document|header\d*|footer\d*)\.xml$/.test(n)).sort((a, b) => rank(a) - rank(b) || a.localeCompare(b));
+  return parts.map(n => jiXmlDecode_(byName[n]
+    .replace(/<w:tc[ >][\s\S]*?<\/w:tc>/g, tc => tc.replace(/<\/w:p>/g, ' ').replace(/<w:br[^>]*\/>/g, ' ').replace(/<w:tab\/>/g, ' '))   // a cell's own paragraphs stay in the cell
+    .replace(/<w:tab\/>/g, '\t').replace(/<w:br[^>]*\/>/g, '\n')
+    .replace(/<\/w:tc>/g, '\t').replace(/<\/w:tr>/g, '\n').replace(/<\/w:p>/g, '\n')
+    .replace(/<[^>]+>/g, ''))
+    .replace(/[ \u00a0]+/g, ' ').replace(/ ?\t ?/g, '\t').replace(/\t+\n/g, '\n').replace(/\n{3,}/g, '\n\n').trim()).filter(Boolean).join('\n\n');
+}
+/** Excel: every sheet as tab-separated rows (shared strings and inline strings resolved; numbers as stored). */
+function jiXlsxText_(byName) {
+  const shared = [];
+  const ss = byName['xl/sharedStrings.xml'] || '';
+  (ss.match(/<si>[\s\S]*?<\/si>/g) || []).forEach(si => shared.push(jiXmlDecode_((si.match(/<t[^>]*>[\s\S]*?<\/t>/g) || []).map(t => t.replace(/<[^>]+>/g, '')).join(''))));
+  const names = {};   // sheetN.xml -> tab name, from workbook.xml + its rels
+  const wb = byName['xl/workbook.xml'] || '', rels = byName['xl/_rels/workbook.xml.rels'] || '';
+  (wb.match(/<sheet [^>]*>/g) || []).forEach(t => {
+    const nm = /name="([^"]*)"/.exec(t), rid = /r:id="([^"]*)"/.exec(t);
+    const rel = rid && new RegExp('<Relationship[^>]*Id="' + rid[1] + '"[^>]*>').exec(rels);
+    const tgt = rel && /Target="([^"]*)"/.exec(rel[0]);
+    if (nm && tgt) names['xl/' + tgt[1].replace(/^\/?xl\//, '')] = jiXmlDecode_(nm[1]);
+  });
+  const col = ref => { let n = 0; String(ref).replace(/\d+/g, '').toUpperCase().split('').forEach(ch => { n = n * 26 + ch.charCodeAt(0) - 64; }); return n - 1; };
+  return Object.keys(byName).filter(n => /^xl\/worksheets\/sheet\d+\.xml$/.test(n)).sort((a, b) => +a.match(/\d+/)[0] - +b.match(/\d+/)[0]).map(n => {
+    const rows = (byName[n].match(/<row[^>]*>[\s\S]*?<\/row>/g) || []).map(r => {
+      const cells = [];
+      (r.match(/<c [^>]*?(?:\/>|>[\s\S]*?<\/c>)/g) || []).forEach(c => {
+        const ref = /r="([A-Z]+\d+)"/.exec(c), t = /t="([^"]+)"/.exec(c), v = /<v>([\s\S]*?)<\/v>/.exec(c);
+        let val = '';
+        if (t && t[1] === 's' && v) val = shared[+v[1]] || '';
+        else if (t && t[1] === 'inlineStr') val = jiXmlDecode_((c.match(/<t[^>]*>[\s\S]*?<\/t>/g) || []).map(x => x.replace(/<[^>]+>/g, '')).join(''));
+        else if (v) val = jiXmlDecode_(v[1]);
+        const i = ref ? col(ref[1]) : cells.length;
+        while (cells.length < i) cells.push('');
+        cells[i] = val.replace(/[\t\r\n]+/g, ' ').trim();
+      });
+      return cells.join('\t').replace(/\t+$/, '');
+    }).filter(r => r.replace(/\t/g, '').trim());
+    return rows.length ? '=== Sheet: ' + (names[n] || n.replace(/^.*\//, '')) + ' ===\n' + rows.join('\n') : '';
+  }).filter(Boolean).join('\n\n');
 }
 
 /** Haiku's JSON → page-shaped lines, with the receipt's sales tax spread across the items by their share of the subtotal. */
