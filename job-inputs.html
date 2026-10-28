@@ -95,7 +95,7 @@
     <label>Material receipts → HCP Job Inputs</label>
     <div class="drop" id="drop">
       <b>Drop the Weinstein CSV or a vendor receipt here, or tap to choose</b>
-      <span class="hint">Weinstein: web store → Order History → <i>Order History Detail</i> → Export CSV. Other vendors (Amazon, Home Depot, SupplyHouse…): the receipt as a PDF or a photo — sales tax on it is added into the cost. Lines already posted are skipped. A job number in the PO field goes to that job; Inventory / truck-stock POs go to that month's Inventory Management job.</span>
+      <span class="hint">Weinstein: web store → Order History → <i>Order History Detail</i> → Export CSV. Amazon: the Business <i>Orders</i> report CSV, or any order's PDF. Other vendors: the receipt as a PDF or a photo. Sales tax on receipts is added into the cost. Lines already posted are skipped. A job number in the PO field goes to that job; everything else on a vendor receipt (Inventory, Office, Truck, tools…) goes to that month's Inventory Management job.</span>
       <input type="file" id="file" accept=".csv,text/csv,text/plain,.pdf,application/pdf,image/*">
     </div>
     <div class="status" id="fileMsg"></div>
@@ -240,6 +240,57 @@
     }
     return { lines: lines, warns: warns };
   }
+  // ---------- Amazon Business "Orders" report (Business Analytics → Orders → download CSV) ----------
+  function parseCsvRows(text) {   // RFC-4180: quoted fields, "" escapes, commas / newlines inside quotes; Excel ="..." unwrapped
+    var rows = [], row = [], cell = "", q = false, i = 0, n = text.length;
+    while (i < n) {
+      var c = text.charAt(i);
+      if (q) { if (c === '"') { if (text.charAt(i + 1) === '"') { cell += '"'; i++; } else q = false; } else cell += c; }
+      else if (c === '"') q = true;
+      else if (c === ",") { row.push(cell); cell = ""; }
+      else if (c === "\n" || c === "\r") { if (c === "\r" && text.charAt(i + 1) === "\n") i++; row.push(cell); rows.push(row); row = []; cell = ""; }
+      else cell += c;
+      i++;
+    }
+    if (cell.length || row.length) { row.push(cell); rows.push(row); }
+    return rows.map(function (r) { return r.map(function (v) { v = String(v); var m = /^="?(.*?)"?$/.exec(v); return (m ? m[1] : v).trim(); }); });
+  }
+  function isAmazonReport(headers) { var h = headers.map(norm); return h.indexOf("orderid") !== -1 && h.indexOf("asin") !== -1 && h.indexOf("itemsubtotal") !== -1; }
+  function parseAmazonReport(text) {
+    var rows = parseCsvRows(text).filter(function (r) { return r.length > 1; });
+    var headers = rows[0], col = {}; headers.forEach(function (h, i) { col[norm(h)] = i; });
+    var g = function (r, name) { var i = col[norm(name)]; return i == null ? "" : (r[i] || ""); };
+    var orders = {}, warns = [];
+    rows.slice(1).forEach(function (r, k) {
+      var id = g(r, "Order ID"), asin = g(r, "ASIN"); if (!id || !asin) return;
+      var qty = toFloat(g(r, "Item Quantity")), sub = toFloat(g(r, "Item Subtotal")), tax = toFloat(g(r, "Item Tax")), promo = toFloat(g(r, "Item Promotion")), net = toFloat(g(r, "Item Net Total"));
+      var o = orders[id] = orders[id] || { id: id, date: g(r, "Order Date"), po: g(r, "PO Number"), subtotal: toFloat(g(r, "Order Subtotal")), status: g(r, "Order Status"), rows: [] };
+      if (qty <= 0) { warns.push("Order " + id + ": \"" + g(r, "Title").slice(0, 50) + "…\" shows quantity 0 on the report (cancelled / not shipped) — left out"); return; }
+      var part = [g(r, "Part number"), g(r, "Item model number")].filter(function (v) { return v && v.length <= 20 && !/\s/.test(v); })[0] || asin;   // readable model # when there is one, else the ASIN
+      o.rows.push({ asin: asin, title: g(r, "Title"), part: part, qty: qty, sub: sub, net: net || (sub + tax + promo), pay: g(r, "Payment Reference ID"), row: k + 2 });
+    });
+    var lines = [];
+    Object.keys(orders).forEach(function (id) {
+      var o = orders[id];
+      // the report repeats an item once per payment record — keep one copy of each identical row, then add copies back
+      // only while the order's subtotal says there really were more (two separate shipments of the same item)
+      var seen = {}, keep = [], extra = [];
+      o.rows.forEach(function (x) { var key = x.asin + "|" + x.qty + "|" + x.sub; if (seen[key]) extra.push(x); else { seen[key] = 1; keep.push(x); } });
+      var sum = keep.reduce(function (s, x) { return s + x.sub; }, 0);
+      extra.forEach(function (x) { if (o.subtotal && sum + x.sub <= o.subtotal + 0.005) { keep.push(x); sum += x.sub; } });
+      if (o.subtotal && Math.abs(sum - o.subtotal) > 0.01) warns.push("Order " + id + ": items add up to $" + sum.toFixed(2) + " but the order subtotal is $" + o.subtotal.toFixed(2) + " — check it");
+      if (/cancel/i.test(o.status)) { warns.push("Order " + id + " is " + o.status + " — left out"); return; }
+      // the same item shipped twice on one order -> one line (qty and cost added up)
+      var merged = {}; keep.forEach(function (x) { var k = x.asin; if (merged[k]) { merged[k].qty += x.qty; merged[k].net += x.net; } else merged[k] = { asin: x.asin, title: x.title, part: x.part, qty: x.qty, net: x.net, row: x.row }; });
+      var cls = classifyPO(o.po), usedPart = {};
+      Object.keys(merged).forEach(function (k, n) {
+        var x = merged[k], part = x.part; if (usedPart[part.toUpperCase()]) part = part + "-" + (n + 1); usedPart[part.toUpperCase()] = 1;
+        lines.push({ order: id, date: o.date, po: o.po, ref: cls.ref, part: part, desc: x.title, qty: x.qty, ext: Math.round(x.net * 100) / 100, uom: "ea",
+                     kind: cls.kind === "purchase" ? "purchase" : "stock", orig: "", stock: cls.kind !== "purchase", vendor: "Amazon", gen: false, row: x.row });
+      });
+    });
+    return { lines: lines, warns: warns, amazon: { orders: Object.keys(orders).length } };
+  }
   function readBase64(file) {
     return new Promise(function (resolve, reject) {
       var fr = new FileReader();
@@ -274,7 +325,10 @@
   function load(file) {
     S.over = {}; S.applied = false; S.fileName = file.name;
     say("fileMsg", "Reading " + file.name + "…", "busy"); show($("planCard"), false);
-    var job = isCsv(file) ? readFile(file).then(function (text) { return parseCsv(text); }) : loadReceipt(file);
+    var job = isCsv(file) ? readFile(file).then(function (text) {
+      var first = text.split(/\r?\n/)[0] || "";
+      return isAmazonReport(parseCsvRows(first)[0] || []) ? parseAmazonReport(text) : parseCsv(text);
+    }) : loadReceipt(file);
     job.then(function (p) {
       if (!p.lines.length) throw new Error("No material lines in " + file.name + "." + (p.warns.length ? "\n" + p.warns.join("\n") : ""));
       S.lines = p.lines;
@@ -282,7 +336,7 @@
       p.lines.forEach(function (l) { orders[l.order] = 1; if (l.ref) refs[l.ref] = 1; var m = /^(\d{1,2})\/(\d{1,2})\/(\d{4})/.exec(l.date); if (m) dates.push(new Date(+m[3], +m[1] - 1, +m[2])); });
       dates.sort(function (a, b) { return a - b; });
       var span = dates.length ? dates[0].toLocaleDateString() + (dates.length > 1 ? " – " + dates[dates.length - 1].toLocaleDateString() : "") : "";
-      var head = p.receipt ? "🧾 " + p.receipt.vendor + " order " + p.receipt.order + (p.receipt.po ? " · PO \"" + p.receipt.po + "\"" : " · no PO on the receipt") + ": " + p.lines.length + " item" + (p.lines.length === 1 ? "" : "s") + (p.receipt.tax ? " · " + money(Math.round(p.receipt.tax * 100)) + " sales tax added into the costs" : " · no sales tax shown") : "📄 " + file.name + ": " + p.lines.length + " lines · " + Object.keys(orders).length + " orders · " + Object.keys(refs).length + " job numbers";
+      var head = p.amazon ? "🧾 Amazon order report " + file.name + ": " + p.lines.length + " item" + (p.lines.length === 1 ? "" : "s") + " on " + p.amazon.orders + " order" + (p.amazon.orders === 1 ? "" : "s") + " · item sales tax included in the costs" : p.receipt ? "🧾 " + p.receipt.vendor + " order " + p.receipt.order + (p.receipt.po ? " · PO \"" + p.receipt.po + "\"" : " · no PO on the receipt") + ": " + p.lines.length + " item" + (p.lines.length === 1 ? "" : "s") + (p.receipt.tax ? " · " + money(Math.round(p.receipt.tax * 100)) + " sales tax added into the costs" : " · no sales tax shown") : "📄 " + file.name + ": " + p.lines.length + " lines · " + Object.keys(orders).length + " orders · " + Object.keys(refs).length + " job numbers";
       say("fileMsg", head + (span ? " · shipped " + span : "") + (p.warns.length ? "\n⚠️ " + p.warns.join("\n⚠️ ") : ""), p.warns.length ? "wait" : "ok");
       preview();
     }).catch(function (e) { say("fileMsg", "❌ " + e.message, "err"); });

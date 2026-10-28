@@ -25,7 +25,9 @@
  *   • Receipts from other vendors (Amazon, Home Depot, SupplyHouse… as a PDF or a photo) are read by Claude
  *     Haiku (property ANTHROPIC_API_KEY) into the same line shape and follow the same rules. Sales tax shown on
  *     the receipt is spread across the lines so the posted cost is what was actually paid. Dedupe tag becomes
- *     "<Vendor> #<order> <date>". The PO field on the receipt works like Weinstein's (job number, or Inventory).
+ *     "<Vendor> #<order> <date>". A job number in the receipt's PO field -> that job; anything else (Inventory, Office,
+ *     Truck, a tool name, or no PO) -> the month's Inventory Management job. The Amazon Business "Orders" report CSV
+ *     is parsed by the page itself (per-item tax, part numbers, duplicate payment rows reconciled) - no Claude needed.
  *
  * ───────────── ONE-TIME SETUP ─────────────
  *  1. script.google.com → New project "HCP Job Inputs" → paste this file (owner: golden.rule.calendar@gmail.com).
@@ -548,7 +550,7 @@ function jiReceiptLines_(r, fileName) {
   const sub = items.reduce((s, i) => s + i.total, 0);
   const tax = Math.max(Number(r.tax) || 0, 0);
   let taxLeft = Math.round(tax * 100);
-  const cls = po ? jiClassifyPo_(po) : { kind: 'unknown', ref: '' };
+  const cls = po ? jiClassifyPo_(po) : { kind: 'stock', ref: '' };
   const seen = {};
   return items.map((i, n) => {
     let add = n === items.length - 1 ? taxLeft : Math.round(tax * 100 * i.total / (sub || 1));   // cents of tax for this line; last line takes the rounding
@@ -558,8 +560,11 @@ function jiReceiptLines_(r, fileName) {
     let part = i.part || jiPartFromDesc_(vendor, i.desc);
     if (seen[part.toUpperCase()]) part = part + '-' + (n + 1);            // two different items that slug the same
     seen[part.toUpperCase()] = true;
-    return { order: order, date: date, po: po, ref: cls.ref, part: part, desc: i.desc, qty: i.qty, ext: ext, uom: 'ea', kind: cls.kind,
-             orig: '', stock: cls.kind === 'stock', vendor: vendor, row: n + 1, tax_added: add / 100, gen: gen };
+    // on a vendor receipt anything that isn't a job number (Inventory, Office, Truck, a tool, nothing at all) is overhead /
+    // stock for the business -> the month's Inventory Management job
+    const stock = cls.kind !== 'purchase' && cls.kind !== 'return';
+    return { order: order, date: date, po: po, ref: cls.ref, part: part, desc: i.desc, qty: i.qty, ext: ext, uom: 'ea', kind: stock ? 'stock' : cls.kind,
+             orig: '', stock: stock, vendor: vendor, row: n + 1, tax_added: add / 100, gen: gen };
   });
 }
 function jiMdy_(v) {
