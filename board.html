@@ -191,6 +191,28 @@
   #codeCard label { display: block; font-weight: 650; margin-bottom: 6px; font-size: 17px; }
   #codeCard input { width: 100%; font: inherit; font-size: 17px; color: var(--ink); background: var(--card); border: 1px solid var(--line); border-radius: 10px; padding: 11px 12px; }
   #codeCard .btn { width: 100%; margin-top: 10px; }
+
+  /* field tools in the job sheet + outbox */
+  .ftools { margin-top: 14px; border-top: 1px solid var(--line); padding-top: 4px; }
+  .ftools .ft { font-size: 12px; font-weight: 800; letter-spacing: .05em; text-transform: uppercase; color: var(--muted); padding: 10px 0 8px; }
+  .fbtns { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; }
+  .fb { border: 0; border-radius: 12px; padding: 14px 6px; color: #fff; font-weight: 800; font-size: 15px; line-height: 1.15; cursor: pointer; text-align: center; }
+  .fb small { display: block; font-weight: 500; font-size: 11.5px; opacity: .92; margin-top: 4px; min-height: 14px; }
+  .fb.omw { background: #1d4ed8; } .fb.start { background: #15803d; } .fb.finish { background: var(--brand); }
+  .fb.done { opacity: .6; } .fb:active { filter: brightness(1.15); }
+  .ftools textarea { width: 100%; font: inherit; font-size: 16px; color: var(--ink); background: var(--card); border: 1px solid var(--line); border-radius: 10px; padding: 10px 12px; min-height: 76px; resize: vertical; margin-top: 12px; }
+  .frow { display: flex; gap: 8px; margin-top: 8px; }
+  .frow .btn { flex: 1; padding: 11px; }
+  .fmsg { margin-top: 8px; font-size: 14px; border-radius: 10px; padding: 8px 12px; }
+  .fmsg.ok { background: var(--ok-bg); color: var(--ok-ink); } .fmsg.wait { background: var(--warn-bg); color: var(--warn-ink); } .fmsg.err { background: var(--err-bg); color: var(--err-ink); }
+  .ob { border-top: 1px solid var(--grid); padding: 10px 0; }
+  .ob:first-of-type { border-top: 0; }
+  .ob b { display: block; font-size: 15px; }
+  .ob .oz { font-size: 13px; color: var(--muted); margin-top: 2px; }
+  .ob .oz.err { color: var(--err-ink); }
+  .ob .oa { display: flex; gap: 8px; margin-top: 8px; }
+  .ob .oa button { flex: 1; padding: 8px; border-radius: 9px; border: 1px solid var(--line); background: var(--card); color: var(--ink); font: inherit; font-size: 14px; font-weight: 650; cursor: pointer; }
+  .small.alert { background: var(--warn-bg); color: var(--warn-ink); border-color: transparent; }
   footer { text-align: center; font-size: 13px; color: var(--muted); padding: 10px 0 16px; }
   footer a { color: inherit; }
 </style>
@@ -222,6 +244,7 @@
     <div class="sub">
       <span class="sum" id="sum"></span>
       <button class="small" id="fit" title="Columns per screen">⇔ 2</button>
+      <button class="small hidden" id="outBtn" title="Waiting to send"></button>
       <div class="seg"><button id="vGrid" class="on">Grid</button><button id="vList">List</button></div>
     </div>
   </div>
@@ -438,7 +461,7 @@
   }
   function openUnassigned() {
     closeMenu();
-    var sh = $("sheet"); sh.innerHTML = ""; sh.appendChild(el("div", "grab")); S.sheetIsUn = true;
+    var sh = $("sheet"); sh.innerHTML = ""; sh.appendChild(el("div", "grab")); S.sheetIsUn = true; S.sheetOut = false;
     sh.appendChild(el("h3", null, "Unassigned jobs"));
     var u = S.un;
     if (!u) { sh.appendChild(el("div", "kind", "Loading…")); loadUn(false); }
@@ -616,12 +639,195 @@
   }
   window.addEventListener("resize", function () { sizeBoard(); });
 
+
+  // ---------- field tools: buttons, notes, photos (saved on the phone, sent when signal returns) ----------
+  var CLOCK = (window.GR_ENDPOINTS && window.GR_ENDPOINTS.clock) || "";
+  var OB_STAMP = "grClockOutbox", OB_NOTE = "grBoardNotes", TODAY_K = "grClockToday";   // stamps share the Job Clock page's outbox
+  var EVL = { omw: "On my way", start: "Start", finish: "Finish" };
+  S.ph = [];
+  function rid() { return Date.now().toString(36) + Math.random().toString(36).slice(2, 8); }
+  function readJ(k) { try { var v = JSON.parse(get(k) || "[]"); return Array.isArray(v) ? v : []; } catch (e) { return []; } }
+  function tfmt(iso) { return new Date(iso).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" }); }
+  function dfmt(iso) { return new Date(iso).toLocaleString([], { weekday: "short", hour: "numeric", minute: "2-digit" }); }
+  function clockPost(data, ms) {
+    data.token = S.code;
+    if (CLOCK.indexOf("https://") !== 0) return Promise.reject(new Error("not connected"));
+    var ctrl = window.AbortController ? new AbortController() : null, t = ctrl ? setTimeout(function () { ctrl.abort(); }, ms || 30000) : null;
+    return fetch(CLOCK, { method: "POST", headers: { "Content-Type": "text/plain" }, body: JSON.stringify(data), signal: ctrl ? ctrl.signal : undefined })
+      .then(function (r) { return r.json(); }).then(function (r) { if (t) clearTimeout(t); return r; }, function (e) { if (t) clearTimeout(t); throw e; });
+  }
+  function localStamp(num, ev) { try { var a = JSON.parse(get(TODAY_K) || "{}"); return a.__day === new Date().toDateString() && a[num] ? a[num][ev] || "" : ""; } catch (e) { return ""; } }
+  function saveStamp(num, ev, at) { var a = {}; try { a = JSON.parse(get(TODAY_K) || "{}"); } catch (e) {} if (a.__day !== new Date().toDateString()) a = { __day: new Date().toDateString() }; (a[num] = a[num] || {})[ev] = at; put(TODAY_K, JSON.stringify(a)); }
+
+  // photos live in IndexedDB (too big for localStorage)
+  var idb = null;
+  function idbOpen() {
+    return new Promise(function (res, rej) {
+      if (idb) return res(idb);
+      if (!window.indexedDB) return rej(new Error("This browser can't save photos for later."));
+      var r = indexedDB.open("grBoard", 1);
+      r.onupgradeneeded = function () { r.result.createObjectStore("photos", { keyPath: "id" }); };
+      r.onsuccess = function () { idb = r.result; res(idb); };
+      r.onerror = function () { rej(r.error || new Error("Couldn't open photo storage.")); };
+    });
+  }
+  function idbDo(mode, fn) { return idbOpen().then(function (db) { return new Promise(function (res, rej) { var tx = db.transaction("photos", mode), st = tx.objectStore("photos"), r = fn(st); tx.oncomplete = function () { res(r && r.result); }; tx.onerror = tx.onabort = function () { rej(tx.error || new Error("Photo storage failed.")); }; }); }); }
+  function idbAll() { return idbDo("readonly", function (st) { return st.getAll(); }); }
+  function idbPut(x) { return idbDo("readwrite", function (st) { return st.put(x); }); }
+  function idbDel(id) { return idbDo("readwrite", function (st) { return st.delete(id); }); }
+  function loadPhotos() { return idbAll().then(function (a) { S.ph = a || []; refreshOut(); }, function () {}); }
+  function shrink(file) {
+    return new Promise(function (resolve, reject) {
+      var url = URL.createObjectURL(file), img = new Image();
+      img.onload = function () {
+        var w = img.naturalWidth, h = img.naturalHeight, k = Math.min(1, 1600 / Math.max(w, h)), c = document.createElement("canvas");
+        c.width = Math.max(1, Math.round(w * k)); c.height = Math.max(1, Math.round(h * k));
+        c.getContext("2d").drawImage(img, 0, 0, c.width, c.height); URL.revokeObjectURL(url);
+        c.toBlob(function (b) { b ? resolve(b) : reject(new Error("Couldn't prepare that photo.")); }, "image/jpeg", 0.72);
+      };
+      img.onerror = function () { URL.revokeObjectURL(url); reject(new Error("Couldn't read that photo.")); };
+      img.src = url;
+    });
+  }
+  function b64(blob) { return new Promise(function (res, rej) { var r = new FileReader(); r.onload = function () { res(String(r.result).split(",")[1] || ""); }; r.onerror = function () { rej(r.error); }; r.readAsDataURL(blob); }); }
+
+  function outCount() { return readJ(OB_STAMP).length + readJ(OB_NOTE).length + S.ph.length; }
+  function refreshOut() {
+    var n = outCount(), b = $("outBtn");
+    b.textContent = "📤 " + n + " waiting"; show(b, n > 0); b.classList.toggle("alert", n > 0);
+    if (S.sheetOut && !$("sheet").classList.contains("hidden")) openOutbox();
+  }
+  function setList(k, list) { put(k, JSON.stringify(list)); refreshOut(); }
+  function patchItem(kind, id, patch) {
+    if (kind === "photo") { S.ph.forEach(function (x) { if (x.id === id) { Object.keys(patch).forEach(function (q) { x[q] = patch[q]; }); idbPut(x).catch(function () {}); } }); refreshOut(); return; }
+    var k = kind === "stamp" ? OB_STAMP : OB_NOTE, l = readJ(k); l.forEach(function (x) { if (x.id === id) Object.keys(patch).forEach(function (q) { x[q] = patch[q]; }); }); setList(k, l);
+  }
+  function removeItem(kind, id) {
+    if (kind === "photo") { S.ph = S.ph.filter(function (x) { return x.id !== id; }); idbDel(id).catch(function () {}); refreshOut(); return; }
+    var k = kind === "stamp" ? OB_STAMP : OB_NOTE; setList(k, readJ(k).filter(function (x) { return x.id !== id; }));
+  }
+  function allItems() {
+    var a = [];
+    readJ(OB_STAMP).forEach(function (x) { a.push({ kind: "stamp", x: x }); });
+    readJ(OB_NOTE).forEach(function (x) { a.push({ kind: "note", x: x }); });
+    S.ph.forEach(function (x) { a.push({ kind: "photo", x: x }); });
+    return a;
+  }
+  function sendOne(it) {
+    var x = it.x, base = { req_id: x.id, at: x.at, job_id: x.job_id || "", number: x.number };
+    if (it.kind === "stamp") return clockPost(Object.assign(base, { action: "stamp", event: x.event }));
+    if (it.kind === "note") return clockPost(Object.assign(base, { action: "note", text: x.text }));
+    return b64(x.blob).then(function (d) { return clockPost(Object.assign(base, { action: "photo", name: x.name, mime: x.mime || "image/jpeg", data: d }), 90000); });
+  }
+  var flushing = false, ftimer = null;
+  function flushSoon() { if (ftimer) clearTimeout(ftimer); ftimer = setTimeout(function () { flush(); }, 800); }
+  function flush(onlyId) {
+    if (flushing || !S.code) return;
+    var items = allItems().filter(function (it) { return onlyId ? it.x.id === onlyId : !it.x.err; });
+    if (!items.length) return;
+    flushing = true; var i = 0, sent = 0, stamps = 0;
+    (function next() {
+      if (i >= items.length) { flushing = false; if (sent) { fmsg("✅ " + sent + " sent to the office" + (outCount() ? " · " + outCount() + " still waiting" : "") + ".", "ok"); if (stamps) load(true, true); } refreshOut(); return; }
+      var it = items[i++];
+      patchItem(it.kind, it.x.id, { sending: true });
+      sendOne(it).then(function (r) {
+        if (r && r.ok) { removeItem(it.kind, it.x.id); sent++; if (it.kind === "stamp") stamps++; }
+        else if (/access code|Too many wrong/.test((r && r.error) || "")) { patchItem(it.kind, it.x.id, { sending: false }); flushing = false; drop(KEY); S.code = ""; return showCode(r.error); }
+        else patchItem(it.kind, it.x.id, { sending: false, err: (r && r.error) || "unknown error" });
+        next();
+      }).catch(function () {
+        patchItem(it.kind, it.x.id, { sending: false, tries: (it.x.tries || 0) + 1 });
+        flushing = false; fmsg("📶 No signal — " + outCount() + " saved on this phone. They'll send when you're back in range.", "wait");
+      });
+    })();
+  }
+  var fmsgEl = null;
+  function fmsg(text, kind) { if (fmsgEl && document.body.contains(fmsgEl)) { fmsgEl.textContent = text; fmsgEl.className = "fmsg " + kind; show(fmsgEl, true); } }
+
+  function jobTools(sh, it) {
+    var box = el("div", "ftools");
+    box.appendChild(el("div", "ft", "Field tools — work with no signal"));
+    var row = el("div", "fbtns"), hcpVal = { omw: it.omw, start: it.started, finish: it.done };
+    ["omw", "start", "finish"].forEach(function (ev) {
+      var b = el("button", "fb " + ev), sm = el("small");
+      b.type = "button"; b.appendChild(document.createTextNode((ev === "omw" ? "🚗 " : ev === "start" ? "▶️ " : "✅ ") + EVL[ev])); b.appendChild(sm);
+      function paint() { var l = localStamp(it.number, ev); sm.textContent = l ? "pressed " + tfmt(l) : hcpVal[ev] ? "HCP " + hcpVal[ev] : ""; b.classList.toggle("done", !!(l || hcpVal[ev])); }
+      paint();
+      b.onclick = function () {
+        var prior = localStamp(it.number, ev);
+        if (prior && !confirm(EVL[ev] + " was already pressed at " + tfmt(prior) + " for job " + it.number + ". Press it again with the time right now?")) return;
+        var at = new Date().toISOString(), l = readJ(OB_STAMP);
+        l.push({ id: rid(), event: ev, at: at, job_id: it.job_id || "", number: it.number, customer: it.customer || "", tries: 0 }); setList(OB_STAMP, l);
+        saveStamp(it.number, ev, at); paint();
+        fmsg("⏱ " + EVL[ev] + " " + tfmt(at) + " saved. Sending…", "wait"); flushSoon();
+      };
+      row.appendChild(b);
+    });
+    box.appendChild(row);
+    var ta = el("textarea"); ta.placeholder = "Add a note to this job…"; ta.setAttribute("aria-label", "Note"); box.appendChild(ta);
+    var fr = el("div", "frow");
+    var nb = el("button", "btn", "Save note"); nb.type = "button";
+    nb.onclick = function () {
+      var t = ta.value.trim(); if (!t) return;
+      var l = readJ(OB_NOTE); l.push({ id: rid(), text: t, at: new Date().toISOString(), job_id: it.job_id || "", number: it.number, customer: it.customer || "", tries: 0 }); setList(OB_NOTE, l);
+      ta.value = ""; fmsg("📝 Note saved. Sending…", "wait"); flushSoon();
+    };
+    var pb = el("button", "btn", "📷 Add photos"); pb.type = "button";
+    var fi = el("input"); fi.type = "file"; fi.accept = "image/*"; fi.multiple = true; fi.className = "hidden";
+    pb.onclick = function () { fi.click(); };
+    fi.onchange = function () {
+      var files = Array.prototype.slice.call(fi.files || []); fi.value = ""; if (!files.length) return;
+      fmsg("Preparing " + files.length + " photo" + (files.length > 1 ? "s" : "") + "…", "wait");
+      var ok = 0, bad = "";
+      files.reduce(function (p, f) {
+        return p.then(function () { return shrink(f).then(function (blob) {
+          var at = new Date().toISOString(), x = { id: rid(), at: at, job_id: it.job_id || "", number: it.number, customer: it.customer || "", blob: blob, mime: "image/jpeg", name: "photo.jpg", tries: 0 };
+          return idbPut(x).then(function () { S.ph.push(x); ok++; });
+        }); }).catch(function (e) { bad = e.message; });
+      }, Promise.resolve()).then(function () {
+        refreshOut();
+        if (bad) fmsg("❌ " + bad + (ok ? " (" + ok + " saved)" : ""), "err"); else fmsg("📷 " + ok + " photo" + (ok > 1 ? "s" : "") + " saved. Sending…", "wait");
+        if (ok) flushSoon();
+      });
+    };
+    fr.appendChild(nb); fr.appendChild(pb); box.appendChild(fr); box.appendChild(fi);
+    fmsgEl = el("div", "fmsg hidden"); box.appendChild(fmsgEl);
+    sh.appendChild(box);
+  }
+
+  function openOutbox() {
+    closeMenu();
+    var sh = $("sheet"); sh.innerHTML = ""; sh.appendChild(el("div", "grab")); S.sheetIsUn = false; S.sheetOut = true;
+    sh.appendChild(el("h3", null, "Waiting to send"));
+    sh.appendChild(el("div", "kind", "Saved on this phone with the time you pressed. They send themselves when signal returns."));
+    var items = allItems();
+    if (!items.length) sh.appendChild(el("div", "kind", "Nothing waiting."));
+    items.forEach(function (it) {
+      var x = it.x, d = el("div", "ob");
+      var label = it.kind === "stamp" ? EVL[x.event] : it.kind === "note" ? "Note" : "Photo";
+      d.appendChild(el("b", null, label + " · job " + x.number + (x.customer ? " · " + x.customer : "")));
+      d.appendChild(el("div", "oz", dfmt(x.at) + (it.kind === "note" ? " — " + x.text.slice(0, 80) : "")));
+      d.appendChild(el("div", "oz" + (x.err ? " err" : ""), x.sending ? "Sending…" : x.err ? "❌ " + x.err : "Waiting for signal" + (x.tries ? " · tried " + x.tries + "×" : "")));
+      var oa = el("div", "oa");
+      var sn = el("button", null, "Send now"); sn.onclick = function () { patchItem(it.kind, x.id, { err: "" }); flush(x.id); }; if (x.sending) sn.disabled = true;
+      var dl = el("button", null, "Delete"); dl.onclick = function () { if (confirm("Delete this " + label.toLowerCase() + " for job " + x.number + "?")) removeItem(it.kind, x.id); };
+      oa.appendChild(sn); oa.appendChild(dl); d.appendChild(oa); sh.appendChild(d);
+    });
+    var acts = el("div", "acts");
+    var all = el("button", "btn pri", "Send all now"); all.onclick = function () { allItems().forEach(function (it) { if (it.x.err) patchItem(it.kind, it.x.id, { err: "" }); }); flush(); };
+    var cl = el("button", "btn", "Close"); cl.onclick = closeSheet; acts.appendChild(all); acts.appendChild(cl);
+    sh.appendChild(acts); show($("shade"), true); show(sh, true);
+  }
+  $("outBtn").onclick = openOutbox;
+  window.addEventListener("online", flushSoon);
+  setInterval(function () { if (document.visibilityState === "visible" && allItems().some(function (it) { return !it.x.err; })) flush(); }, 60000);
+
   // ---------- detail sheet ----------
-  function closeSheet() { show($("shade"), false); show($("sheet"), false); S.sheetIsUn = false; }
+  function closeSheet() { show($("shade"), false); show($("sheet"), false); S.sheetIsUn = false; S.sheetOut = false; }
   function kv(box, label, content) { var r = el("div", "kv"); r.appendChild(el("span", null, label)); var v = el("span"); if (typeof content === "string") v.textContent = content; else v.appendChild(content); r.appendChild(v); box.appendChild(r); }
   function link(href, text, blank) { var a = el("a", null, text); a.href = href; if (blank) { a.target = "_blank"; a.rel = "noopener"; } return a; }
   function openSheet(it, c, back) {
-    var sh = $("sheet"); sh.innerHTML = ""; sh.appendChild(el("div", "grab")); S.sheetIsUn = false;
+    var sh = $("sheet"); sh.innerHTML = ""; sh.appendChild(el("div", "grab")); S.sheetIsUn = false; S.sheetOut = false;
     var tm = S.data ? techMap() : {}, s = stateOf(it);
     sh.appendChild(el("h3", null, it.kind === "event" ? it.title : it.customer));
     var kind = it.kind === "job" ? "Job #" + (it.number || "?") : it.kind === "estimate" ? "Estimate #" + (it.number || "?") : "Event";
@@ -643,6 +849,7 @@
     if (it.estimate_amount) kv(sh, "Estimate", money(it.estimate_amount));
     var tt = [it.type, it.unit].filter(Boolean).join(" · "); if (tt) kv(sh, "Type", tt);
     if (it.tags && it.tags.length) kv(sh, "Tags", it.tags.join(", "));
+    if (it.kind === "job" && it.number) jobTools(sh, it);
     var acts = el("div", "acts");
     if (it.url) { var o = link(it.url, "Open in HCP", true); o.className = "btn"; acts.appendChild(o); }
     if (it.kind === "job" && it.number) { var mv = link("dispatch.html?job=" + encodeURIComponent(it.number), "Move / reassign"); mv.className = "btn pri"; acts.appendChild(mv); }
@@ -719,6 +926,7 @@
     // Show the last board straight away when it's the same day (instant open, works with no signal).
     try { var last = JSON.parse(get(LAST) || "null"); if (last && last.date === S.date) { S.data = last; render(); } } catch (e) {}
     renderTop(); sizeBoard(); load(false);
+    refreshOut(); loadPhotos().then(flushSoon);
   }
   $("codeGo").onclick = function () { var c = $("code").value.trim(); if (c) start(c); };
   $("code").onkeydown = function (e) { if (e.key === "Enter") $("codeGo").click(); };

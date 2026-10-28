@@ -32,6 +32,8 @@
  *   init   {}                              → who, today's jobs for this tech with HCP's current timestamps
  *   job    {number}                        → one job by number (customer, address, timestamps)
  *   stamp  {req_id, event, at, job_id | number, note} → records the press; replays with the same req_id are no-ops
+ *   note   {req_id, at, job_id | number, text}        → adds a note to the HCP job (Board page, works offline via its outbox)
+ *   photo  {req_id, at, job_id | number, name, mime, data (base64)} → attaches a photo to the HCP job
  */
 
 const CK = {
@@ -63,6 +65,8 @@ function clockAction_(p) {
       case 'init':  return Object.assign({ ok: true }, ckInit_(who));
       case 'job':   return { ok: true, job: ckJobOut_(ckJobByNumber_(p.number)) };
       case 'stamp': return ckStamp_(p, who);
+      case 'note':  return ckNote_(p, who);
+      case 'photo': return ckPhoto_(p, who);
       default:      throw new Error('Unknown action.');
     }
   } catch (err) {
@@ -137,6 +141,70 @@ function ckStampLocked_(p, who) {
   console.log(`clock ✅ ${CK.EVENTS[event]} job ${out.number} ${pressed} by ${who}; hcp=${hcpNow || 'none'}; note=${noted}`);
   return { ok: true, message: `✅ ${CK.EVENTS[event]} ${pressed} recorded for job ${out.number}` + (hcpNow ? ` (HCP already has ${hcpNow}).` : '. The office will set HCP to this time.'),
            job: out, event: event, pressed: pressed, hcp_had: hcpNow, logged: logged, noted: noted };
+}
+
+/* ───────────── notes and photos from the Board (queued on the phone, sent when signal returns) ───────────── */
+
+function ckNote_(p, who) {
+  const reqId = String(p.req_id || '').replace(/[^\w-]/g, '').slice(0, 64);
+  if (reqId) { const prior = ckRecall_(reqId); if (prior) return prior; }
+  const text = String(p.text || '').trim().slice(0, 4000);
+  if (!text) throw new Error('That note is empty.');
+  const result = withLock_(() => {
+    const job = p.job_id ? hcp_('get', '/jobs/' + encodeURIComponent(p.job_id)) : ckJobByNumber_(p.number);
+    const at = ckParse_(p.at) || new Date(), tz = ckTz_();
+    const late = Date.now() - at.getTime() > 5 * 60000;
+    hcp_('post', `/jobs/${job.id}/notes`, { content: `📝 ${who} — ${Utilities.formatDate(at, tz, 'EEE MMM d, h:mm a')}` + (late ? ' (written with no signal, sent later)' : '') + `\n${text}` });
+    const out = ckJobOut_(job);
+    console.log(`clock note ✅ job ${out.number} by ${who}`);
+    return { ok: true, message: `✅ Note added to job ${out.number}.`, job: out, event: 'note', pressed: '' };
+  });
+  if (reqId) ckRemember_(reqId, result);
+  return result;
+}
+
+function ckPhoto_(p, who) {
+  const reqId = String(p.req_id || '').replace(/[^\w-]/g, '').slice(0, 64);
+  if (reqId) { const prior = ckRecall_(reqId); if (prior) return prior; }
+  const mime = String(p.mime || 'image/jpeg');
+  if (!/^image\/(jpeg|png|webp|heic)$/i.test(mime)) throw new Error('Photos only (JPG, PNG, WebP).');
+  if (!p.data) throw new Error('No photo came through.');
+  const result = withLock_(() => {
+    const job = p.job_id ? hcp_('get', '/jobs/' + encodeURIComponent(p.job_id)) : ckJobByNumber_(p.number);
+    const at = ckParse_(p.at) || new Date(), tz = ckTz_();
+    const ext = /png/i.test(mime) ? 'png' : /webp/i.test(mime) ? 'webp' : 'jpg';
+    const name = 'job' + String(job.invoice_number || '') + '_' + Utilities.formatDate(at, tz, 'yyyyMMdd_HHmm') + '_' + who.replace(/[^A-Za-z]/g, '').slice(0, 12) + '_' + String(p.req_id || '').slice(-4) + '.' + ext;
+    const blob = Utilities.newBlob(Utilities.base64Decode(p.data), mime, name);
+    const res = UrlFetchApp.fetch(CK.BASE + `/jobs/${job.id}/attachments`, { method: 'post', headers: { Authorization: 'Token ' + apiKey_(), Accept: 'application/json' }, payload: { file: blob }, muteHttpExceptions: true });
+    const code = res.getResponseCode();
+    if (code < 200 || code >= 300) throw new Error(`HCP attachment → ${code}: ${res.getContentText().slice(0, 200)}`);
+    const out = ckJobOut_(job);
+    console.log(`clock photo ✅ job ${out.number} ${name} by ${who}`);
+    return { ok: true, message: `✅ Photo added to job ${out.number}.`, job: out, event: 'photo', pressed: '' };
+  });
+  if (reqId) ckRemember_(reqId, result);
+  return result;
+}
+
+/**
+ * Run from the editor BEFORE relying on the Board's notes and photos. Set the job number of the "Test Customer"
+ * test job below. It adds one clearly-labelled test note and one tiny test photo to that job, then says whether each worked.
+ */
+function verifyNotesAndPhotos() {
+  const TEST_JOB_NUMBER = '';   // ← the job number of a job on the "Test Customer" (not a real customer)
+  if (!TEST_JOB_NUMBER) { console.log('❌ Type a test job number into TEST_JOB_NUMBER at the top of verifyNotesAndPhotos(), then run it again.'); return; }
+  const job = ckJobByNumber_(TEST_JOB_NUMBER);
+  const cust = job.customer || {};
+  console.log(`Job ${job.invoice_number} · customer: ${[cust.first_name, cust.last_name].filter(Boolean).join(' ')} — make sure this is the Test Customer.`);
+  try {
+    hcp_('post', `/jobs/${job.id}/notes`, { content: '🧪 Board access test — safe to ignore.' });
+    console.log('✅ Notes: POST /jobs/{id}/notes works.');
+  } catch (e) { console.log('❌ Notes: ' + e.message); }
+  try {
+    const png = Utilities.newBlob(Utilities.base64Decode('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg=='), 'image/png', 'board-access-test.png');
+    const res = UrlFetchApp.fetch(CK.BASE + `/jobs/${job.id}/attachments`, { method: 'post', headers: { Authorization: 'Token ' + apiKey_() }, payload: { file: png }, muteHttpExceptions: true });
+    console.log(res.getResponseCode() < 300 ? `✅ Photos: POST /jobs/{id}/attachments works (${res.getResponseCode()}). Check the job in HCP for board-access-test.png.` : `❌ Photos: HCP said ${res.getResponseCode()} — ${res.getContentText().slice(0, 200)}`);
+  } catch (e) { console.log('❌ Photos: ' + e.message); }
 }
 
 /* ───────────── nightly reconciliation ───────────── */
