@@ -375,3 +375,29 @@ What HCP does on its own (not fixable from our side):
 - Test records from the Oct 21 checks to delete in HCP: customers "ZZBilling Test" and "ZZBilling2 Test", and the
   addresses "1 Billing Test A" / "2 Billing Test B" on Test Customer (gone when Test Customer is deleted). Job #49804
   now has ZZ test line items (also on the delete list already).
+
+## Labor cost in HCP — the hybrid (2026-10-28)
+
+HCP's **Labor cost** (job costing, profit margin, hours per tech) comes from one place only: each tech's
+On my way / Start / Finish times in the HCP app × that tech's **fully loaded rate**. The public API can't write
+those times, timesheets or labor cost, and anything posted through the API lands under Material/Service cost
+instead — so HCP's buttons are the system of record and the Job Clock is the check.
+
+**One-time setup in HCP (by hand, before trusting the numbers):**
+1. Settings → Jobs → Costs & Materials: turn on **Travel and time on jobs** and **Show job costing breakdown**.
+2. Team → each tech → pencil → **Pay**: base pay + Additional costs (taxes, insurance, benefits) = fully loaded
+   rate. Rates are **not** applied to time tracked before they were set — do this first.
+3. Techs press OMW / Start / Finish in the HCP app on every job (the page's Job Clock is a backup, not a
+   replacement). Don't post labor as job inputs — it would count twice.
+
+**What the Job Clock does now (`dailyReport`, every morning 6–7 AM, replaces the Monday email):**
+- Looks at every job due in the last 3 days and emails REPORT_TO:
+  - **No labor cost** — finished in HCP but no Start/Finish there, so it's costing $0 labor. When someone
+    pressed the page buttons, the email gives the travel and job time to type into **Field Tech Details**
+    (job → tech's row → Edit → Total Travel Time / Total Job Time) with a direct link; otherwise "ask the tech".
+  - **Times differ** — HCP has times but a page press is 15+ min away from them.
+  - **Still open** — the day is over and Finish was never pressed in HCP.
+- The email's hidden `JOBCLOCK-DATA` block still feeds the Chrome `apply-job-clock-times` run if Claude is
+  asked to type the times in.
+- Setup: run `installDailyTrigger()` once in the Job Clock editor (it removes the Monday trigger).
+  `weeklyReport()` is still there for a manual 7-day sweep.

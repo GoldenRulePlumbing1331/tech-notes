@@ -7,8 +7,14 @@
  * real times where it can and tells the office what to fix:
  *   • a row in the "Job Clock" spreadsheet (Log tab)
  *   • a private note on the HCP job ("⏱ ON MY WAY 8:02 AM — pressed on the voice page by Mike Smith")
- *   • a Monday-morning email to REPORT_TO listing every press where HCP's own timestamp is missing or
- *     differs by more than REPORT_TOLERANCE_MIN, with the time to enter.
+ *   • an email every morning to REPORT_TO (dailyReport): every finished job from the last few days where HCP
+ *     has no Start/Finish — so it carries NO labor cost — with the travel/job time to type into Field Tech
+ *     Details when the page has it; plus times that differ by more than REPORT_TOLERANCE_MIN and jobs still open.
+ *
+ * Labor cost in HCP = HCP's own tracked time × the tech's fully loaded rate (Team → Team member → Pay), with
+ * Settings → Jobs → Costs & Materials → "Travel and time on jobs" on. Rates are not applied to time that was
+ * already tracked, so set every tech's rate before relying on the numbers. Don't also post labor as job inputs —
+ * that would count it twice.
  *
  * ───────────── ONE-TIME SETUP ─────────────
  *  1. script.google.com → New project "HCP Job Clock" → paste this file (owner: golden.rule.calendar@gmail.com).
@@ -19,7 +25,7 @@
  *       REPORT_TO    = office email(s) for the Monday report, comma-separated
  *       REPORT_CC    = optional
  *  4. Run setupSheet() → creates the "Job Clock" spreadsheet and saves its ID.
- *  5. Run verifyAccess() (read-only). Run installWeeklyTrigger() once (Monday 6–7 AM report).
+ *  5. Run verifyAccess() (read-only). Run installDailyTrigger() once (6–7 AM report every day).
  *  6. Deploy → Web app (Execute as Me, Anyone) → URL into config.js as "clock".
  *
  * Actions (POST JSON, all need "token"):
@@ -35,6 +41,7 @@ const CK = {
   EVENTS: { omw: 'ON MY WAY', start: 'START', finish: 'FINISH' },
   HCP_FIELD: { omw: 'on_my_way_at', start: 'started_at', finish: 'completed_at' },
   REPORT_TOLERANCE_MIN: 15,
+  REPORT_BACK_DAYS: 3,        // dailyReport re-checks the last 3 days so late presses and late Finishes get caught
   JOB_SCAN_PAGES: 15,
   CODE_LENGTH: 8,
 };
@@ -69,13 +76,13 @@ function ckInit_(who) {
   let jobs = [];
   if (emp) {
     const tz = ckTz_();
-    const day = Utilities.formatDate(new Date(), tz, 'yyyy-MM-dd');
+    const day = Utilities.formatDate(ckNow_(), tz, 'yyyy-MM-dd');
     const start = Utilities.parseDate(day + ' 00:00', tz, 'yyyy-MM-dd HH:mm'), end = new Date(start.getTime() + 86400000 - 1);
     const iso = d => Utilities.formatDate(d, 'UTC', "yyyy-MM-dd'T'HH:mm:ss'Z'");
     const r = hcp_('get', `/jobs?scheduled_start_min=${encodeURIComponent(iso(start))}&scheduled_start_max=${encodeURIComponent(iso(end))}&employee_ids[]=${encodeURIComponent(emp.id)}&page_size=50`);
     jobs = (r.jobs || []).map(ckJobOut_).sort((a, b) => (a.start || '').localeCompare(b.start || ''));
   }
-  return { who: who, today: Utilities.formatDate(new Date(), ckTz_(), 'yyyy-MM-dd'), jobs: jobs, employee_known: !!emp };
+  return { who: who, today: Utilities.formatDate(ckNow_(), ckTz_(), 'yyyy-MM-dd'), jobs: jobs, employee_known: !!emp };
 }
 
 function ckJobOut_(j) {
@@ -131,85 +138,158 @@ function ckStampLocked_(p, who) {
            job: out, event: event, pressed: pressed, hcp_had: hcpNow, logged: logged, noted: noted };
 }
 
-/* ───────────── Monday report ───────────── */
+/* ───────────── nightly reconciliation ───────────── */
 
-/** Emails REPORT_TO every press from the last 7 days where HCP's own timestamp is missing or off. Safe to re-run. */
-function weeklyReport() {
-  const sh = ckSheet_('Log');
-  if (!sh || sh.getLastRow() < 2) { console.log('No presses logged.'); return; }
+/**
+ * Labor cost in HCP comes only from HCP's own On my way / Start / Finish times × each tech's fully loaded rate
+ * (Team → Pay). The API can't write those times, so HCP's buttons are the system of record and this report is
+ * the check. Every morning it looks at every job that was due in the last REPORT_BACK_DAYS and sorts them into:
+ *   • NO LABOR COST — the job is finished but HCP never got a Start/Finish, so it carries $0 labor. If the tech
+ *     pressed the page buttons, the email gives the travel/job time to type into Field Tech Details (with a link).
+ *   • TIMES DIFFER — HCP has times but the page press is REPORT_TOLERANCE_MIN+ minutes away from them.
+ *   • STILL OPEN — the day is over and the job isn't finished in HCP (Finish never pressed).
+ *   • matched — HCP's times are there and agree with the page (or nobody used the page).
+ * Only unfinished items are repeated day to day. Safe to re-run.
+ */
+function dailyReport() { ckReport_(CK.REPORT_BACK_DAYS); }
+function weeklyReport() { ckReport_(7); }   // kept for a manual wider sweep
+
+function ckNow_() { return new Date(); }
+function ckReport_(days) {
   const tz = ckTz_();
-  const rows = sh.getRange(2, 1, sh.getLastRow() - 1, CK.LOG_HEADERS.length).getValues();
-  const since = Date.now() - 7 * 86400000;
-  const byJob = {};
+  const now = ckNow_();
+  const today = Utilities.formatDate(now, tz, 'yyyy-MM-dd');
+  const from = new Date(Utilities.parseDate(today + ' 00:00', tz, 'yyyy-MM-dd HH:mm').getTime() - days * 86400000);
+  const until = new Date(Utilities.parseDate(today + ' 00:00', tz, 'yyyy-MM-dd HH:mm').getTime() - 1);   // up to the end of yesterday
+  const iso = d => Utilities.formatDate(d, 'UTC', "yyyy-MM-dd'T'HH:mm:ss'Z'");
+
+  // 1. Every job due in the window (one entry per job, not per appointment)
+  const jobs = {};
+  for (let page = 1; page <= 10; page++) {
+    const r = hcp_('get', `/jobs?scheduled_start_min=${encodeURIComponent(iso(from))}&scheduled_start_max=${encodeURIComponent(iso(until))}&page=${page}&page_size=100`);
+    (r.jobs || []).forEach(j => { jobs[j.id] = j; });
+    if (!(r.jobs || []).length || page >= (r.total_pages || 0)) break;
+  }
+
+  // 2. Page presses in the window (plus any job a press mentions that the schedule search missed)
+  const sh = ckSheet_('Log');
+  const presses = {};   // jobId → tech → event → {pressed, row, note}
+  const rows = sh && sh.getLastRow() > 1 ? sh.getRange(2, 1, sh.getLastRow() - 1, CK.LOG_HEADERS.length).getValues() : [];
   rows.forEach((r, i) => {
-    const sent = r[0] instanceof Date ? r[0].getTime() : Date.parse(r[0]);
-    if (!(sent >= since) || !r[7]) return;
-    (byJob[r[7]] = byJob[r[7]] || []).push({ row: i + 2, pressed: r[1] instanceof Date ? r[1] : new Date(r[1]), tech: r[2], number: r[3], customer: r[4], event: r[5], note: r[8], jobId: r[7] });
+    const pressed = r[1] instanceof Date ? r[1] : ckParse_(r[1]);
+    if (!pressed || !r[7] || pressed < from || pressed > now) return;
+    const k = ckEventKey_(r[5]);
+    const byTech = presses[r[7]] = presses[r[7]] || {};
+    const ev = byTech[r[2]] = byTech[r[2]] || {};
+    if (!ev[k] || pressed > ev[k].pressed) ev[k] = { pressed: pressed, row: i + 2, note: r[8] || '' };   // last press wins
+    if (!jobs[r[7]]) { try { jobs[r[7]] = hcp_('get', '/jobs/' + encodeURIComponent(r[7])); } catch (e) { console.warn('job ' + r[7] + ': ' + e.message); } }
   });
-  const fix = [], ok = [], apply = [];
-  Object.keys(byJob).forEach(jobId => {
-    let job = null;
-    try { job = hcp_('get', '/jobs/' + encodeURIComponent(jobId)); } catch (e) { console.warn('job ' + jobId + ': ' + e.message); }
-    const ts = (job && job.work_timestamps) || {};
-    // keep the LAST press per event (a tech can re-press by mistake)
-    const last = {};
-    byJob[jobId].forEach(s => { const k = ckEventKey_(s.event); if (!last[k] || s.pressed > last[k].pressed) last[k] = s; });
-    // Durations for HCP's "Field tech details" panel (travel = On my way → Start, job = Start → Finish).
-    // Page stamps win; HCP's own timestamp fills a gap. Carried in the email for the Monday Chrome run.
-    const t = k => (last[k] && last[k].pressed) || (ts[CK.HCP_FIELD[k]] ? ckParse_(ts[CK.HCP_FIELD[k]]) : null);
-    const tOmw = t('omw'), tStart = t('start'), tFinish = t('finish');
-    const first = byJob[jobId][0];
-    const emp = ckEmployeeByName_(first.tech);
-    if (job && emp && tStart && (tOmw || tFinish)) {
-      const mins = (a, b) => a && b && b > a ? Math.round((b - a) / 60000) : 0;
-      apply.push({ job: first.number, job_id: jobId, customer: first.customer, tech: first.tech, pro_id: emp.id,
+
+  // 3. Sort each job
+  const noLabor = [], differ = [], open = [], matched = [], apply = [];
+  const fmt = d => d ? Utilities.formatDate(d, tz, 'EEE MM/d h:mm a') : '—';
+  const mins = (a, b) => a && b && b > a ? Math.round((b - a) / 60000) : 0;
+  Object.keys(jobs).forEach(id => {
+    const j = jobs[id];
+    const status = String(j.work_status || '');
+    if (/cancel|needs scheduling/.test(status)) return;
+    const ts = j.work_timestamps || {};
+    const hcp = { omw: ckParse_(ts.on_my_way_at), start: ckParse_(ts.started_at), finish: ckParse_(ts.completed_at) };
+    const done = /complete/.test(status);
+    const c = j.customer || {};
+    const base = { number: String(j.invoice_number || ''), job_id: id, customer: [c.first_name, c.last_name].filter(Boolean).join(' ') || c.company || '',
+      techs: (j.assigned_employees || []).map(e => [e.first_name, e.last_name].filter(Boolean).join(' ')).join(', ') || 'unassigned',
+      due: fmt(ckParse_((j.schedule || {}).scheduled_start)), status: status, url: 'https://pro.housecallpro.com/app/jobs/' + id,
+      hcp: { omw: fmt(hcp.omw), start: fmt(hcp.start), finish: fmt(hcp.finish) } };
+    const byTech = presses[id] || {};
+    const techNames = Object.keys(byTech);
+
+    // Travel / job time to type in, per tech who pressed the page buttons (HCP's own time fills a gap)
+    techNames.forEach(tech => {
+      const ev = byTech[tech];
+      const t = k => (ev[k] && ev[k].pressed) || hcp[k] || null;
+      const tOmw = t('omw'), tStart = t('start'), tFinish = t('finish');
+      const emp = ckEmployeeByName_(tech);
+      if (emp && tStart && tFinish) apply.push({ job: base.number, job_id: id, customer: base.customer, tech: tech, pro_id: emp.id,
         travel_min: mins(tOmw, tStart), job_min: mins(tStart, tFinish),
-        edit_url: `https://pro.housecallpro.com/app/jobs/${jobId}/technician_time_tracking_details/edit?job_uuid=${jobId}&pro_uuid=${emp.id}`,
-        source: ['omw', 'start', 'finish'].map(k => k + ':' + (last[k] ? 'page' : ts[CK.HCP_FIELD[k]] ? 'hcp' : 'none')).join(' ') });
-    }
-    Object.keys(last).forEach(k => {
-      const s = last[k];
-      const hcpRaw = ts[CK.HCP_FIELD[k]];
-      const hcpAt = hcpRaw ? ckParse_(hcpRaw) : null;
-      const diffMin = hcpAt ? Math.abs(hcpAt.getTime() - s.pressed.getTime()) / 60000 : null;
-      const entry = { number: s.number, customer: s.customer || ((job && job.customer) ? [job.customer.first_name, job.customer.last_name].filter(Boolean).join(' ') : ''), tech: s.tech, event: CK.EVENTS[k],
-        page: Utilities.formatDate(s.pressed, tz, 'EEE MM/d h:mm a'), hcp: hcpAt ? Utilities.formatDate(hcpAt, tz, 'EEE MM/d h:mm a') : '—', note: s.note || '',
-        status: !hcpAt ? 'MISSING in HCP' : diffMin > CK.REPORT_TOLERANCE_MIN ? `off by ${Math.round(diffMin)} min` : 'ok', row: s.row };
-      (entry.status === 'ok' ? ok : fix).push(entry);
+        edit_url: `https://pro.housecallpro.com/app/jobs/${id}/technician_time_tracking_details/edit?job_uuid=${id}&pro_uuid=${emp.id}`,
+        source: ['omw', 'start', 'finish'].map(k => k + ':' + (ev[k] ? 'page' : hcp[k] ? 'hcp' : 'none')).join(' ') });
     });
+
+    const dueAt = ckParse_((j.schedule || {}).scheduled_start);
+    if (!hcp.start || !hcp.finish) {
+      if (!done && dueAt && dueAt > until) return;   // today's job, still going — nothing to say yet
+      if (done) {
+        const have = apply.filter(a => a.job_id === id);
+        noLabor.push(Object.assign({}, base, { enter: have, missing: !hcp.start && !hcp.finish ? 'Start and Finish' : !hcp.start ? 'Start' : 'Finish' }));
+      } else open.push(base);
+      return;
+    }
+    // HCP has its times: compare to the page presses
+    let worst = null;
+    techNames.forEach(tech => Object.keys(byTech[tech]).forEach(k => {
+      if (!hcp[k]) return;
+      const d = Math.abs(hcp[k].getTime() - byTech[tech][k].pressed.getTime()) / 60000;
+      if (d > CK.REPORT_TOLERANCE_MIN && (!worst || d > worst.min)) worst = { min: Math.round(d), tech: tech, event: CK.EVENTS[k], page: fmt(byTech[tech][k].pressed), hcp: fmt(hcp[k]), note: byTech[tech][k].note };
+    }));
+    if (worst) differ.push(Object.assign({}, base, worst, { enter: apply.filter(a => a.job_id === id) }));
+    else matched.push(base);
   });
-  const weekOf = Utilities.formatDate(new Date(since), tz, 'MMM d') + ' – ' + Utilities.formatDate(new Date(), tz, 'MMM d');
+  const num = x => Number(String(x.number).split('-')[0]) || 0;
+  [noLabor, differ, open, matched].forEach(l => l.sort((a, b) => num(a) - num(b)));
+
+  // 4. Email
   const to = props_().getProperty('REPORT_TO');
-  if (!to) { console.log(`REPORT_TO not set. ${fix.length} to fix, ${ok.length} ok.`); return; }
-  const esc = s => String(s == null ? '' : s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
-  const order = { 'ON MY WAY': 0, 'START': 1, 'FINISH': 2 };
-  fix.sort((a, b) => a.number.localeCompare(b.number) || order[a.event] - order[b.event]);
+  const span = Utilities.formatDate(from, tz, 'EEE MM/d') + ' – ' + Utilities.formatDate(until, tz, 'EEE MM/d');
+  console.log(`Job Clock ${span}: ${noLabor.length} with no labor cost, ${differ.length} differ, ${open.length} still open, ${matched.length} matched.`);
+  if (!to) { console.log('REPORT_TO not set — nothing emailed.'); return; }
+  const esc = x => String(x == null ? '' : x).replace(/[&<>"]/g, ch => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[ch]));
+  const F = 'font-family:Arial,sans-serif';
+  const table = (heads, body) => `<table border="1" cellpadding="6" style="border-collapse:collapse;${F};font-size:14px"><tr>${heads.map(h => '<th>' + esc(h) + '</th>').join('')}</tr>${body}</table>`;
+  const enterCell = x => x.enter.length
+    ? x.enter.map(a => `<b>${esc(a.tech)}</b>: travel ${ckHm_(a.travel_min)}, job ${ckHm_(a.job_min)} — <a href="${esc(a.edit_url)}">enter</a>`).join('<br>')
+    : `no page presses either — ask ${esc(x.techs)}`;
   const sheetUrl = 'https://docs.google.com/spreadsheets/d/' + props_().getProperty('CLOCK_SHEET_ID');
-  const html = [`<p style="font-family:Arial,sans-serif">Job Clock — week of ${esc(weekOf)}. <b>${fix.length}</b> time(s) to enter or fix in HCP; ${ok.length} already match.</p>`,
-    fix.length ? '<table border="1" cellpadding="6" style="border-collapse:collapse;font-family:Arial,sans-serif;font-size:14px"><tr><th>Job</th><th>Customer</th><th>Tech</th><th>Button</th><th>Pressed on the page</th><th>HCP shows</th><th>Action</th><th>Note</th></tr>' +
-      fix.map(f => `<tr><td>${esc(f.number)}</td><td>${esc(f.customer)}</td><td>${esc(f.tech)}</td><td>${esc(f.event)}</td><td><b>${esc(f.page)}</b></td><td>${esc(f.hcp)}</td><td>${esc(f.status)}</td><td>${esc(f.note)}</td></tr>`).join('') + '</table>' : '<p style="font-family:Arial,sans-serif">Nothing to fix this week.</p>',
-    `<p style="font-family:Arial,sans-serif;font-size:12px;color:#666">Each job also has a private "⏱" note with the time. Full log: <a href="${sheetUrl}">Job Clock sheet</a>.</p>`,
-    apply.length ? `<h3 style="font-family:Arial,sans-serif;font-size:14px">Field tech details to enter (travel / job time)</h3><table border="1" cellpadding="6" style="border-collapse:collapse;font-family:Arial,sans-serif;font-size:14px"><tr><th>Job</th><th>Tech</th><th>Travel</th><th>Job time</th><th></th></tr>` +
-      apply.map(a => `<tr><td>${esc(a.job)} ${esc(a.customer)}</td><td>${esc(a.tech)}</td><td>${ckHm_(a.travel_min)}</td><td>${ckHm_(a.job_min)}</td><td><a href="${esc(a.edit_url)}">open in HCP</a></td></tr>`).join('') + '</table>' +
-      `<p style="font-family:Arial,sans-serif;font-size:12px;color:#666">To have Claude enter these: open a Claude chat with Chrome connected and run <b>apply-job-clock-times</b>.</p>` +
-      `<pre style="font-size:10px;color:#999">JOBCLOCK-DATA: ${esc(JSON.stringify({ week: weekOf, apply: apply }))}</pre>` : ''].join('\n');
-  const text = `Job Clock — week of ${weekOf}: ${fix.length} time(s) to enter or fix in HCP; ${ok.length} already match.\n\n` +
-    fix.map(f => `Job ${f.number} (${f.customer}) — ${f.tech} — ${f.event}: page ${f.page} | HCP ${f.hcp} → ${f.status}${f.note ? ' — ' + f.note : ''}`).join('\n') +
-    (apply.length ? `\n\nField tech details to enter:\n` + apply.map(a => `Job ${a.job} (${a.customer}) — ${a.tech}: travel ${ckHm_(a.travel_min)}, job ${ckHm_(a.job_min)} — ${a.edit_url}`).join('\n') + `\n\nJOBCLOCK-DATA: ${JSON.stringify({ week: weekOf, apply: apply })}` : '') + `\n\n${sheetUrl}`;
-  GmailApp.sendEmail(to, `Job Clock — ${fix.length} time${fix.length === 1 ? '' : 's'} to update in HCP (week of ${weekOf})`, text,
-    { cc: props_().getProperty('REPORT_CC') || '', htmlBody: html, name: 'Golden Rule Job Clock' });
-  const stamp = Utilities.formatDate(new Date(), tz, 'yyyy-MM-dd');
-  fix.concat(ok).forEach(f => { try { sh.getRange(f.row, 10).setValue(stamp + (f.status === 'ok' ? ' ok' : ' ' + f.status)); } catch (_) {} });
-  console.log(`✅ Report sent to ${to}: ${fix.length} to fix, ${ok.length} ok.`);
+  const html = [
+    `<p style="${F}">Job Clock — ${esc(span)}. <b>${noLabor.length}</b> finished job(s) carry no labor cost in HCP; ${differ.length} have times that differ; ${open.length} still open; ${matched.length} fine.</p>`,
+    noLabor.length ? `<h3 style="${F};font-size:15px;color:#b00">No labor cost — HCP never got ${'Start/Finish'} (${noLabor.length})</h3>` +
+      table(['Job', 'Customer', 'Tech(s)', 'Due', 'HCP is missing', 'Type into Field Tech Details'],
+        noLabor.map(x => `<tr><td><a href="${esc(x.url)}">${esc(x.number)}</a></td><td>${esc(x.customer)}</td><td>${esc(x.techs)}</td><td>${esc(x.due)}</td><td>${esc(x.missing)}</td><td>${enterCell(x)}</td></tr>`).join('')) : `<p style="${F}">Every finished job has HCP time on it. 👍</p>`,
+    differ.length ? `<h3 style="${F};font-size:15px">Times differ from the page (${differ.length})</h3>` +
+      table(['Job', 'Customer', 'Tech', 'Button', 'Page', 'HCP', 'Off by', 'If the page is right'],
+        differ.map(x => `<tr><td><a href="${esc(x.url)}">${esc(x.number)}</a></td><td>${esc(x.customer)}</td><td>${esc(x.tech)}</td><td>${esc(x.event)}</td><td><b>${esc(x.page)}</b></td><td>${esc(x.hcp)}</td><td>${x.min} min</td><td>${enterCell(x)}</td></tr>`).join('')) : '',
+    open.length ? `<h3 style="${F};font-size:15px">Still open in HCP (${open.length})</h3>` +
+      table(['Job', 'Customer', 'Tech(s)', 'Due', 'Status', 'HCP has'],
+        open.map(x => `<tr><td><a href="${esc(x.url)}">${esc(x.number)}</a></td><td>${esc(x.customer)}</td><td>${esc(x.techs)}</td><td>${esc(x.due)}</td><td>${esc(x.status)}</td><td>OMW ${esc(x.hcp.omw)} · Start ${esc(x.hcp.start)}</td></tr>`).join('')) : '',
+    `<p style="${F};font-size:12px;color:#666">Labor cost = HCP's tracked time × the tech's fully loaded rate (Team → Pay); typing the time into Field Tech Details fixes it. Full log: <a href="${sheetUrl}">Job Clock sheet</a>.</p>`,
+    apply.length ? `<pre style="font-size:10px;color:#999">JOBCLOCK-DATA: ${esc(JSON.stringify({ span: span, apply: apply.filter(a => noLabor.concat(differ).some(x => x.job_id === a.job_id)) }))}</pre>` : '',
+  ].join('\n');
+  const text = `Job Clock — ${span}: ${noLabor.length} finished job(s) with no labor cost in HCP; ${differ.length} differ; ${open.length} still open; ${matched.length} fine.\n\n` +
+    (noLabor.length ? 'NO LABOR COST:\n' + noLabor.map(x => `Job ${x.number} (${x.customer}) — ${x.techs} — missing ${x.missing}` + (x.enter.length ? x.enter.map(a => `; ${a.tech}: travel ${ckHm_(a.travel_min)}, job ${ckHm_(a.job_min)} ${a.edit_url}`).join('') : '; no page presses — ask the tech')).join('\n') + '\n\n' : '') +
+    (differ.length ? 'TIMES DIFFER:\n' + differ.map(x => `Job ${x.number} (${x.customer}) — ${x.tech} ${x.event}: page ${x.page} | HCP ${x.hcp} (${x.min} min) ${x.url}`).join('\n') + '\n\n' : '') +
+    (open.length ? 'STILL OPEN:\n' + open.map(x => `Job ${x.number} (${x.customer}) — ${x.techs} — ${x.status} ${x.url}`).join('\n') + '\n\n' : '') + sheetUrl;
+  const subject = noLabor.length ? `Job Clock — ${noLabor.length} job${noLabor.length === 1 ? '' : 's'} with no labor cost in HCP (${span})` : `Job Clock — all finished jobs have time in HCP (${span})`;
+  GmailApp.sendEmail(to, subject, text, { cc: props_().getProperty('REPORT_CC') || '', htmlBody: html, name: 'Golden Rule Job Clock' });
+
+  // 5. Mark the log rows this run looked at
+  const stamp = Utilities.formatDate(now, tz, 'yyyy-MM-dd');
+  const verdict = {};
+  noLabor.forEach(x => { verdict[x.job_id] = 'no labor cost'; }); differ.forEach(x => { verdict[x.job_id] = 'differs'; }); open.forEach(x => { verdict[x.job_id] = 'open'; }); matched.forEach(x => { verdict[x.job_id] = 'ok'; });
+  Object.keys(presses).forEach(id => Object.keys(presses[id]).forEach(tech => Object.keys(presses[id][tech]).forEach(k => {
+    try { if (sh) sh.getRange(presses[id][tech][k].row, 10).setValue(stamp + ' ' + (verdict[id] || 'ok')); } catch (_) {}
+  })));
+  console.log(`✅ Report sent to ${to}.`);
 }
 function ckHm_(min) { min = Number(min) || 0; return Math.floor(min / 60) + 'h ' + String(min % 60).padStart(2, '0') + 'm'; }
 function ckEventKey_(label) { return Object.keys(CK.EVENTS).filter(k => CK.EVENTS[k] === label)[0] || 'omw'; }
 
-function installWeeklyTrigger() {
-  ScriptApp.getProjectTriggers().filter(t => t.getHandlerFunction() === 'weeklyReport').forEach(t => ScriptApp.deleteTrigger(t));
-  ScriptApp.newTrigger('weeklyReport').timeBased().onWeekDay(ScriptApp.WeekDay.MONDAY).atHour(6).create();
-  console.log('✅ weeklyReport runs every Monday between 6 and 7 AM.');
+/** Nightly report every morning between 6 and 7 AM (replaces the Monday one). */
+function installDailyTrigger() {
+  ScriptApp.getProjectTriggers().filter(t => ['weeklyReport', 'dailyReport'].indexOf(t.getHandlerFunction()) !== -1).forEach(t => ScriptApp.deleteTrigger(t));
+  ScriptApp.newTrigger('dailyReport').timeBased().everyDays(1).atHour(6).create();
+  console.log('✅ dailyReport runs every day between 6 and 7 AM.');
 }
+function installWeeklyTrigger() { installDailyTrigger(); }
 
 /* ───────────── jobs, employees, dates ───────────── */
 
@@ -348,9 +428,9 @@ function verifyAccess() {
   const known = names.filter(n => ckEmployeeByName_(n));
   console.log(`✅ Access codes for ${names.length} people; ${known.length} match an HCP employee by name (those get a "today's jobs" list).`);
   if (names.length !== known.length) console.log('   No HCP match for: ' + names.filter(n => !ckEmployeeByName_(n)).join(', ') + ' — they type the job number instead.');
-  console.log(props_().getProperty('REPORT_TO') ? `✅ Monday report → ${props_().getProperty('REPORT_TO')}` : '⚠️ REPORT_TO not set — weeklyReport() will only log.');
+  console.log(props_().getProperty('REPORT_TO') ? `✅ Daily report → ${props_().getProperty('REPORT_TO')}` : '⚠️ REPORT_TO not set — dailyReport() will only log.');
   console.log(`Time zone: ${ckTz_()} (should be America/New_York)`);
-  console.log(ScriptApp.getProjectTriggers().some(t => t.getHandlerFunction() === 'weeklyReport') ? '✅ Weekly trigger installed.' : '⚠️ Run installWeeklyTrigger() for the Monday email.');
+  console.log(ScriptApp.getProjectTriggers().some(t => t.getHandlerFunction() === 'dailyReport') ? '✅ Daily trigger installed.' : '⚠️ Run installDailyTrigger() for the morning email.');
 }
 
 function generateTechCodes() {
