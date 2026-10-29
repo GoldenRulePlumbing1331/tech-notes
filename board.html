@@ -200,6 +200,29 @@
   .fb small { display: block; font-weight: 500; font-size: 11.5px; opacity: .92; margin-top: 4px; min-height: 14px; }
   .fb.omw { background: #1d4ed8; } .fb.start { background: #15803d; } .fb.finish { background: var(--brand); }
   .fb.done { opacity: .6; } .fb:active { filter: brightness(1.15); }
+  .ftools .sub2 { font-size: 13px; color: var(--muted); margin: -2px 0 6px; }
+  .lines { border: 1px solid var(--line); border-radius: 10px; overflow: hidden; margin-top: 4px; }
+  .lines .ln { display: flex; gap: 8px; padding: 7px 10px; border-top: 1px solid var(--grid); font-size: 14px; align-items: baseline; }
+  .lines .ln:first-child { border-top: 0; }
+  .lines .ln .q { flex: none; width: 34px; color: var(--muted); } .lines .ln .nm { flex: 1; min-width: 0; } .lines .ln .pr { flex: none; font-weight: 650; }
+  .lines .ln.tot { background: var(--soft); font-weight: 750; } .lines .ln.pend .nm { color: var(--warn-ink); }
+  .lines .ln.none { color: var(--muted); }
+  .ftools input.srch { width: 100%; font: inherit; font-size: 16px; color: var(--ink); background: var(--card); border: 1px solid var(--line); border-radius: 10px; padding: 10px 12px; margin-top: 10px; }
+  .hits { margin-top: 6px; }
+  .hit { display: flex; gap: 8px; align-items: center; width: 100%; text-align: left; border: 1px solid var(--line); border-radius: 10px; background: var(--card); padding: 9px 11px; margin-top: 5px; font: inherit; color: inherit; cursor: pointer; }
+  .hit:active { background: var(--soft); }
+  .hit .nm { flex: 1; min-width: 0; font-size: 15px; } .hit .nm small { display: block; color: var(--muted); font-size: 12.5px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .hit .pr { flex: none; font-weight: 700; }
+  .hit.custom { border-style: dashed; color: var(--brand); }
+  @media (prefers-color-scheme: dark) { .hit.custom { color: var(--accent); } }
+  .addp { border: 1px solid var(--brand); border-radius: 12px; padding: 10px 12px; margin-top: 8px; background: var(--card); }
+  .addp .nm { font-weight: 700; font-size: 15px; margin-bottom: 6px; }
+  .addp .g { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+  .addp label { display: block; font-size: 12.5px; color: var(--muted); font-weight: 600; }
+  .addp input[type=text], .addp input[type=number] { width: 100%; font: inherit; font-size: 16px; color: var(--ink); background: var(--card); border: 1px solid var(--line); border-radius: 9px; padding: 8px 10px; }
+  .addp .chk { display: flex; gap: 14px; align-items: center; font-size: 14px; margin-top: 8px; }
+  .addp .chk label { display: flex; align-items: center; gap: 5px; color: var(--ink); font-weight: 600; }
+  .addp .frow { margin-top: 10px; }
   .ftools textarea { width: 100%; font: inherit; font-size: 16px; color: var(--ink); background: var(--card); border: 1px solid var(--line); border-radius: 10px; padding: 10px 12px; min-height: 76px; resize: vertical; margin-top: 12px; }
   .frow { display: flex; gap: 8px; margin-top: 8px; }
   .frow .btn { flex: 1; padding: 11px; }
@@ -642,7 +665,7 @@
 
   // ---------- field tools: buttons, notes, photos (saved on the phone, sent when signal returns) ----------
   var CLOCK = (window.GR_ENDPOINTS && window.GR_ENDPOINTS.clock) || "";
-  var OB_STAMP = "grClockOutbox", OB_NOTE = "grBoardNotes", TODAY_K = "grClockToday";   // stamps share the Job Clock page's outbox
+  var OB_STAMP = "grClockOutbox", OB_NOTE = "grBoardNotes", OB_LINE = "grBoardLines", CAT_K = "grBoardCatalog", TODAY_K = "grClockToday";   // stamps share the Job Clock page's outbox
   var EVL = { omw: "On my way", start: "Start", finish: "Finish" };
   S.ph = [];
   function rid() { return Date.now().toString(36) + Math.random().toString(36).slice(2, 8); }
@@ -691,7 +714,8 @@
   }
   function b64(blob) { return new Promise(function (res, rej) { var r = new FileReader(); r.onload = function () { res(String(r.result).split(",")[1] || ""); }; r.onerror = function () { rej(r.error); }; r.readAsDataURL(blob); }); }
 
-  function outCount() { return readJ(OB_STAMP).length + readJ(OB_NOTE).length + S.ph.length; }
+  function outCount() { return readJ(OB_STAMP).length + readJ(OB_NOTE).length + readJ(OB_LINE).length + S.ph.length; }
+  function boxKey(kind) { return kind === "stamp" ? OB_STAMP : kind === "line" ? OB_LINE : OB_NOTE; }
   function refreshOut() {
     var n = outCount(), b = $("outBtn");
     b.textContent = "📤 " + n + " waiting"; show(b, n > 0); b.classList.toggle("alert", n > 0);
@@ -700,16 +724,17 @@
   function setList(k, list) { put(k, JSON.stringify(list)); refreshOut(); }
   function patchItem(kind, id, patch) {
     if (kind === "photo") { S.ph.forEach(function (x) { if (x.id === id) { Object.keys(patch).forEach(function (q) { x[q] = patch[q]; }); idbPut(x).catch(function () {}); } }); refreshOut(); return; }
-    var k = kind === "stamp" ? OB_STAMP : OB_NOTE, l = readJ(k); l.forEach(function (x) { if (x.id === id) Object.keys(patch).forEach(function (q) { x[q] = patch[q]; }); }); setList(k, l);
+    var k = boxKey(kind), l = readJ(k); l.forEach(function (x) { if (x.id === id) Object.keys(patch).forEach(function (q) { x[q] = patch[q]; }); }); setList(k, l);
   }
   function removeItem(kind, id) {
     if (kind === "photo") { S.ph = S.ph.filter(function (x) { return x.id !== id; }); idbDel(id).catch(function () {}); refreshOut(); return; }
-    var k = kind === "stamp" ? OB_STAMP : OB_NOTE; setList(k, readJ(k).filter(function (x) { return x.id !== id; }));
+    var k = boxKey(kind); setList(k, readJ(k).filter(function (x) { return x.id !== id; }));
   }
   function allItems() {
     var a = [];
     readJ(OB_STAMP).forEach(function (x) { a.push({ kind: "stamp", x: x }); });
     readJ(OB_NOTE).forEach(function (x) { a.push({ kind: "note", x: x }); });
+    readJ(OB_LINE).forEach(function (x) { a.push({ kind: "line", x: x }); });
     S.ph.forEach(function (x) { a.push({ kind: "photo", x: x }); });
     return a;
   }
@@ -717,6 +742,7 @@
     var x = it.x, base = { req_id: x.id, at: x.at, job_id: x.job_id || "", number: x.number };
     if (it.kind === "stamp") return clockPost(Object.assign(base, { action: "stamp", event: x.event }));
     if (it.kind === "note") return clockPost(Object.assign(base, { action: "note", text: x.text }));
+    if (it.kind === "line") return clockPost(Object.assign(base, { action: "lineitem", name: x.name, description: x.description || "", quantity: x.qty, unit_price: x.price, unit_cost: x.cost || 0, kind: x.lkind || "labor", taxable: x.taxable !== false, service_item_id: x.uuid || "" }));
     return b64(x.blob).then(function (d) { return clockPost(Object.assign(base, { action: "photo", name: x.name, mime: x.mime || "image/jpeg", data: d }), 90000); });
   }
   var flushing = false, ftimer = null;
@@ -731,7 +757,7 @@
       var it = items[i++];
       patchItem(it.kind, it.x.id, { sending: true });
       sendOne(it).then(function (r) {
-        if (r && r.ok) { removeItem(it.kind, it.x.id); sent++; if (it.kind === "stamp") stamps++; }
+        if (r && r.ok) { removeItem(it.kind, it.x.id); sent++; if (it.kind === "stamp") stamps++; if (it.kind === "line" && S.linesFor === it.x.number) loadLines(S.linesFor, true); }
         else if (/access code|Too many wrong/.test((r && r.error) || "")) { patchItem(it.kind, it.x.id, { sending: false }); flushing = false; drop(KEY); S.code = ""; return showCode(r.error); }
         else patchItem(it.kind, it.x.id, { sending: false, err: (r && r.error) || "unknown error" });
         next();
@@ -764,13 +790,14 @@
       row.appendChild(b);
     });
     box.appendChild(row);
-    var ta = el("textarea"); ta.placeholder = "Add a note to this job…"; ta.setAttribute("aria-label", "Note"); box.appendChild(ta);
+    box.appendChild(el("div", "ft", "Private note")); box.appendChild(el("div", "sub2", "Goes on the job in HCP for the office and techs. The customer never sees it."));
+    var ta = el("textarea"); ta.placeholder = "Add a private note to this job…"; ta.setAttribute("aria-label", "Private note"); ta.style.marginTop = "0"; box.appendChild(ta);
     var fr = el("div", "frow");
-    var nb = el("button", "btn", "Save note"); nb.type = "button";
+    var nb = el("button", "btn", "Save private note"); nb.type = "button";
     nb.onclick = function () {
       var t = ta.value.trim(); if (!t) return;
       var l = readJ(OB_NOTE); l.push({ id: rid(), text: t, at: new Date().toISOString(), job_id: it.job_id || "", number: it.number, customer: it.customer || "", tries: 0 }); setList(OB_NOTE, l);
-      ta.value = ""; fmsg("📝 Note saved. Sending…", "wait"); flushSoon();
+      ta.value = ""; fmsg("📝 Private note saved. Sending…", "wait"); flushSoon();
     };
     var pb = el("button", "btn", "📷 Add photos"); pb.type = "button";
     var fi = el("input"); fi.type = "file"; fi.accept = "image/*"; fi.multiple = true; fi.className = "hidden";
@@ -791,8 +818,118 @@
       });
     };
     fr.appendChild(nb); fr.appendChild(pb); box.appendChild(fr); box.appendChild(fi);
+    lineTools(box, it);
     fmsgEl = el("div", "fmsg hidden"); box.appendChild(fmsgEl);
     sh.appendChild(box);
+  }
+
+  // ---------- line items: price book search on the phone, queued like everything else ----------
+  var SYN = { gas: ["natural", "propane"], ng: ["natural"], lp: ["propane"], gal: ["gallon"], gallons: ["gallon"], ho: ["homeowner"], homeowner: ["ho"],
+    customer: ["homeowner", "ho"], gr: ["golden rule", "gr"], drain: ["clog"], snake: ["clog"], clogged: ["clog"], backed: ["clog"], bathroom: ["lavy"], vanity: ["lavy"],
+    disposal: ["garbage disposal"], prv: ["pressure reducing"], spigot: ["hose bib"], sillcock: ["hose bib"], heater: ["water heater", "gallon"], water: ["water", "gallon"],
+    tankless: ["tankless"], sewer: ["sewer", "main"], install: ["installation", "install"], installation: ["install"], replace: ["replacement", "replace"], replacement: ["replace"], wh: ["gallon", "water heater"] };
+  var STOP = { a: 1, an: 1, the: 1, and: 1, or: 1, "for": 1, of: 1, to: 1, "new": 1, "with": 1, "in": 1, on: 1, unit: 1 };
+  function catalog() { try { var c = JSON.parse(get(CAT_K) || "null"); return c && c.items ? c : null; } catch (e) { return null; } }
+  function loadCatalog(force) {
+    var c = catalog();
+    if (!force && c && Date.now() - (c.at || 0) < 6 * 3600000) return Promise.resolve(c);
+    return clockPost({ action: "catalog" }).then(function (r) {
+      if (r && r.ok && r.items) { c = { at: Date.now(), items: r.items }; put(CAT_K, JSON.stringify(c)); }
+      return c;
+    }).catch(function () { return c; });
+  }
+  function priceSearch(q) {
+    var c = catalog(); if (!c) return null;
+    q = String(q || "").trim().toLowerCase().slice(0, 80); if (!q) return [];
+    var words = q.replace(/(\d)\s*-\s*(?=[a-z])/g, "$1 ").replace(/[^a-z0-9\/.\s]/g, " ").split(/\s+/).filter(function (w) { return w && !STOP[w]; });
+    if (!words.length) return [];
+    return c.items.map(function (x) {
+      var name = x.name.toLowerCase(), cat = (x.category || "").toLowerCase(), desc = (x.description || "").toLowerCase(), score = 0;
+      words.forEach(function (w) {
+        var forms = [w].concat(SYN[w] || []); if (/^\d+$/.test(w)) forms.push(w + " gallon", w + "in", w + " gal");
+        if (forms.some(function (f) { return name.indexOf(f) !== -1; })) score += 2;
+        else if (forms.some(function (f) { return cat.indexOf(f) !== -1; })) score += 1.5;
+        else if (forms.some(function (f) { return desc.indexOf(f) !== -1; })) score += 0.5;
+      });
+      return { x: x, score: score };
+    }).filter(function (r) { return r.score >= words.length; })
+      .sort(function (a, b) { return b.score - a.score || a.x.price - b.x.price; }).slice(0, 6).map(function (r) { return r.x; });
+  }
+  function dollars(cents) { return "$" + (Math.round(cents) / 100).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 }); }
+  S.lines = {}; S.linesFor = "";
+  function loadLines(number, force) {
+    var it = S.lineIt; if (!it || it.number !== number) return;
+    if (!force && S.lines[number]) { renderLines(); return; }
+    clockPost({ action: "lines", job_id: it.job_id || "", number: number }).then(function (r) { if (r && r.ok) { S.lines[number] = r; if (S.linesFor === number) renderLines(); } }).catch(function () {});
+  }
+  function renderLines() {
+    var box = S.linesBox, it = S.lineIt; if (!box || !document.body.contains(box)) return;
+    box.innerHTML = "";
+    var have = S.lines[it.number], pend = readJ(OB_LINE).filter(function (x) { return x.number === it.number; });
+    var any = false, total = 0;
+    if (have) have.lines.forEach(function (l) { var r = el("div", "ln"); r.appendChild(el("span", "q", l.qty + "×")); r.appendChild(el("span", "nm", l.name)); r.appendChild(el("span", "pr", dollars(l.price * l.qty))); box.appendChild(r); any = true; total += l.price * l.qty; });
+    pend.forEach(function (x) { var r = el("div", "ln pend"); r.appendChild(el("span", "q", x.qty + "×")); r.appendChild(el("span", "nm", x.name + (x.err ? " — ❌ " + x.err : " — waiting to send"))); r.appendChild(el("span", "pr", dollars(x.price * x.qty))); box.appendChild(r); any = true; total += x.price * x.qty; });
+    if (!any) box.appendChild(el("div", "ln none", have ? "No line items on this job yet." : "Can't load the job's line items with no signal — anything you add is saved and sent later."));
+    else if (have) { var t = el("div", "ln tot"); t.appendChild(el("span", "q", "")); t.appendChild(el("span", "nm", "Total" + (pend.length ? " (incl. waiting)" : ""))); t.appendChild(el("span", "pr", dollars(total))); box.appendChild(t); }
+  }
+  function lineTools(box, it) {
+    box.appendChild(el("div", "ft", "Line items"));
+    box.appendChild(el("div", "sub2", "Search the price book, or add a custom line. Prices can be edited before adding."));
+    var lb = el("div", "lines"); box.appendChild(lb);
+    S.lineIt = it; S.linesBox = lb; S.linesFor = it.number;
+    renderLines(); loadLines(it.number, false);
+    var srch = el("input", "srch"); srch.type = "search"; srch.placeholder = "Search the price book (e.g. hose bib, 50 gal water heater)"; srch.setAttribute("aria-label", "Search the price book"); srch.autocomplete = "off";
+    var hits = el("div", "hits"), panel = null;
+    box.appendChild(srch); box.appendChild(hits);
+    function closePanel() { if (panel && panel.parentNode) panel.parentNode.removeChild(panel); panel = null; }
+    function openPanel(x) {
+      closePanel();
+      panel = el("div", "addp");
+      panel.appendChild(el("div", "nm", x ? x.name : "Custom line item"));
+      var g = el("div", "g"), nameIn = null;
+      if (!x) { var ln = el("label", null, "Name"); nameIn = el("input"); nameIn.type = "text"; nameIn.placeholder = "What was done / used"; ln.appendChild(nameIn); ln.style.gridColumn = "1 / -1"; g.appendChild(ln); }
+      var lq = el("label", null, "Quantity"), qIn = el("input"); qIn.type = "number"; qIn.min = "0.01"; qIn.step = "0.01"; qIn.value = "1"; qIn.inputMode = "decimal"; lq.appendChild(qIn); g.appendChild(lq);
+      var lp = el("label", null, "Price each ($)"), pIn = el("input"); pIn.type = "number"; pIn.min = "0"; pIn.step = "0.01"; pIn.inputMode = "decimal"; pIn.value = x ? (x.price / 100).toFixed(2) : ""; lp.appendChild(pIn); g.appendChild(lp);
+      panel.appendChild(g);
+      var chk = el("div", "chk");
+      var kl = el("label"), kLab = el("input"); kLab.type = "radio"; kLab.name = "lkind"; kLab.value = "labor"; kLab.checked = true; kl.appendChild(kLab); kl.appendChild(document.createTextNode("Labor / service"));
+      var km = el("label"), kMat = el("input"); kMat.type = "radio"; kMat.name = "lkind"; kMat.value = "materials"; km.appendChild(kMat); km.appendChild(document.createTextNode("Materials"));
+      var tl = el("label"), tx = el("input"); tx.type = "checkbox"; tx.checked = x ? x.taxable !== false : true; tl.appendChild(tx); tl.appendChild(document.createTextNode("Taxable"));
+      chk.appendChild(kl); chk.appendChild(km); chk.appendChild(tl); panel.appendChild(chk);
+      var fr = el("div", "frow");
+      var add = el("button", "btn pri", "Add to job"); add.type = "button";
+      add.onclick = function () {
+        var name = x ? x.name : (nameIn.value || "").trim(); if (!name) { nameIn.focus(); return; }
+        var qty = Math.round((parseFloat(qIn.value) || 0) * 100) / 100; if (!(qty > 0)) { qIn.focus(); return; }
+        var price = Math.round((parseFloat(pIn.value) || 0) * 100);
+        var l = readJ(OB_LINE);
+        l.push({ id: rid(), at: new Date().toISOString(), job_id: it.job_id || "", number: it.number, customer: it.customer || "", name: name, description: x ? (x.description || "") : "",
+                 qty: qty, price: price, cost: x ? x.cost : 0, lkind: kMat.checked ? "materials" : "labor", taxable: tx.checked, uuid: x ? x.uuid : "", tries: 0 });
+        setList(OB_LINE, l); closePanel(); srch.value = ""; hits.innerHTML = ""; renderLines();
+        fmsg("🧾 " + qty + " × " + name + " saved. Sending…", "wait"); flushSoon();
+      };
+      var cancel = el("button", "btn", "Cancel"); cancel.type = "button"; cancel.onclick = closePanel;
+      fr.appendChild(add); fr.appendChild(cancel); panel.appendChild(fr);
+      hits.parentNode.insertBefore(panel, hits.nextSibling);
+      (nameIn || qIn).focus();
+    }
+    function customBtn() { var b = el("button", "hit custom"); b.type = "button"; b.appendChild(el("span", "nm", "＋ Custom line item (not in the price book)")); b.onclick = function () { openPanel(null); }; return b; }
+    function showHits() {
+      hits.innerHTML = "";
+      var q = srch.value.trim(); if (!q) return;
+      var res = priceSearch(q);
+      if (res === null) { hits.appendChild(el("div", "sub2", "The price book isn't on this phone yet — it downloads the next time there's signal. Add a custom line for now.")); hits.appendChild(customBtn()); loadCatalog(true).then(function (c) { if (c && srch.value.trim() === q) showHits(); }); return; }
+      res.forEach(function (x) {
+        var b = el("button", "hit"); b.type = "button";
+        var nm = el("span", "nm", x.name); if (x.category) nm.appendChild(el("small", null, x.category)); b.appendChild(nm);
+        b.appendChild(el("span", "pr", dollars(x.price))); b.onclick = function () { openPanel(x); }; hits.appendChild(b);
+      });
+      if (!res.length) hits.appendChild(el("div", "sub2", "Nothing in the price book matches \"" + q + "\"."));
+      hits.appendChild(customBtn());
+    }
+    var st = null; srch.oninput = function () { if (st) clearTimeout(st); st = setTimeout(showHits, 150); };
+    srch.onkeydown = function (e) { if (e.key === "Enter") { e.preventDefault(); showHits(); } };
+    loadCatalog(false);
   }
 
   function openOutbox() {
@@ -804,9 +941,9 @@
     if (!items.length) sh.appendChild(el("div", "kind", "Nothing waiting."));
     items.forEach(function (it) {
       var x = it.x, d = el("div", "ob");
-      var label = it.kind === "stamp" ? EVL[x.event] : it.kind === "note" ? "Note" : "Photo";
+      var label = it.kind === "stamp" ? EVL[x.event] : it.kind === "note" ? "Private note" : it.kind === "line" ? "Line item" : "Photo";
       d.appendChild(el("b", null, label + " · job " + x.number + (x.customer ? " · " + x.customer : "")));
-      d.appendChild(el("div", "oz", dfmt(x.at) + (it.kind === "note" ? " — " + x.text.slice(0, 80) : "")));
+      d.appendChild(el("div", "oz", dfmt(x.at) + (it.kind === "note" ? " — " + x.text.slice(0, 80) : it.kind === "line" ? " — " + x.qty + " × " + x.name + " @ " + dollars(x.price) : "")));
       d.appendChild(el("div", "oz" + (x.err ? " err" : ""), x.sending ? "Sending…" : x.err ? "❌ " + x.err : "Waiting for signal" + (x.tries ? " · tried " + x.tries + "×" : "")));
       var oa = el("div", "oa");
       var sn = el("button", null, "Send now"); sn.onclick = function () { patchItem(it.kind, x.id, { err: "" }); flush(x.id); }; if (x.sending) sn.disabled = true;
@@ -823,7 +960,7 @@
   setInterval(function () { if (document.visibilityState === "visible" && allItems().some(function (it) { return !it.x.err; })) flush(); }, 60000);
 
   // ---------- detail sheet ----------
-  function closeSheet() { show($("shade"), false); show($("sheet"), false); S.sheetIsUn = false; S.sheetOut = false; }
+  function closeSheet() { show($("shade"), false); show($("sheet"), false); S.sheetIsUn = false; S.sheetOut = false; S.linesFor = ""; S.linesBox = null; }
   function kv(box, label, content) { var r = el("div", "kv"); r.appendChild(el("span", null, label)); var v = el("span"); if (typeof content === "string") v.textContent = content; else v.appendChild(content); r.appendChild(v); box.appendChild(r); }
   function link(href, text, blank) { var a = el("a", null, text); a.href = href; if (blank) { a.target = "_blank"; a.rel = "noopener"; } return a; }
   function openSheet(it, c, back) {
@@ -926,7 +1063,7 @@
     // Show the last board straight away when it's the same day (instant open, works with no signal).
     try { var last = JSON.parse(get(LAST) || "null"); if (last && last.date === S.date) { S.data = last; render(); } } catch (e) {}
     renderTop(); sizeBoard(); load(false);
-    refreshOut(); loadPhotos().then(flushSoon);
+    refreshOut(); loadPhotos().then(flushSoon); loadCatalog(false);
   }
   $("codeGo").onclick = function () { var c = $("code").value.trim(); if (c) start(c); };
   $("code").onkeydown = function (e) { if (e.key === "Enter") $("codeGo").click(); };

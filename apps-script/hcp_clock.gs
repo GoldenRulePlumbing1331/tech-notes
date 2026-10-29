@@ -34,6 +34,11 @@
  *   stamp  {req_id, event, at, job_id | number, note} → records the press; replays with the same req_id are no-ops
  *   note   {req_id, at, job_id | number, text}        → adds a note to the HCP job (Board page, works offline via its outbox)
  *   photo  {req_id, at, job_id | number, name, mime, data (base64)} → attaches a photo to the HCP job
+ *   catalog  {fresh}                       → the services price book (uuid, name, price/cost in cents) — the Board keeps a
+ *                                            copy on the phone so line-item search works with no signal
+ *   lines    {job_id | number}             → the line items already on the job (so techs don't add one twice)
+ *   lineitem {req_id, at, job_id | number, name, description, quantity, unit_price, unit_cost, kind, taxable, service_item_id}
+ *                                          → adds a line item to the HCP job (prices in cents); replays with the same req_id are no-ops
  */
 
 const CK = {
@@ -67,6 +72,9 @@ function clockAction_(p) {
       case 'stamp': return ckStamp_(p, who);
       case 'note':  return ckNote_(p, who);
       case 'photo': return ckPhoto_(p, who);
+      case 'catalog':  return { ok: true, items: ckCatalog_(!!p.fresh), loaded_at: Utilities.formatDate(new Date(), ckTz_(), 'EEE h:mm a') };
+      case 'lines':    return ckLines_(p);
+      case 'lineitem': return ckLineItem_(p, who);
       default:      throw new Error('Unknown action.');
     }
   } catch (err) {
@@ -213,6 +221,98 @@ function verifyNotesAndPhotos() {
     const res = UrlFetchApp.fetch(CK.BASE + `/jobs/${job.id}/attachments`, { method: 'post', headers: { Authorization: 'Token ' + apiKey_() }, payload: { file: png }, muteHttpExceptions: true });
     console.log(res.getResponseCode() < 300 ? `✅ Photos: POST /jobs/{id}/attachments works (${res.getResponseCode()}). Check the job in HCP for board-access-test.png.` : `❌ Photos: HCP said ${res.getResponseCode()} — ${res.getContentText().slice(0, 200)}`);
   } catch (e) { console.log('❌ Photos: ' + e.message); }
+}
+
+/* ───────────── line items from the Board ───────────── */
+
+/** The whole services price book (~100 items), cached 6 hours. Same shape the Estimate tool uses. */
+function ckCatalog_(fresh) {
+  const cache = CacheService.getScriptCache();
+  const hit = !fresh && cache.get('ck_catalog1');
+  if (hit) { try { return JSON.parse(hit); } catch (_) {} }
+  const out = [];
+  for (let page = 1; page <= 20; page++) {
+    const r = hcp_('get', `/api/price_book/services?page=${page}&page_size=100&sort_by=name&sort_direction=asc`);
+    (r.data || []).forEach(sv => out.push({
+      uuid: sv.uuid, name: String(sv.name || '').trim(), category: String((sv.category && sv.category.name) || '').trim(),
+      description: String(sv.description || '').replace(/\r\n?/g, '\n').replace(/[ \t]+\n/g, '\n').trim().slice(0, 300),
+      price: Number(sv.price) || 0, cost: Number(sv.cost) || 0, uom: sv.unit_of_measure || '', taxable: sv.taxable !== false,
+    }));
+    const pages = r.total_pages_count || r.total_pages || 0;
+    if (!(r.data || []).length || page >= pages) break;
+  }
+  const list = out.filter(c => c.uuid && c.name);
+  try { cache.put('ck_catalog1', JSON.stringify(list), 6 * 3600); } catch (e) { console.warn('catalog too big to cache: ' + e.message); }
+  return list;
+}
+
+function ckLines_(p) {
+  const job = p.job_id ? hcp_('get', '/jobs/' + encodeURIComponent(p.job_id)) : ckJobByNumber_(p.number);
+  const r = hcp_('get', `/jobs/${job.id}/line_items`);
+  const lines = (r.data || []).map(li => ({ id: li.id, name: li.name, qty: Number(li.quantity) || 0, price: Number(li.unit_price) || 0, kind: li.kind || '' }));
+  const total = lines.reduce((s, l) => s + l.price * l.qty, 0);
+  return { ok: true, job_id: job.id, number: String(job.invoice_number || ''), lines: lines, total: total };
+}
+
+function ckLineItem_(p, who) {
+  const reqId = String(p.req_id || '').replace(/[^\w-]/g, '').slice(0, 64);
+  if (reqId) { const prior = ckRecall_(reqId); if (prior) return prior; }
+  const name = String(p.name || '').trim().slice(0, 200);
+  if (!name) throw new Error('That line item has no name.');
+  const qty = Math.round((Number(p.quantity) || 1) * 100) / 100;
+  if (!(qty > 0)) throw new Error('Quantity must be more than 0.');
+  const result = withLock_(() => {
+    const job = p.job_id ? hcp_('get', '/jobs/' + encodeURIComponent(p.job_id)) : ckJobByNumber_(p.number);
+    const at = ckParse_(p.at) || new Date(), tz = ckTz_();
+    const body = { name: name, description: String(p.description || '').trim().slice(0, 2000), quantity: qty,
+                   unit_price: Math.max(0, Math.round(Number(p.unit_price) || 0)), unit_cost: Math.max(0, Math.round(Number(p.unit_cost) || 0)),
+                   kind: p.kind === 'materials' ? 'materials' : 'labor', taxable: p.taxable !== false };
+    let li = null, linked = false;
+    if (p.service_item_id) {
+      // Link it to the price book item when HCP will take the link; otherwise add it as a plain line.
+      try { li = hcp_('post', `/jobs/${job.id}/line_items`, Object.assign({}, body, { service_item_id: String(p.service_item_id), service_item_type: 'organizational' })); linked = true; }
+      catch (e) { if (!/→ 4\d\d/.test(e.message)) throw e; console.warn('line item with service_item_id refused, adding unlinked: ' + e.message); }
+    }
+    if (!li) li = hcp_('post', `/jobs/${job.id}/line_items`, body);
+    try {
+      hcp_('post', `/jobs/${job.id}/notes`, { content: `🧾 ${who} added a line item from the Board — ${Utilities.formatDate(at, tz, 'EEE MMM d, h:mm a')}\n${qty} × ${name} @ $${(body.unit_price / 100).toFixed(2)}` });
+    } catch (e) { console.warn('line item note failed: ' + e.message); }
+    const out = ckJobOut_(job);
+    console.log(`clock lineitem ✅ job ${out.number} "${name}" x${qty} by ${who}${linked ? ' (price book)' : ''}`);
+    return { ok: true, message: `✅ ${qty} × ${name} added to job ${out.number}.`, job: out, event: 'lineitem', pressed: '', line_id: li && li.id, linked: linked };
+  });
+  if (reqId) ckRemember_(reqId, result);
+  return result;
+}
+
+/**
+ * Run from the editor before relying on the Board's line items. Adds one $0 test line item (linked to the first price
+ * book service) to the newest "Test Customer" job, then lists the job's line items. Delete the test line in HCP afterwards.
+ */
+function verifyLineItems() {
+  const TEST_JOB_NUMBER = '';
+  let job = null;
+  if (TEST_JOB_NUMBER) job = ckJobByNumber_(TEST_JOB_NUMBER);
+  else {
+    for (let page = 1; page <= 10 && !job; page++) {
+      const r = hcp_('get', `/jobs?page=${page}&page_size=100&sort_by=created_at&sort_direction=desc`);
+      job = (r.jobs || []).filter(j => { const c = j.customer || {}; return String(c.first_name || '').trim().toLowerCase() === 'test' && String(c.last_name || '').trim().toLowerCase() === 'customer'; })[0] || null;
+      if (page >= (r.total_pages || 0)) break;
+    }
+    if (!job) { console.log('❌ No job found for "Test Customer". Create one in HCP or type its job number into TEST_JOB_NUMBER.'); return; }
+  }
+  const cust = job.customer || {};
+  console.log(`Job ${job.invoice_number} · customer: ${[cust.first_name, cust.last_name].filter(Boolean).join(' ')} — make sure this is the Test Customer.`);
+  let cat = [];
+  try { cat = ckCatalog_(true); console.log(`✅ Price book: ${cat.length} services readable (first: "${cat[0] ? cat[0].name : ''}").`); }
+  catch (e) { console.log('❌ Price book: ' + e.message); }
+  try {
+    const r = ckLineItem_({ req_id: 'verify_' + Date.now(), at: new Date().toISOString(), job_id: job.id, name: 'Board access test — delete me', description: 'Added by verifyLineItems(); safe to delete.',
+                            quantity: 1, unit_price: 0, unit_cost: 0, kind: 'labor', taxable: false, service_item_id: cat[0] ? cat[0].uuid : '' }, 'Board test');
+    console.log(`✅ Line item: POST /jobs/{id}/line_items works (id ${r.line_id}; linked to price book: ${r.linked}).`);
+  } catch (e) { console.log('❌ Line item: ' + e.message); }
+  try { const l = ckLines_({ job_id: job.id }); console.log(`✅ Lines: job has ${l.lines.length} line item(s), total $${(l.total / 100).toFixed(2)}: ` + l.lines.map(x => `${x.qty}× ${x.name}`).join(' · ')); }
+  catch (e) { console.log('❌ Lines: ' + e.message); }
 }
 
 /* ───────────── nightly reconciliation ───────────── */
