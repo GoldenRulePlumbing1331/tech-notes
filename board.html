@@ -268,6 +268,7 @@
       <span class="sum" id="sum"></span>
       <button class="small" id="fit" title="Columns per screen">⇔ 2</button>
       <button class="small hidden" id="outBtn" title="Waiting to send"></button>
+      <div class="seg hidden" id="mineSeg"><button id="vMine">My jobs</button><button id="vAll" class="on">All</button></div>
       <div class="seg"><button id="vGrid" class="on">Grid</button><button id="vList">List</button></div>
     </div>
   </div>
@@ -303,12 +304,13 @@
   function say(text, kind) { var m = $("msg"); m.textContent = text || ""; m.className = "msg" + (text ? " " + (kind || "warn") : " hidden"); sizeBoard(); }
 
   // hidden: techs switched off; shown: techs with nothing scheduled that were switched on anyway.
-  var prefs = { hidden: {}, shown: {}, view: "grid", fit: 2 };
+  var prefs = { hidden: {}, shown: {}, view: "grid", fit: 2, mine: false };
   try { var sp = JSON.parse(get(PREF) || "{}"); for (var k in sp) prefs[k] = sp[k]; } catch (e) {}
   delete prefs.showEmpty; if (!prefs.shown) prefs.shown = {}; if (!prefs.hidden) prefs.hidden = {};
   function savePrefs() { put(PREF, JSON.stringify(prefs)); }
 
-  var S = { code: "", date: "", today: "", data: null, loading: false, scrolledFor: "", timer: null, offline: false, un: null };
+  var S = { code: "", date: "", today: "", data: null, loading: false, scrolledFor: "", timer: null, offline: false, un: null, me: get("grBoardMe") || "" };
+  function mineOn() { return !!(prefs.mine && S.me); }
 
   // ---------- server ----------
   function api(action, data) {
@@ -383,7 +385,7 @@
   }
   // Unassigned is always there (like HCP) unless switched off; techs show when they have something that day or were
   // switched on by hand.
-  function isOn(c) { if (prefs.hidden[c.id]) return false; return c.id === UN || c.items.length > 0 || !!prefs.shown[c.id]; }
+  function isOn(c) { if (mineOn()) return c.id === S.me; if (prefs.hidden[c.id]) return false; return c.id === UN || c.items.length > 0 || !!prefs.shown[c.id]; }
   function toggle(c) {
     if (isOn(c)) { prefs.hidden[c.id] = 1; delete prefs.shown[c.id]; }
     else { delete prefs.hidden[c.id]; if (c.id !== UN && !c.items.length) prefs.shown[c.id] = 1; }
@@ -403,6 +405,12 @@
     var cols = columns(), box = $("chips"); box.innerHTML = "";
     var on = cols.filter(isOn).length;
     $("techCount").textContent = on + "/" + cols.length;
+    var meKnown = !!S.me && cols.some(function (c) { return c.id === S.me; });
+    show($("mineSeg"), meKnown);
+    if (!meKnown && prefs.mine) { prefs.mine = false; savePrefs(); }
+    $("vMine").classList.toggle("on", mineOn()); $("vAll").classList.toggle("on", !mineOn());
+    show($("techBtn"), !mineOn()); show($("unBtn"), !mineOn()); show(box, !mineOn());
+    if (mineOn()) { $("sum").textContent = "Showing only your jobs"; return; }
     // Quick toggles for whoever has something today (the Techs list has everyone).
     cols.filter(function (c) { return c.items.length || isOn(c); }).forEach(function (c) {
       var off = !isOn(c);
@@ -531,7 +539,7 @@
     var d = S.data; if (!d) return;
     var cols = visible(columns());
     var hourPx = parseFloat(getComputedStyle(document.documentElement).getPropertyValue("--hour")) || 64;
-    if (!cols.length) { g.style.gridTemplateColumns = "1fr"; g.appendChild(el("div", "empty", (d.items || []).length ? "Every tech is switched off. Tap a name above." : "Nothing on the schedule for " + dayLabel(S.date) + ".")); return; }
+    if (!cols.length) { g.style.gridTemplateColumns = "1fr"; g.appendChild(el("div", "empty", mineOn() ? "Nothing on your schedule for " + dayLabel(S.date) + "." : (d.items || []).length ? "Every tech is switched off. Tap a name above." : "Nothing on the schedule for " + dayLabel(S.date) + ".")); return; }
     var timed = (d.items || []).filter(function (it) { return !it.all_day; });
     var startH = 7, endH = 18;
     timed.forEach(function (it) { startH = Math.min(startH, Math.floor(it.smin / 60)); endH = Math.max(endH, Math.ceil(it.emin / 60)); });
@@ -610,7 +618,7 @@
     var box = $("list"); box.innerHTML = "";
     var d = S.data; if (!d) return;
     var cols = visible(columns());
-    if (!cols.length) { box.appendChild(el("div", "empty", (d.items || []).length ? "Every tech is switched off. Tap a name above." : "Nothing on the schedule for " + dayLabel(S.date) + ".")); return; }
+    if (!cols.length) { box.appendChild(el("div", "empty", mineOn() ? "Nothing on your schedule for " + dayLabel(S.date) + "." : (d.items || []).length ? "Every tech is switched off. Tap a name above." : "Nothing on the schedule for " + dayLabel(S.date) + ".")); return; }
     cols.forEach(function (c) {
       var st = stats(c), wn = whereNow(c);
       var card = el("div", "tcard"), th = el("div", "th");
@@ -1046,6 +1054,7 @@
       }
       S.offline = false;
       if (r.today) S.today = r.today;
+      if (r.me !== undefined) { S.me = r.me || ""; put("grBoardMe", S.me); }
       if (!S.un || fresh || Date.now() - (S.unAt || 0) > REFRESH_MS - 5000) { S.unAt = Date.now(); loadUn(fresh); }
       S.data = r; put(LAST, JSON.stringify(r));
       say((r.warnings || []).length ? "Some of the schedule couldn't load: " + r.warnings.join(" · ") : "");
@@ -1064,6 +1073,8 @@
   $("todayBtn").onclick = function () { go(S.today || localDay()); };
   $("dayPick").onchange = function () { go(this.value); };
   $("refresh").onclick = function () { load(true); };
+  $("vMine").onclick = function () { prefs.mine = true; savePrefs(); closeMenu(); render(); };
+  $("vAll").onclick = function () { prefs.mine = false; savePrefs(); render(); };
   $("vGrid").onclick = function () { prefs.view = "grid"; savePrefs(); render(); };
   $("vList").onclick = function () { prefs.view = "list"; savePrefs(); render(); };
   $("fit").onclick = function () { prefs.fit = prefs.fit >= 4 ? 2 : prefs.fit + 1; savePrefs(); sizeBoard(); render(); };
@@ -1092,7 +1103,7 @@
   }
   $("codeGo").onclick = function () { var c = $("code").value.trim(); if (c) start(c); };
   $("code").onkeydown = function (e) { if (e.key === "Enter") $("codeGo").click(); };
-  $("forget").onclick = function (e) { e.preventDefault(); drop(KEY); drop(LAST); drop("grBoardUn"); S.un = null; S.code = ""; S.data = null; $("code").value = ""; showCode(""); };
+  $("forget").onclick = function (e) { e.preventDefault(); drop(KEY); drop(LAST); drop("grBoardUn"); drop("grBoardMe"); S.me = ""; S.un = null; S.code = ""; S.data = null; $("code").value = ""; showCode(""); };
   (function boot() {
     if (get(KEY)) return start(get(KEY));
     for (var i = 0; i < OLD_KEYS.length; i++) if (get(OLD_KEYS[i])) return start(get(OLD_KEYS[i]));
