@@ -682,8 +682,9 @@
   $("tagAdd").onchange = function () { if (S.allTags.some(function (x) { return x.name === $("tagAdd").value; })) addTag(); };
 
   // ---------- line items from the price book ----------
-  function customItem(name, qty) {
-    return { label: name, qty: qty > 0 ? qty : 1, cands: [], custom: true, use: false,
+  // Custom line items don't need a price: left blank, one goes on the job at $0.00.
+  function customItem(name, qty, use) {
+    return { label: name, qty: qty > 0 ? qty : 1, cands: [], custom: true, use: !!use,
              cand: { uuid: "", name: name, description: "", price: 0, cost: 0, taxable: false } };
   }
   function setItems(suggestions) {
@@ -706,12 +707,12 @@
       var body = el("div", "body");
       var ctl = el("div", "ctl");
       if (it.custom) {
-        var nm = el("input", "nm"); nm.value = it.cand.name; nm.title = "Line item name"; nm.autocomplete = "off";
-        nm.oninput = function () { it.cand.name = nm.value; };
+        var nm = el("input", "nm"); nm.value = it.cand.name; nm.title = "Line item name"; nm.autocomplete = "off"; nm.placeholder = "Name the line item";
+        nm.oninput = function () { it.cand.name = nm.value; nm.classList.remove("missing"); };
         body.appendChild(nm);
-        body.appendChild(el("span", "tag2", it.cand.price ? "Custom — not from the price book" : "Not in the price book — enter a price"));
+        body.appendChild(el("span", "tag2", "Custom — not from the price book · price optional"));
         ctl.appendChild(el("span", "ql", "$"));
-        var pr = el("input", "pr"); pr.type = "number"; pr.min = "0"; pr.step = "0.01"; pr.inputMode = "decimal"; pr.placeholder = "0.00"; pr.title = "Price each";
+        var pr = el("input", "pr"); pr.type = "number"; pr.min = "0"; pr.step = "0.01"; pr.inputMode = "decimal"; pr.placeholder = "0.00"; pr.title = "Price each (optional — blank is $0)";
         if (it.cand.price) pr.value = (it.cand.price / 100).toFixed(2);
         pr.onchange = function () { var c = Math.round((Number(pr.value) || 0) * 100); it.cand.price = c > 0 ? c : 0; if (it.cand.price && !it.use) { it.use = true; cb.checked = true; row.classList.remove("off"); } sumItems(); };
         ctl.appendChild(pr);
@@ -779,7 +780,7 @@
     Array.prototype.forEach.call($("liList").querySelectorAll(".li"), function (row, i) { var it = S.items[i];
       row.querySelector(".price").textContent = it.discount ? (it.cents ? "−" + money(it.cents) : "") : it.cand ? money(it.cand.price * it.qty) : ""; });
     show($("liTotal"), n > 0 || off > 0); $("liSum").textContent = money(sum) + (n ? " · " + n + " line item" + (n === 1 ? "" : "s") : "") + (off ? " · " + money(off) + " off" : "");
-    $("liHint").textContent = S.items.length ? "Picked from what you said. Ticked = clearly asked for; tick the others if they apply, change the match, or price the custom ones." : "Nothing picked yet — search the price book below to add line items.";
+    $("liHint").textContent = S.items.length ? "Picked from what you said. Ticked = clearly asked for; tick the others if they apply or change the match. Custom items can go on at $0." : "Nothing picked yet — search the price book below to add line items.";
   }
   $("liGo").onclick = function () {
     var q = $("liSearch").value.trim();
@@ -790,8 +791,8 @@
       if (!r.ok) { say("liMsg", "❌ " + r.error, "err"); return; }
       var cands = r.candidates || [];
       if (!cands.length) {
-        S.items.push(customItem(q.charAt(0).toUpperCase() + q.slice(1), 1));
-        say("liMsg", "Nothing in the price book for “" + q + "” — added it as a custom line item. Enter the price to include it.", "warn");
+        S.items.push(customItem(q.charAt(0).toUpperCase() + q.slice(1), 1, true));
+        say("liMsg", "Nothing in the price book for “" + q + "” — added it as a custom line item. Add a price if you want one; left blank it goes on at $0.", "warn");
         $("liSearch").value = ""; renderItems(); return;
       }
       say("liMsg", "");
@@ -802,8 +803,8 @@
   $("liSearch").onkeydown = function (e) { if (e.key === "Enter") $("liGo").click(); };
   $("liCustom").onclick = function () {
     var q = $("liSearch").value.trim();
-    var it = customItem(q ? q.charAt(0).toUpperCase() + q.slice(1) : "", 1);
-    S.items.push(it); $("liSearch").value = ""; say("liMsg", "Name it and enter the price — it goes on the job as typed (not from the price book).", "");
+    var it = customItem(q ? q.charAt(0).toUpperCase() + q.slice(1) : "", 1, true);
+    S.items.push(it); $("liSearch").value = ""; say("liMsg", "Name it — the price is optional (left blank it goes on at $0). It goes on the job as typed, not from the price book.", "");
     renderItems();
     var rows = $("liList").querySelectorAll(".li"), inp = rows[rows.length - 1] && rows[rows.length - 1].querySelector(".nm");
     if (inp) inp.focus();
@@ -828,17 +829,22 @@
                         job_type_id: $("jType").value, business_unit_id: $("jUnit").value } };
     if (!data.job.description) { say("submitMsg", "❌ Add the private notes.", "err"); $("desc").focus(); return; }
     if (data.job.time && !data.job.date) { say("submitMsg", "❌ Pick a date for that time.", "err"); return; }
+    // A ticked custom line item only needs a name — no price is fine, it goes on at $0.
+    var unnamed = S.items.filter(function (it) { return it.custom && it.use && !String(it.cand.name || "").trim(); });
+    if (unnamed.length) {
+      var rows = $("liList").querySelectorAll(".li"), at = rows[S.items.indexOf(unnamed[0])], nmEl = at && at.querySelector(".nm");
+      if (nmEl) { nmEl.classList.add("missing"); nmEl.focus(); }
+      say("submitMsg", "❌ Name the custom line item, or untick it.", "err"); return;
+    }
     data.job.tag_ids = S.tags.map(function (t) { return t.id; });
     sumItems();   // works out each discount's dollars from the current lines
     data.job.line_items = S.items.filter(function (it) { return !it.discount && it.use && it.cand && String(it.cand.name).trim(); }).map(function (it) {
-      return { uuid: it.cand.uuid || "", name: String(it.cand.name).trim(), description: it.cand.description || "", quantity: it.qty, unit_price: it.cand.price, unit_cost: it.cand.cost, kind: "labor", taxable: it.cand.taxable };
+      return { uuid: it.cand.uuid || "", name: String(it.cand.name).trim(), description: it.cand.description || "", quantity: it.qty, unit_price: it.cand.price || 0, unit_cost: it.cand.cost || 0, kind: "labor", taxable: it.cand.taxable };
     }).concat(S.items.filter(function (it) { return it.discount && it.cents > 0; }).map(function (it) {
       var nm = String(it.name || "").trim() || "Discount";
       if (it.mode === "%" && nm.indexOf("%") === -1) nm += " (" + it.value + "%)";
       return { name: nm, quantity: 1, unit_price: it.cents, kind: "fixed discount" };
     }));
-    var unpriced = S.items.filter(function (it) { return it.custom && it.use && !it.cand.price; });
-    if (unpriced.length) { say("submitMsg", "❌ Enter a price for “" + (unpriced[0].cand.name || "the custom line item") + "”, or untick it.", "err"); return; }
     if (S.isNew) {
       if (!$("nFirst").value.trim() && !$("nLast").value.trim()) { need(["nFirst", "nLast"]); say("submitMsg", "❌ Add the customer's name.", "err"); return; }
       if (!addrOk("na")) { say("submitMsg", "❌ Fill in the street and the city — the ZIP is looked up for you.", "err"); return; }
