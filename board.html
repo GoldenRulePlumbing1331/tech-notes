@@ -824,7 +824,10 @@
   }
 
   // ---------- line items: price book search on the phone, queued like everything else ----------
-  var SYN = { gas: ["natural", "propane"], ng: ["natural"], lp: ["propane"], gal: ["gallon"], gallons: ["gallon"], ho: ["homeowner"], homeowner: ["ho"],
+  var SYN = { shutoff: ["shut off", "shut-off", "stop", "valve"], shut: ["shutoff", "shut-off", "stop"], off: ["shutoff", "shut-off"], stop: ["shutoff", "shut off", "shut-off", "valve"],
+    valve: ["shutoff", "stop"], angle: ["shutoff", "stop", "angle"], supply: ["supply", "shutoff"], lav: ["lavy", "lavatory"], lavatory: ["lavy"], sink: ["sink", "lavy"],
+    faucet: ["faucet", "lavy"], toilet: ["toilet", "closet"], wc: ["toilet"], flapper: ["toilet", "rebuild"], fill: ["fill", "toilet"], expansion: ["expansion", "tank"],
+    gas: ["natural", "propane"], ng: ["natural"], lp: ["propane"], gal: ["gallon"], gallons: ["gallon"], ho: ["homeowner"], homeowner: ["ho"],
     customer: ["homeowner", "ho"], gr: ["golden rule", "gr"], drain: ["clog"], snake: ["clog"], clogged: ["clog"], backed: ["clog"], bathroom: ["lavy"], vanity: ["lavy"],
     disposal: ["garbage disposal"], prv: ["pressure reducing"], spigot: ["hose bib"], sillcock: ["hose bib"], heater: ["water heater", "gallon"], water: ["water", "gallon"],
     tankless: ["tankless"], sewer: ["sewer", "main"], install: ["installation", "install"], installation: ["install"], replace: ["replacement", "replace"], replacement: ["replace"], wh: ["gallon", "water heater"] };
@@ -841,10 +844,14 @@
   function priceSearch(q) {
     var c = catalog(); if (!c) return null;
     q = String(q || "").trim().toLowerCase().slice(0, 80); if (!q) return [];
-    var words = q.replace(/(\d)\s*-\s*(?=[a-z])/g, "$1 ").replace(/[^a-z0-9\/.\s]/g, " ").split(/\s+/).filter(function (w) { return w && !STOP[w]; });
+    // "shut-off", "shut off" and "shutoff" are the same word; so are "hose bib" / "hosebib" and "water heater" / "waterheater".
+    q = q.replace(/(\d)\s*-\s*(?=[a-z])/g, "$1 ").replace(/([a-z])-([a-z])/g, "$1$2")
+         .replace(/\bshut\s+off\b/g, "shutoff").replace(/\bhose\s*bib\b/g, "hose bib").replace(/\bwater\s*heater\b/g, "water heater").replace(/\bsill\s*cock\b/g, "sillcock");
+    var words = q.replace(/[^a-z0-9\/.\s]/g, " ").split(/\s+/).filter(function (w) { return w && !STOP[w]; });
     if (!words.length) return [];
     return c.items.map(function (x) {
-      var name = x.name.toLowerCase(), cat = (x.category || "").toLowerCase(), desc = (x.description || "").toLowerCase(), score = 0;
+      var norm = function (t) { return String(t || "").toLowerCase().replace(/([a-z])-([a-z])/g, "$1$2").replace(/\bshut\s+off\b/g, "shutoff"); };
+      var name = norm(x.name), cat = norm(x.category), desc = norm(x.description), score = 0;
       words.forEach(function (w) {
         var forms = [w].concat(SYN[w] || []); if (/^\d+$/.test(w)) forms.push(w + " gallon", w + "in", w + " gal");
         if (forms.some(function (f) { return name.indexOf(f) !== -1; })) score += 2;
@@ -879,8 +886,9 @@
     S.lineIt = it; S.linesBox = lb; S.linesFor = it.number;
     renderLines(); loadLines(it.number, false);
     var srch = el("input", "srch"); srch.type = "search"; srch.placeholder = "Search the price book (e.g. hose bib, 50 gal water heater)"; srch.setAttribute("aria-label", "Search the price book"); srch.autocomplete = "off";
-    var hits = el("div", "hits"), panel = null;
-    box.appendChild(srch); box.appendChild(hits);
+    var hits = el("div", "hits"), panel = null, more = el("div", "hits");
+    box.appendChild(srch); box.appendChild(hits); box.appendChild(more);
+    var cb = el("button", "hit custom"); cb.type = "button"; cb.appendChild(el("span", "nm", "＋ Custom line item (not in the price book)")); cb.onclick = function () { openPanel(null); }; box.appendChild(cb);
     function closePanel() { if (panel && panel.parentNode) panel.parentNode.removeChild(panel); panel = null; }
     function openPanel(x) {
       closePanel();
@@ -894,8 +902,7 @@
       var chk = el("div", "chk");
       var kl = el("label"), kLab = el("input"); kLab.type = "radio"; kLab.name = "lkind"; kLab.value = "labor"; kLab.checked = true; kl.appendChild(kLab); kl.appendChild(document.createTextNode("Labor / service"));
       var km = el("label"), kMat = el("input"); kMat.type = "radio"; kMat.name = "lkind"; kMat.value = "materials"; km.appendChild(kMat); km.appendChild(document.createTextNode("Materials"));
-      var tl = el("label"), tx = el("input"); tx.type = "checkbox"; tx.checked = x ? x.taxable !== false : true; tl.appendChild(tx); tl.appendChild(document.createTextNode("Taxable"));
-      chk.appendChild(kl); chk.appendChild(km); chk.appendChild(tl); panel.appendChild(chk);
+      chk.appendChild(kl); chk.appendChild(km); panel.appendChild(chk);
       var fr = el("div", "frow");
       var add = el("button", "btn pri", "Add to job"); add.type = "button";
       add.onclick = function () {
@@ -904,28 +911,46 @@
         var price = Math.round((parseFloat(pIn.value) || 0) * 100);
         var l = readJ(OB_LINE);
         l.push({ id: rid(), at: new Date().toISOString(), job_id: it.job_id || "", number: it.number, customer: it.customer || "", name: name, description: x ? (x.description || "") : "",
-                 qty: qty, price: price, cost: x ? x.cost : 0, lkind: kMat.checked ? "materials" : "labor", taxable: tx.checked, uuid: x ? x.uuid : "", tries: 0 });
-        setList(OB_LINE, l); closePanel(); srch.value = ""; hits.innerHTML = ""; renderLines();
+                 qty: qty, price: price, cost: x ? x.cost : 0, lkind: kMat.checked ? "materials" : "labor", taxable: false, uuid: x ? x.uuid : "", tries: 0 });
+        setList(OB_LINE, l); closePanel(); srch.value = ""; hits.innerHTML = ""; more.innerHTML = ""; renderLines();
         fmsg("🧾 " + qty + " × " + name + " saved. Sending…", "wait"); flushSoon();
       };
       var cancel = el("button", "btn", "Cancel"); cancel.type = "button"; cancel.onclick = closePanel;
       fr.appendChild(add); fr.appendChild(cancel); panel.appendChild(fr);
-      hits.parentNode.insertBefore(panel, hits.nextSibling);
+      more.parentNode.insertBefore(panel, more.nextSibling);
       (nameIn || qIn).focus();
     }
-    function customBtn() { var b = el("button", "hit custom"); b.type = "button"; b.appendChild(el("span", "nm", "＋ Custom line item (not in the price book)")); b.onclick = function () { openPanel(null); }; return b; }
+    function hitBtn(x) {
+      var b = el("button", "hit"); b.type = "button";
+      var nm = el("span", "nm", x.name); if (x.category) nm.appendChild(el("small", null, x.category)); b.appendChild(nm);
+      b.appendChild(el("span", "pr", dollars(x.price))); b.onclick = function () { openPanel(x); }; return b;
+    }
+    // When the phone's word search finds little, ask the server (Claude Haiku) to pick matches by meaning. Needs signal.
+    var smartTimer = null;
+    function smartSearch(q, have) {
+      more.innerHTML = "";
+      if (smartTimer) clearTimeout(smartTimer);
+      smartTimer = setTimeout(function () {
+        if (srch.value.trim() !== q) return;
+        var note = el("div", "sub2", "Looking for other matches…"); more.appendChild(note);
+        clockPost({ action: "search", q: q }, 20000).then(function (r) {
+          if (srch.value.trim() !== q) return;
+          more.innerHTML = "";
+          var items = ((r && r.items) || []).filter(function (x) { return !have.some(function (h) { return h.uuid === x.uuid; }); });
+          if (!items.length) return;
+          more.appendChild(el("div", "sub2", have.length ? "Other matches" : "Closest matches"));
+          items.forEach(function (x) { more.appendChild(hitBtn(x)); });
+        }).catch(function () { more.innerHTML = ""; });
+      }, 500);
+    }
     function showHits() {
-      hits.innerHTML = "";
+      hits.innerHTML = ""; more.innerHTML = "";
       var q = srch.value.trim(); if (!q) return;
       var res = priceSearch(q);
-      if (res === null) { hits.appendChild(el("div", "sub2", "The price book isn't on this phone yet — it downloads the next time there's signal. Add a custom line for now.")); hits.appendChild(customBtn()); loadCatalog(true).then(function (c) { if (c && srch.value.trim() === q) showHits(); }); return; }
-      res.forEach(function (x) {
-        var b = el("button", "hit"); b.type = "button";
-        var nm = el("span", "nm", x.name); if (x.category) nm.appendChild(el("small", null, x.category)); b.appendChild(nm);
-        b.appendChild(el("span", "pr", dollars(x.price))); b.onclick = function () { openPanel(x); }; hits.appendChild(b);
-      });
-      if (!res.length) hits.appendChild(el("div", "sub2", "Nothing in the price book matches \"" + q + "\"."));
-      hits.appendChild(customBtn());
+      if (res === null) { hits.appendChild(el("div", "sub2", "The price book isn't on this phone yet — it downloads the next time there's signal. Use the custom line for now.")); loadCatalog(true).then(function (c) { if (c && srch.value.trim() === q) showHits(); }); return; }
+      res.forEach(function (x) { hits.appendChild(hitBtn(x)); });
+      if (!res.length) hits.appendChild(el("div", "sub2", "No word match for \"" + q + "\" in the price book."));
+      if (res.length < 3 && q.length >= 3) smartSearch(q, res);
     }
     var st = null; srch.oninput = function () { if (st) clearTimeout(st); st = setTimeout(showHits, 150); };
     srch.onkeydown = function (e) { if (e.key === "Enter") { e.preventDefault(); showHits(); } };
