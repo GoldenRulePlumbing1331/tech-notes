@@ -37,6 +37,7 @@
  *   catalog  {fresh}                       → the services price book (uuid, name, price/cost in cents) — the Board keeps a
  *                                            copy on the phone so line-item search works with no signal
  *   lines    {job_id | number}             → the line items already on the job (so techs don't add one twice)
+ *   search   {q}                           → price book matches by meaning (Claude Haiku picks from the catalog; needs ANTHROPIC_API_KEY)
  *   lineitem {req_id, at, job_id | number, name, description, quantity, unit_price, unit_cost, kind, taxable, service_item_id}
  *                                          → adds a line item to the HCP job (prices in cents); replays with the same req_id are no-ops
  */
@@ -74,6 +75,7 @@ function clockAction_(p) {
       case 'photo': return ckPhoto_(p, who);
       case 'catalog':  return { ok: true, items: ckCatalog_(!!p.fresh), loaded_at: Utilities.formatDate(new Date(), ckTz_(), 'EEE h:mm a') };
       case 'lines':    return ckLines_(p);
+      case 'search':   return ckSmartSearch_(p);
       case 'lineitem': return ckLineItem_(p, who);
       default:      throw new Error('Unknown action.');
     }
@@ -246,6 +248,34 @@ function ckCatalog_(fresh) {
   return list;
 }
 
+/**
+ * "shut off" / "shutoff" / "shut-off" / "stop" → the shutoff valve items. Haiku reads the tech's words and picks the
+ * matching price book items by meaning. Only called when the phone's own word search finds little. Cached 6 hours per query.
+ */
+function ckSmartSearch_(p) {
+  const q = String(p.q || '').trim().slice(0, 120);
+  if (!q) return { ok: true, items: [], by: 'none' };
+  const key = props_().getProperty('ANTHROPIC_API_KEY');
+  if (!key) return { ok: true, items: [], by: 'none', note: 'ANTHROPIC_API_KEY not set' };
+  const cache = CacheService.getScriptCache(), ck = 'ck_ss_' + Utilities.base64EncodeWebSafe(q.toLowerCase()).slice(0, 80);
+  const hit = cache.get(ck); if (hit) { try { return { ok: true, items: JSON.parse(hit), by: 'cache' }; } catch (_) {} }
+  const cat = ckCatalog_(false);
+  const list = cat.map((c, i) => `${i}\t${c.name}${c.category ? ' [' + c.category + ']' : ''}`).join('\n');
+  const res = UrlFetchApp.fetch('https://api.anthropic.com/v1/messages', {
+    method: 'post', contentType: 'application/json', headers: { 'x-api-key': key, 'anthropic-version': '2023-06-01' }, muteHttpExceptions: true,
+    payload: JSON.stringify({ model: 'claude-haiku-5-5', max_tokens: 200,
+      system: 'You match what a plumber typed to items in a plumbing company\'s price book. Plumbers use shorthand and synonyms: "shut off", "shutoff", "shut-off", "stop", "stop valve" and "angle stop" all mean a shutoff valve; "WH" is a water heater; "spigot"/"sillcock" is a hose bib; "snake" means a drain clog; "lav" is a bathroom sink; "disposal" is a garbage disposal. Reply with ONLY a JSON array of up to 5 item numbers from the list, best match first, or [] if nothing fits. No words.',
+      messages: [{ role: 'user', content: `Plumber typed: "${q}"\n\nPrice book:\n${list}` }] }),
+  });
+  if (res.getResponseCode() !== 200) { console.warn('smart search: Claude ' + res.getResponseCode() + ' ' + res.getContentText().slice(0, 120)); return { ok: true, items: [], by: 'error' }; }
+  const text = (JSON.parse(res.getContentText()).content || []).filter(b => b.type === 'text').map(b => b.text).join('');
+  let idx = []; try { idx = JSON.parse((/\[[^\]]*\]/.exec(text) || ['[]'])[0]); } catch (_) {}
+  const items = idx.map(n => cat[Number(n)]).filter(Boolean).slice(0, 5);
+  try { cache.put(ck, JSON.stringify(items), 6 * 3600); } catch (_) {}
+  console.log(`smart search "${q}" → ${items.map(c => c.name).join(' | ') || 'nothing'}`);
+  return { ok: true, items: items, by: 'haiku' };
+}
+
 function ckLines_(p) {
   const job = p.job_id ? hcp_('get', '/jobs/' + encodeURIComponent(p.job_id)) : ckJobByNumber_(p.number);
   const r = hcp_('get', `/jobs/${job.id}/line_items`);
@@ -266,7 +296,7 @@ function ckLineItem_(p, who) {
     const at = ckParse_(p.at) || new Date(), tz = ckTz_();
     const body = { name: name, description: String(p.description || '').trim().slice(0, 2000), quantity: qty,
                    unit_price: Math.max(0, Math.round(Number(p.unit_price) || 0)), unit_cost: Math.max(0, Math.round(Number(p.unit_cost) || 0)),
-                   kind: p.kind === 'materials' ? 'materials' : 'labor', taxable: p.taxable !== false };
+                   kind: p.kind === 'materials' ? 'materials' : 'labor', taxable: false };   // Golden Rule: nothing added from the Board is taxable
     let li = null, linked = false;
     if (p.service_item_id) {
       // Link it to the price book item when HCP will take the link; otherwise add it as a plain line.
@@ -311,6 +341,7 @@ function verifyLineItems() {
                             quantity: 1, unit_price: 0, unit_cost: 0, kind: 'labor', taxable: false, service_item_id: cat[0] ? cat[0].uuid : '' }, 'Board test');
     console.log(`✅ Line item: POST /jobs/{id}/line_items works (id ${r.line_id}; linked to price book: ${r.linked}).`);
   } catch (e) { console.log('❌ Line item: ' + e.message); }
+  try { const r = ckSmartSearch_({ q: 'stop' }); console.log(r.by === 'none' ? '⚠️ Smart search: ANTHROPIC_API_KEY not set in this project — the Board falls back to word search only.' : `✅ Smart search ("stop" → ${r.items.map(c => c.name).join(' | ') || 'nothing'}) via ${r.by}.`); } catch (e) { console.log('❌ Smart search: ' + e.message); }
   try { const l = ckLines_({ job_id: job.id }); console.log(`✅ Lines: job has ${l.lines.length} line item(s), total $${(l.total / 100).toFixed(2)}: ` + l.lines.map(x => `${x.qty}× ${x.name}`).join(' · ')); }
   catch (e) { console.log('❌ Lines: ' + e.message); }
 }
