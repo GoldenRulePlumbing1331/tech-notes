@@ -74,7 +74,7 @@ function dispatchAction_(p) {
       case 'parse':      return Object.assign({ ok: true }, dpParse_(p.text, who));
       case 'job':        return { ok: true, jobs: dpJobsByNumber_(p.number).map(dpJobOut_) };
       case 'board':      return { ok: true, jobs: dpBoard_(p.date, p.employee_id) };
-      case 'day':        return Object.assign({ ok: true, who: who, me: dpMe_(who) }, dpDay_(p.date, !!p.fresh));   // me = this tech's HCP employee id (for the Board's "My jobs" toggle)
+      case 'day':        return Object.assign({ ok: true, who: who, me: dpMe_(who), can_dispatch: dpCanDispatch_(who) }, dpDay_(p.date, !!p.fresh));   // me = this tech's HCP employee id (for the Board's "My jobs" toggle)
       case 'events_sync': return dpSyncEvents_(!!p.force);
       case 'unassigned': return Object.assign({ ok: true }, dpUnassigned_(!!p.fresh));
       case 'apply':      mustDispatch_(who); return dpApply_(p, who);
@@ -91,6 +91,10 @@ function jsonOut_(o) {
   return ContentService.createTextOutput(JSON.stringify(o)).setMimeType(ContentService.MimeType.JSON);
 }
 
+function dpCanDispatch_(who) {
+  const allow = String(props_().getProperty('DISPATCHERS') || '').split(/[,\n]/).map(s => s.trim().toLowerCase()).filter(Boolean);
+  return !allow.length || allow.indexOf(String(who).toLowerCase()) !== -1;
+}
 function mustDispatch_(who) {
   const allow = String(props_().getProperty('DISPATCHERS') || '').split(/[,\n]/).map(s => s.trim().toLowerCase()).filter(Boolean);
   if (allow.length && allow.indexOf(String(who).toLowerCase()) === -1)

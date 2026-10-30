@@ -96,6 +96,7 @@
   .msg.err { background: var(--err-bg); color: var(--err-ink); }
   .msg.warn { background: var(--warn-bg); color: var(--warn-ink); }
   .msg.busy { background: var(--soft); color: var(--muted); }
+  .msg.ok { background: var(--ok-bg); color: var(--ok-ink); }
 
   /* grid view */
   #scroller { overflow: auto; -webkit-overflow-scrolling: touch; position: relative; margin-top: 4px; overscroll-behavior: contain;
@@ -127,6 +128,12 @@
          border: 1px solid var(--line); border-left: 4px solid var(--c, #8a94a6); background: var(--tint, var(--card)); color: var(--ink);
          font-size: 12px; line-height: 1.25; z-index: 2; }
   .blk:active { filter: brightness(.95); }
+  @media (hover: hover) and (pointer: fine) { .blk.job[draggable="true"] { cursor: grab; } .blk.job[draggable="true"]:active { cursor: grabbing; } }
+  .blk.dragging { opacity: .45; }
+  .col.over, .head.over { background-color: rgba(242, 182, 50, .22); box-shadow: 0 0 0 2px var(--accent) inset; }
+  .col.nodrop { background-color: rgba(211, 47, 47, .08); }
+  #dragHint { position: fixed; left: 50%; bottom: calc(14px + env(safe-area-inset-bottom)); transform: translateX(-50%); z-index: 45; background: var(--brand); color: #fff;
+              padding: 8px 14px; border-radius: 10px; font-size: 14px; font-weight: 650; box-shadow: 0 6px 20px rgba(0,0,0,.25); pointer-events: none; white-space: nowrap; }
   .blk b { display: block; font-size: 13px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   .blk .t { color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; display: block; }
   .blk .d { display: block; overflow: hidden; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; }
@@ -284,6 +291,7 @@
   <div class="ml" id="mList"></div>
   <div class="mf"><button class="btn pri" id="mDone">Done</button></div>
 </div>
+<div id="dragHint" class="hidden"></div>
 <div id="shade" class="hidden"></div>
 <div id="sheet" class="hidden" role="dialog" aria-modal="true"></div>
 
@@ -311,6 +319,9 @@
 
   var S = { code: "", date: "", today: "", data: null, loading: false, scrolledFor: "", timer: null, offline: false, un: null, me: get("grBoardMe") || "" };
   function mineOn() { return !!(prefs.mine && S.me); }
+  // Drag a job onto another tech's column to reassign it. Desktop only: a mouse/trackpad with hover, not a touch screen.
+  var DRAG_OK = !!(window.matchMedia && matchMedia("(hover: hover) and (pointer: fine)").matches);
+  function canDrag() { return DRAG_OK && S.canDispatch !== false && !mineOn(); }
 
   // ---------- server ----------
   function api(action, data) {
@@ -534,6 +545,51 @@
     return out;
   }
   function openBlock(it, c) { return function () { openSheet(it, c); }; }
+  // ---------- drag a job to a tech (desktop) ----------
+  var DRAG = null;   // { it, from }
+  function dragSource(b, it, c) {
+    b.draggable = true; b.title = "Drag onto a tech to reassign";
+    b.addEventListener("dragstart", function (e) {
+      DRAG = { it: it, from: c };
+      try { e.dataTransfer.setData("text/plain", it.number); e.dataTransfer.effectAllowed = "move"; } catch (x) {}
+      b.classList.add("dragging");
+      var hint = $("dragHint"); hint.textContent = "Drop on a tech to reassign job #" + it.number + " · hold Ctrl to add them as a second tech"; show(hint, true);
+    });
+    b.addEventListener("dragend", function () { b.classList.remove("dragging"); DRAG = null; show($("dragHint"), false); Array.prototype.forEach.call(document.querySelectorAll(".over, .nodrop"), function (x) { x.classList.remove("over", "nodrop"); }); });
+  }
+  function dropTarget(elx, c) {
+    elx.addEventListener("dragover", function (e) {
+      if (!DRAG || !canDrag()) return;
+      var ok = c.id !== UN && c.id !== DRAG.from.id;
+      if (!ok) { elx.classList.add("nodrop"); return; }
+      e.preventDefault(); try { e.dataTransfer.dropEffect = "move"; } catch (x) {}
+      elx.classList.add("over");
+    });
+    elx.addEventListener("dragleave", function () { elx.classList.remove("over", "nodrop"); });
+    elx.addEventListener("drop", function (e) {
+      elx.classList.remove("over", "nodrop");
+      if (!DRAG || !canDrag() || c.id === UN || c.id === DRAG.from.id) return;
+      e.preventDefault();
+      var d = DRAG; DRAG = null; show($("dragHint"), false);
+      reassign(d.it, d.from, c, !!(e.ctrlKey || e.metaKey));
+    });
+  }
+  function reassign(it, from, to, add) {
+    var tm = techMap(), cur = (it.employee_ids || []).filter(function (id) { return tm[id]; });
+    var ids = add ? cur.concat(cur.indexOf(to.id) === -1 ? [to.id] : []) : [to.id];
+    var curNames = cur.map(function (id) { return tm[id].name; }).join(", ") || "unassigned";
+    var what = add ? "Add " + to.name + " to job #" + it.number + " (" + it.customer + ")?\nCrew will be: " + ids.map(function (id) { return tm[id].name; }).join(", ")
+                   : "Move job #" + it.number + " (" + it.customer + ") to " + to.name + "?\nCurrently: " + curNames + ". Same date and time.";
+    if (!confirm(what)) return;
+    say("Moving job #" + it.number + " to " + ids.map(function (id) { return tm[id].name; }).join(", ") + "…", "busy");
+    api("apply", { req_id: rid(), job_id: it.job_id, change: { employee_ids: ids, note: "Dragged on the Board" } }).then(function (r) {
+      if (!r.ok) { say("❌ " + (r.error || "Couldn't move the job."), "err"); return; }
+      say("✅ Job #" + it.number + " → " + ids.map(function (id) { return tm[id].name; }).join(", "), "ok");
+      setTimeout(function () { say(""); }, 4000);
+      load(true, true);
+    });
+  }
+
   function renderGrid() {
     var g = $("grid"); g.innerHTML = "";
     var d = S.data; if (!d) return;
@@ -558,6 +614,7 @@
       h.appendChild(el("div", "meta", (st.rev ? money(st.rev) : "$0") + " · " + hours(st.hrs) + " · " + st.n + (st.n === 1 ? " stop" : " stops")));
       h.appendChild(el("div", "st " + wn.cls, wn.text));
       h.onclick = function () { if (wn.it) openSheet(wn.it, c); else if (c.id === UN) openUnassigned(); };
+      dropTarget(h, c);
       g.appendChild(h);
     });
     if (anyAllDay) {
@@ -585,7 +642,8 @@
       var col = el("div", "col"); col.style.height = H + "px"; col.style.backgroundPosition = "0 0";
       lanes(c.items).forEach(function (x) {
         var it = x.it, st = stateOf(it);
-        var b = el("button", "blk " + st + (it.kind === "estimate" ? " est" : ""));
+        var b = el("button", "blk " + st + (it.kind === "estimate" ? " est" : "") + (it.kind === "job" ? " job" : ""));
+        if (it.kind === "job" && it.job_id && canDrag()) dragSource(b, it, c);
         b.style.setProperty("--c", c.color); b.style.setProperty("--tint", tint(c.color));
         var top = (it.smin - top0) / 60 * hourPx, ht = Math.max(26, (Math.max(it.emin, it.smin + 15) - it.smin) / 60 * hourPx - 2);
         b.style.top = (top + 1) + "px"; b.style.height = ht + "px";
@@ -601,6 +659,7 @@
         col.appendChild(b);
       });
       if (showNow && nowTop >= 0 && nowTop <= H) { var line = el("div", "nowline"); line.style.top = nowTop + "px"; col.appendChild(line); }
+      dropTarget(col, c);
       g.appendChild(col);
     });
 
@@ -1055,6 +1114,7 @@
       S.offline = false;
       if (r.today) S.today = r.today;
       if (r.me !== undefined) { S.me = r.me || ""; put("grBoardMe", S.me); }
+      if (r.can_dispatch !== undefined) S.canDispatch = !!r.can_dispatch;
       if (!S.un || fresh || Date.now() - (S.unAt || 0) > REFRESH_MS - 5000) { S.unAt = Date.now(); loadUn(fresh); }
       S.data = r; put(LAST, JSON.stringify(r));
       say((r.warnings || []).length ? "Some of the schedule couldn't load: " + r.warnings.join(" · ") : "");
