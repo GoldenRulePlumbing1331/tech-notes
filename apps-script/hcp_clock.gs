@@ -653,7 +653,7 @@ function ckReport_(days) {
     open.length ? `<h3 style="${F};font-size:15px">Still open in HCP (${open.length})</h3>` +
       table(['Job', 'Customer', 'Tech(s)', 'Due', 'Status', 'HCP has'],
         open.map(x => `<tr><td><a href="${esc(x.url)}">${esc(x.number)}</a></td><td>${esc(x.customer)}</td><td>${esc(x.techs)}</td><td>${esc(x.due)}</td><td>${esc(x.status)}</td><td>OMW ${esc(x.hcp.omw)} · Start ${esc(x.hcp.start)}</td></tr>`).join('')) : '',
-    `<p style="${F};font-size:12px;color:#666">Labor cost = HCP's tracked time × the tech's fully loaded rate (Team → Pay); Jobs with page presses are queued on the <a href="${sheetUrl}">ToEnter tab</a> for the apply bot; "times differ" rows are flagged there for a person to decide. Full log: <a href="${sheetUrl}">Job Clock sheet</a>.</p>`,
+    `<p style="${F};font-size:12px;color:#666">Labor cost = HCP's tracked time × the tech's fully loaded rate (Team → Pay). Jobs with page presses are queued on the <a href="${sheetUrl}">ToEnter tab</a> for the apply bot; "times differ" rows are flagged there for a person to decide. Full log: <a href="${sheetUrl}">Job Clock sheet</a>.</p>`,
     apply.length ? `<pre style="font-size:10px;color:#999">JOBCLOCK-DATA: ${esc(JSON.stringify({ span: span, apply: apply.filter(a => noLabor.concat(differ).some(x => x.job_id === a.job_id)) }))}</pre>` : '',
   ].join('\n');
   const text = `Job Clock — ${span}: ${noLabor.length} finished job(s) with no labor cost in HCP; ${differ.length} differ; ${open.length} still open; ${matched.length} fine.\n\n` +
