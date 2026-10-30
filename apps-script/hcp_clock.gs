@@ -139,18 +139,40 @@ function ckStampLocked_(p, who) {
     if (sh) { sh.appendRow([now, at, who, out.number, out.customer, CK.EVENTS[event], hcpNow, out.id, note, '']); logged = true; }
   } catch (e) { console.warn('log failed: ' + e.message); }
 
-  // 2. Private note on the job — the office's "what time to enter" if HCP's button never got pressed
+  // 2. Private note on the job — one grouped "Time tracking" note per job, rebuilt with each press
   let noted = false;
   try {
-    hcp_('post', `/jobs/${job.id}/notes`, { content: `⏱ ${CK.EVENTS[event]} ${pressed} — pressed on the voice page by ${who}` +
-      (late ? ` (sent ${Utilities.formatDate(now, tz, 'h:mm a')}, phone had no signal at the time)` : '') + (note ? `. ${note}` : '') +
-      (hcpNow ? `\nHCP already shows ${CK.EVENTS[event]} ${hcpNow}.` : '\nHCP button not pressed yet — office: please set it to this time.') });
+    ckGroupNote_(job.id, 'time', '⏱ Time tracking (Board) — HCP button not pressed yet? Office: set it to these times.',
+      `${CK.EVENTS[event]} ${pressed} — ${who}` + (late ? ` (sent ${Utilities.formatDate(now, tz, 'h:mm a')}, no signal at the time)` : '') +
+      (note ? ` — ${note}` : '') + (hcpNow ? ` · HCP has ${hcpNow}` : ''));
     noted = true;
   } catch (e) { console.warn('note failed: ' + e.message); }
 
   console.log(`clock ✅ ${CK.EVENTS[event]} job ${out.number} ${pressed} by ${who}; hcp=${hcpNow || 'none'}; note=${noted}`);
   return { ok: true, message: `✅ ${CK.EVENTS[event]} ${pressed} recorded for job ${out.number}` + (hcpNow ? ` (HCP already has ${hcpNow}).` : '. The office will set HCP to this time.'),
            job: out, event: event, pressed: pressed, hcp_had: hcpNow, logged: logged, noted: noted };
+}
+
+/* ───────────── one grouped private note per kind, per job ─────────────
+ * HCP's API can add and delete notes but not edit them, so each Board event rebuilds its group: the script keeps the
+ * running text per job+kind in script properties, deletes the previous note for that group and posts the new one.
+ * Kinds: time (On my way / Start / Finish presses), lines (line items added from the Board). Photos make no note
+ * (HCP already shows the attachment) and a typed private note stays its own note. */
+function ckGroupNote_(jobId, kind, title, newLine) {
+  const props = props_(), key = 'ckg_' + kind + '_' + jobId;
+  let st = { lines: [], note_id: '' };
+  try { st = JSON.parse(props.getProperty(key) || 'null') || st; } catch (_) {}
+  st.lines.push(newLine);
+  if (st.lines.length > 40) st.lines = st.lines.slice(-40);
+  const content = title + '\n' + st.lines.join('\n');
+  if (st.note_id) { try { hcp_('delete', `/jobs/${jobId}/notes/${st.note_id}`); } catch (e) { console.warn('old group note delete failed: ' + e.message); } }
+  const r = hcp_('post', `/jobs/${jobId}/notes`, { content: content });
+  st.note_id = (r && r.id) || '';
+  st.t = Date.now();
+  props.setProperty(key, JSON.stringify(st));
+  // keep the property list tidy: drop groups older than 60 days
+  try { const all = props.getProperties(), old = Date.now() - 60 * 86400000; Object.keys(all).forEach(k => { if (k.indexOf('ckg_') !== 0) return; let t = 0; try { t = JSON.parse(all[k]).t; } catch (_) {} if (!t || t < old) props.deleteProperty(k); }); } catch (_) {}
+  return st.note_id;
 }
 
 /* ───────────── notes and photos from the Board (queued on the phone, sent when signal returns) ───────────── */
@@ -305,7 +327,7 @@ function ckLineItem_(p, who) {
     }
     if (!li) li = hcp_('post', `/jobs/${job.id}/line_items`, body);
     try {
-      hcp_('post', `/jobs/${job.id}/notes`, { content: `🧾 ${who} added a line item from the Board — ${Utilities.formatDate(at, tz, 'EEE MMM d, h:mm a')}\n${qty} × ${name} @ $${(body.unit_price / 100).toFixed(2)}` });
+      ckGroupNote_(job.id, 'lines', '🧾 Line items added from the Board', `${Utilities.formatDate(at, tz, 'EEE MMM d, h:mm a')} — ${who}: ${qty} × ${name} @ $${(body.unit_price / 100).toFixed(2)}`);
     } catch (e) { console.warn('line item note failed: ' + e.message); }
     const out = ckJobOut_(job);
     console.log(`clock lineitem ✅ job ${out.number} "${name}" x${qty} by ${who}${linked ? ' (price book)' : ''}`);
