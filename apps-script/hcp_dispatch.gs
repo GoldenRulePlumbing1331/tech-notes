@@ -74,7 +74,7 @@ function dispatchAction_(p) {
       case 'parse':      return Object.assign({ ok: true }, dpParse_(p.text, who));
       case 'job':        return { ok: true, jobs: dpJobsByNumber_(p.number).map(dpJobOut_) };
       case 'board':      return { ok: true, jobs: dpBoard_(p.date, p.employee_id) };
-      case 'day':        return Object.assign({ ok: true }, dpDay_(p.date, !!p.fresh));
+      case 'day':        return Object.assign({ ok: true, who: who, me: dpMe_(who) }, dpDay_(p.date, !!p.fresh));   // me = this tech's HCP employee id (for the Board's "My jobs" toggle)
       case 'events_sync': return dpSyncEvents_(!!p.force);
       case 'unassigned': return Object.assign({ ok: true }, dpUnassigned_(!!p.fresh));
       case 'apply':      mustDispatch_(who); return dpApply_(p, who);
@@ -98,6 +98,12 @@ function mustDispatch_(who) {
 }
 
 /* ───────────── init ───────────── */
+
+/** HCP employee id for the person behind the access code, '' if their name isn't an HCP employee. */
+function dpMe_(who) {
+  try { const me = dpEmployees_().filter(e => e.name.toLowerCase() === String(who).toLowerCase())[0]; return me ? me.id : ''; }
+  catch (e) { console.warn('dpMe_: ' + e.message); return ''; }
+}
 
 function dpInit_(who) {
   const emps = dpEmployees_();
