@@ -407,3 +407,44 @@ the Monday email):**
 - Setup: run `installDailyTrigger()` once in the Job Clock editor (it removes the Monday trigger). The last send
   date is script property `CK_LAST_REPORT`; `sendReportNow()` emails straight away and restarts the 3-day count;
   `weeklyReport()` is a manual 7-day sweep that doesn't.
+
+## Offline for every page + shared code (2026-10-30)
+
+Audit of all nine pages against their Apps Script backends: every action name, request field and reply key the pages
+use matches the scripts (New Job page v6 ≥ server minimum v5). Nothing was broken between front and back end; the
+fixes are about working with no signal and about duplicated code.
+
+**What changed**
+- **Every page now opens and stays usable with no signal.** Before, New Job, Dispatch, Estimate, Order and Job Inputs
+  threw the tech back to the access-code screen with "Couldn't reach the server" when the `init` call failed. Now the
+  app opens anyway, fills its lists (techs, job types, business units, tags, today's jobs) from the copy the phone saved
+  on its last successful load, and shows a yellow **📶 No signal** strip at the top. The strip clears on the next call
+  that gets through.
+- **Dictation is never lost.** What's spoken or typed into New Job, Dispatch, Estimate, Order and Job Notes is saved on
+  the phone as you go (`grDraft:*`), restored when the page is reopened ("Picked up what you dictated earlier"), and
+  cleared once the job/estimate/change goes through. Tapping Look up / Go with no signal says so and keeps the text.
+  Chrome's voice typing itself needs a connection; every page now says to use the keyboard's microphone key when it fails.
+- **Job Notes** no longer drops a note from the outbox when Google answers with an error page instead of ✅/❌ — it stays
+  queued and retries. The page now uses the same access-code card as the other tools (one code everywhere, `grTechCode`;
+  the old per-tool keys are migrated automatically).
+- **Shared code.** `gr.css` (look) and `gr-common.js` (storage, access code, server calls with timeout + no-signal
+  detection, tap-to-talk, drafts, service-worker registration) replace nine copies of the same code. Each page keeps only
+  what's its own. Page weight: 331 KB → 295 KB in total, and the shared 20 KB is cached once; typical pages are 25–35 %
+  smaller. Load order on every page: `config.js` → `gr-common.js` → the page script. `config.js` is now settings only.
+- **Service worker** (`sw.js`, cache `gr-tools-v4`): precaches the two shared files, the bare folder URL and the PNG icon;
+  network-first timeout 3 s (was 4); a navigation that was never cached falls back to `home.html` instead of an error page.
+- **Install as an app:** every page carries the manifest + Apple meta tags (before: only Home/Clock/Job Inputs), and the
+  manifest now has 192/512 PNG icons plus a maskable one, which is what Android Chrome needs to offer "Install app"
+  (the SVG alone only allowed "Add to Home screen"). The home-screen tip says every tool then opens with no signal.
+- Home page: the "waiting to send" badges now count Board notes/line items too, and the tiles re-count when you come back
+  to the page. With nothing connected it opens without a server check.
+
+**Checked with** a Playwright harness against a mock of the seven Apps Script endpoints (`testbed/`): 47 flow checks
+(code accepted/rejected everywhere, New Job dictate → match → create with the right payload, Dispatch parse → apply,
+Estimate draft → create, Order review, Job Inputs CSV → plan → apply, Clock press, Board sheet + private note, then
+offline: drafts restored, Notes/Clock queued, home badge, and both outboxes flushing when signal returns) and pixel
+comparison of every page before/after (identical apart from the moving "now" line and the changed home-page tip).
+
+**To ship:** commit the whole folder to the `tech-notes` repo (new files: `gr.css`, `gr-common.js`, `icon-192.png`,
+`icon-512.png`, `icon-maskable-512.png`). No Apps Script changes and nothing to redeploy. Phones pick up the new pages the
+first time each page is opened with signal; the service worker updates itself.

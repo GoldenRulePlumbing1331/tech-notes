@@ -5,85 +5,18 @@
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <meta name="theme-color" content="#14365c">
 <meta name="robots" content="noindex">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="Golden Rule">
+<link rel="manifest" href="manifest.webmanifest">
 <title>Estimate</title>
-<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='14' fill='%2314365c'/%3E%3Crect x='25' y='12' width='14' height='26' rx='7' fill='%23f2b632'/%3E%3Cpath d='M18 32a14 14 0 0 0 28 0' stroke='%23f2b632' stroke-width='4' fill='none'/%3E%3Crect x='30' y='46' width='4' height='8' fill='%23f2b632'/%3E%3C/svg%3E">
+<link rel="icon" href="icon.svg" type="image/svg+xml">
+<link rel="apple-touch-icon" href="icon-192.png">
+<link rel="stylesheet" href="gr.css">
 <style>
-  :root {
-    --bg: #f3f4f6; --card: #ffffff; --ink: #14181f; --muted: #5d6573; --line: #d5d9e0; --soft: #eef1f5;
-    --brand: #14365c; --accent: #f2b632; --ok-bg: #e4f4e8; --ok-ink: #14532d;
-    --err-bg: #fde8e8; --err-ink: #7f1d1d; --warn-bg: #fff4d6; --warn-ink: #6b4a00; --rec: #c62828;
-  }
-  @media (prefers-color-scheme: dark) {
-    :root { --bg: #0f1216; --card: #191d23; --ink: #eef1f5; --muted: #9aa3b0; --line: #2e343d; --soft: #222831;
-      --ok-bg: #12301d; --ok-ink: #b9f0c9; --err-bg: #3a1515; --err-ink: #ffc9c9; --warn-bg: #3a2e10; --warn-ink: #ffe3a1; }
-  }
-  * { box-sizing: border-box; }
-  html, body { margin: 0; background: var(--bg); color: var(--ink); }
-  body { font: 17px/1.45 -apple-system, "Segoe UI", Roboto, Arial, sans-serif;
-         padding: 16px 16px calc(24px + env(safe-area-inset-bottom)); max-width: 560px; margin: 0 auto; }
-  header { display: flex; align-items: center; gap: 10px; margin: 4px 0 16px; }
-  header .dot { width: 34px; height: 34px; border-radius: 9px; background: var(--brand);
-                display: grid; place-items: center; color: var(--accent); font-weight: 800; flex: none; text-decoration: none; }
-  h1 { font-size: 21px; margin: 0; flex: 1; }
-  header a.nav { font-size: 15px; font-weight: 600; color: var(--brand); text-decoration: none; white-space: nowrap; }
-  @media (prefers-color-scheme: dark) { header a.nav { color: var(--accent); } }
-  h2 { font-size: 15px; text-transform: uppercase; letter-spacing: .06em; color: var(--muted); margin: 0 0 10px; }
-  .card { background: var(--card); border: 1px solid var(--line); border-radius: 14px; padding: 14px; margin-bottom: 14px; }
-  .hidden { display: none !important; }
-  label { display: block; font-weight: 650; margin-bottom: 6px; }
-  input, textarea, select { width: 100%; font: inherit; color: var(--ink); background: var(--card);
-                    border: 1px solid var(--line); border-radius: 10px; padding: 11px 12px; }
-  input.missing { border-color: var(--rec); background: var(--err-bg); }
-  textarea { min-height: 110px; resize: vertical; }
   textarea.desc { min-height: 90px; font-size: 15px; }
-  .seg { display: flex; gap: 6px; margin-bottom: 12px; }
-  .seg button { flex: 1; padding: 11px 6px; font: 600 15px/1.2 inherit; font-family: inherit; border-radius: 10px;
-                border: 1px solid var(--line); background: var(--card); color: var(--ink); }
-  .seg button[aria-pressed="true"] { background: var(--brand); color: #fff; border-color: var(--brand); }
-  .hint { font-size: 14px; color: var(--muted); margin-top: 8px; }
-  .mic { border: 0; border-radius: 12px; background: var(--brand); color: #fff; cursor: pointer;
-         width: 100%; height: 68px; font: 650 19px/1 inherit; font-family: inherit;
-         display: flex; justify-content: center; align-items: center; gap: 10px; }
-  .mic svg { width: 26px; height: 26px; }
-  .mic.rec { background: var(--rec); animation: pulse 1.2s infinite; }
-  @keyframes pulse { 50% { opacity: .75; } }
   #heard { margin-top: 10px; min-height: 130px; }
-  .btn { width: 100%; padding: 13px; border-radius: 12px; font: 700 16px/1 inherit; font-family: inherit;
-         border: 1px solid var(--line); background: var(--soft); color: var(--ink); margin-top: 10px; cursor: pointer; }
-  .btn:disabled { opacity: .55; }
-  .btn.sm { width: auto; padding: 9px 12px; font-size: 14px; margin: 0; }
   #submit { padding: 18px; border: 0; background: var(--accent); color: #1a1300; font-size: 19px; font-weight: 800; }
-  .status { display: none; white-space: pre-wrap; border-radius: 12px; padding: 12px 14px; margin-top: 12px; font-size: 16px; }
-  .status.ok { display: block; background: var(--ok-bg); color: var(--ok-ink); }
-  .status.err { display: block; background: var(--err-bg); color: var(--err-ink); }
-  .status.warn { display: block; background: var(--warn-bg); color: var(--warn-ink); }
-  .status.busy { display: block; background: var(--soft); color: var(--muted); }
-  .match { display: block; width: 100%; text-align: left; font: inherit; color: var(--ink); background: var(--card);
-           border: 1px solid var(--line); border-radius: 12px; padding: 12px; margin-bottom: 8px; cursor: pointer; }
-  .match:active { background: var(--soft); }
-  .match b { display: block; font-size: 18px; }
-  .match span { display: block; font-size: 15px; color: var(--muted); }
-  .match .tag { display: inline-block; font-size: 12px; font-weight: 700; color: var(--ok-ink); background: var(--ok-bg);
-                border-radius: 6px; padding: 1px 6px; margin-left: 6px; vertical-align: middle; }
-  .row { display: flex; gap: 8px; }
-  .row > * { min-width: 0; }
-  dl { display: grid; grid-template-columns: max-content 1fr; gap: 8px 14px; margin: 0; }
-  dt { color: var(--muted); font-size: 15px; }
-  dd { margin: 0; font-weight: 600; overflow-wrap: anywhere; }
-  dd.none { color: var(--warn-ink); font-style: italic; }
-  .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
-  .grid .full { grid-column: 1 / -1; }
-  .grid > div { min-width: 0; }
-  input[type="date"], input[type="time"] { min-width: 0; -webkit-appearance: none; appearance: none; min-height: 46px; }
-  .grid label { font-size: 14px; margin-bottom: 4px; }
-  .choice { display: flex; gap: 10px; align-items: flex-start; padding: 10px; border: 1px solid var(--line);
-            border-radius: 10px; margin-top: 8px; font-weight: 500; cursor: pointer; }
-  .choice input { width: 20px; height: 20px; margin: 2px 0 0; flex: none; }
-  .sub { margin-top: 16px; padding-top: 14px; border-top: 1px solid var(--line); }
-  .link { background: none; border: 0; padding: 0; font: inherit; font-size: 15px; color: var(--brand); text-decoration: underline; cursor: pointer; }
-  @media (prefers-color-scheme: dark) { .link { color: var(--accent); } }
-  .shows { font-size: 15px; color: var(--muted); margin-top: 8px; }
-  .shows b { color: var(--ink); }
+  dd.none { font-weight: 600; }
   /* options editor */
   .opt { border: 2px solid var(--brand); border-radius: 12px; padding: 12px; margin-top: 12px; }
   .opt .head { display: flex; gap: 8px; align-items: center; margin-bottom: 8px; }
@@ -99,8 +32,6 @@
   .x { flex: none; width: 40px; height: 44px; border-radius: 10px; border: 1px solid var(--line); background: var(--card); color: var(--muted); font: 700 18px/1 inherit; cursor: pointer; }
   .total { text-align: right; font-weight: 700; margin-top: 8px; }
   .acts { display: flex; gap: 8px; margin-top: 8px; flex-wrap: wrap; }
-  footer { text-align: center; font-size: 13px; color: var(--muted); margin-top: 18px; }
-  footer a { color: inherit; }
 </style>
 </head>
 <body>
@@ -216,60 +147,33 @@
 <footer><a href="#" id="forget">Not you? Change code</a></footer>
 
 <script src="config.js"></script>
+<script src="gr-common.js"></script>
 <script>
 (function () {
-  var ENDPOINT = (window.GR_ENDPOINTS && window.GR_ENDPOINTS.estimate) || "";
-  var KEY = "grTechCode";
-  var OLD_KEYS = ["grNewJobCode", "grEstimateCode"];
-  function $(id) { return document.getElementById(id); }
-  function get(k) { try { return localStorage.getItem(k) || ""; } catch (e) { return ""; } }
-  function put(k, v) { try { localStorage.setItem(k, v); } catch (e) {} }
-  function drop(k) { try { localStorage.removeItem(k); } catch (e) {} }
-  function show(el, on) { el.classList.toggle("hidden", !on); }
-  function say(id, text, kind) { var m = $(id); m.textContent = text || ""; m.className = "status" + (text ? " " + (kind || "ok") : ""); }
-  function el(tag, cls, text) { var e = document.createElement(tag); if (cls) e.className = cls; if (text != null) e.textContent = text; return e; }
+  // Shared helpers (access code, server calls, speech, drafts, "no signal" strip) live in gr-common.js.
+  var $ = GR.$, show = GR.show, say = GR.say, el = GR.el, stopAll = GR.stopAll;
   function money(c) { return "$" + (Number(c || 0) / 100).toFixed(2); }
-  function recent(text) { try { var r = JSON.parse(get("grRecent") || "[]"); r.unshift({ tool: "Estimate", text: text, at: Date.now() }); put("grRecent", JSON.stringify(r.slice(0, 20))); } catch (e) {} }
+  function recent(text) { GR.recent("Estimate", text); }
 
-  var S = { code: "", mode: "auto", fields: null, est: null, cust: null, isNew: false, addr: "", me: "", today: "", usualUnit: {}, pb: true, reqId: "", target: "new", targetLabel: "" };
+  var S = { mode: "auto", fields: null, est: null, cust: null, isNew: false, addr: "", me: "", today: "", usualUnit: {}, pb: true, reqId: "", target: "new", targetLabel: "" };
 
   // ---------- server ----------
-  function api(action, data) {
-    data = data || {}; data.action = action; data.token = S.code;
-    if (ENDPOINT.indexOf("https://") !== 0) return Promise.resolve({ ok: false, error: "Estimate isn't connected yet. Add its URL to config.js." });
-    return fetch(ENDPOINT, { method: "POST", headers: { "Content-Type": "text/plain" }, body: JSON.stringify(data) })
-      .then(function (r) { return r.json(); })
-      .catch(function () { return { ok: false, error: "Couldn't reach the server. Check your signal and try again.", net: true }; })
-      .then(function (r) {
-        if (!r.ok && action !== "init" && /access code|Too many wrong/.test(r.error || "")) { drop(KEY); S.code = ""; showCode(r.error); }
-        return r;
-      });
-  }
+  var api = GR.client("estimate", { name: "Estimate", onAuthFail: function (msg) { B.showCode(msg); } });
 
-  // ---------- access code ----------
-  function showCode(msg) { show($("codeCard"), true); show($("app"), false); say("codeMsg", msg, "err"); }
-  function start(code, quiet) {
-    S.code = code; say("codeMsg", "Checking…", "busy");
-    api("init").then(function (r) {
-      if (!r.ok) { if (quiet) { S.code = ""; showCode(""); } else showCode(r.error); return; }
-      put(KEY, code);
-      S.me = r.me || ""; S.today = r.today || ""; S.usualUnit = r.usual_unit || {}; S.pb = r.price_book !== false;
-      var sel = $("jEmp");
-      (r.employees || []).forEach(function (e) { var o = el("option", null, e.name); o.value = e.id; sel.appendChild(o); });
-      sel.value = S.me;
-      [["jType", r.job_types], ["jUnit", r.business_units]].forEach(function (d) { (d[1] || []).forEach(function (x) { var o = el("option", null, x.name); o.value = x.id; $(d[0]).appendChild(o); }); });
-      if (S.today) $("vDate").min = S.today;
-      show($("codeCard"), false); show($("app"), true); say("codeMsg", "");
-    });
+  // ---------- access code → init (with no signal: the lists this phone saved last time) ----------
+  function fillSelect(id, list) {
+    var sel = $(id); while (sel.options.length > 1) sel.remove(sel.options.length - 1);
+    (list || []).forEach(function (x) { var o = el("option", null, x.name); o.value = x.id; sel.appendChild(o); });
   }
-  $("codeGo").onclick = function () { var c = $("code").value.trim(); if (c) start(c); };
-  $("code").onkeydown = function (e) { if (e.key === "Enter") $("codeGo").click(); };
-  $("forget").onclick = function (e) { e.preventDefault(); drop(KEY); S.code = ""; $("code").value = ""; showCode(""); };
-  (function boot() {
-    if (get(KEY)) return start(get(KEY));
-    for (var i = 0; i < OLD_KEYS.length; i++) if (get(OLD_KEYS[i])) return start(get(OLD_KEYS[i]), true);
-    showCode("");
-  })();
+  var B = GR.boot({
+    key: "estimate", name: "Estimate",
+    ready: function (r) {
+      S.me = r.me || ""; S.today = r.today || ""; S.usualUnit = r.usual_unit || {}; S.pb = r.price_book !== false;
+      fillSelect("jEmp", r.employees); $("jEmp").value = S.me;
+      fillSelect("jType", r.job_types); fillSelect("jUnit", r.business_units);
+      if (S.today) $("vDate").min = S.today;
+    }
+  });
 
   // ---------- mode ----------
   var HINTS = {
@@ -285,37 +189,15 @@
   Array.prototype.forEach.call(document.querySelectorAll(".seg button"), function (b) { b.onclick = function () { setMode(b.dataset.mode); }; });
   setMode("auto");
 
-  // ---------- speech ----------
-  var SR = window.SpeechRecognition || window.webkitSpeechRecognition;
-  if (!SR) { show($("micMain"), false); $("heard").placeholder = "Voice input isn't supported in this browser. Use Chrome, or the microphone on your keyboard."; }
-  var active = null;
-  function stopAll(cb) { if (!active) { if (cb) cb(); return; } if (cb) active.after.push(cb); active.keep = false; try { active.rec.stop(); } catch (e) {} }
-  function listen(btn, opts) {
-    if (active && active.btn === btn) { stopAll(); return; }
-    stopAll();
-    var state = { btn: btn, keep: true, rec: null, lastHeard: Date.now(), after: [] };
-    var base = opts.base();
-    function begin() {
-      var rec = new SR();
-      rec.lang = "en-US"; rec.continuous = false; rec.interimResults = true; rec.maxAlternatives = 1;
-      state.rec = rec;
-      rec.onresult = function (ev) { var r = ev.results[ev.results.length - 1]; var text = r[0].transcript.trim(); state.lastHeard = Date.now(); opts.onText(base, r.isFinal ? text + " " : "", r.isFinal ? "" : text); };
-      rec.onerror = function (ev) { if (ev.error === "not-allowed" || ev.error === "service-not-allowed") { state.keep = false; say("talkMsg", "❌ Microphone is blocked. Allow microphone access for this site in your browser settings.", "err"); } };
-      rec.onend = function () { base = opts.base(); var idle = Date.now() - state.lastHeard > 20000; if (state.keep && !idle && active === state) { try { begin(); } catch (e) { finish(); } } else finish(); };
-      rec.start();
-    }
-    function finish() { btn.classList.remove("rec"); opts.label(false); if (active === state) active = null; var cbs = state.after; state.after = []; cbs.forEach(function (f) { f(); }); if (opts.done) opts.done(); }
-    active = state; btn.classList.add("rec"); opts.label(true);
-    try { begin(); } catch (e) { finish(); }
-  }
-  $("micMain").onclick = function () {
-    listen($("micMain"), {
-      base: function () { var v = $("heard").value.trim(); return v ? v + " " : ""; },
-      onText: function (base, fin, interim) { $("heard").value = (base + fin + interim).replace(/\s+/g, " ").trimStart(); },
-      label: function (on) { $("micMainLabel").textContent = on ? "Listening… tap when done" : "Tap to talk"; }
-      // No auto-draft on stop: estimates are long, the tech taps "Draft it" when finished.
-    });
-  };
+  // ---------- speech + draft (what's dictated stays on the phone until the estimate is created) ----------
+  var heardDraft = GR.draft($("heard"), "estimate");
+  if (heardDraft.restored) say("talkMsg", "Picked up what you dictated earlier. Tap Draft it when you're ready.", "warn");
+  if (!GR.speech) { show($("micMain"), false); $("heard").placeholder = "Voice input isn't supported in this browser. Use Chrome, or the microphone on your keyboard."; }
+  GR.micFor($("micMain"), $("heard"), {
+    label: function (on) { $("micMainLabel").textContent = on ? "Listening… tap when done" : "Tap to talk"; },
+    onError: function (text, kind) { say("talkMsg", text, kind); }
+    // No auto-draft on stop: estimates are long, the tech taps "Draft it" when finished.
+  });
 
   // ---------- step 1: parse + lookup ----------
   $("lookup").onclick = function () { stopAll(runParse); };
@@ -604,7 +486,7 @@
     var b = $("submit"); b.disabled = true; b.textContent = adding ? "Adding…" : "Creating…"; say("submitMsg", "");
     api("create", data).then(function (r) {
       b.textContent = label;
-      if (r.ok) { say("submitMsg", r.message, "ok"); show(b, false); show($("again"), true); recent(r.message.split("\n").slice(0, 2).join(" — ")); return; }
+      if (r.ok) { say("submitMsg", r.message, "ok"); show(b, false); show($("again"), true); GR.drop("grDraft:estimate"); recent(r.message.split("\n").slice(0, 2).join(" — ")); return; }
       b.disabled = false; if (!r.net) S.reqId = "";
       if (r.created_customer) { var keepAddr = S.isNew ? readAddress("na") : null; openExisting(r.created_customer);
         if (keepAddr && S.addr === "new") { ["Street", "Unit", "City", "State", "Zip"].forEach(function (k, i) { $("xa" + k).value = [keepAddr.street, keepAddr.street_line_2, keepAddr.city, keepAddr.state, keepAddr.zip][i] || ""; }); } }
@@ -614,7 +496,7 @@
   $("again").onclick = function () {
     S.fields = null; S.est = null; S.cust = null; resetSubmit(); setTarget("new"); show($("targetWrap"), false);
     $("heard").value = ""; $("eMsg").value = ""; $("vDate").value = ""; $("vTime").value = ""; $("jEmp").value = S.me; $("searchBox").value = "";
-    $("jType").value = ""; $("jUnit").value = ""; $("options").innerHTML = "";
+    $("jType").value = ""; $("jUnit").value = ""; $("options").innerHTML = ""; GR.saveDrafts();
     say("talkMsg", ""); show($("matchCard"), false); show($("confirmCard"), false);
     window.scrollTo({ top: 0, behavior: "smooth" });
   };
