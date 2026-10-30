@@ -5,8 +5,12 @@
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <meta name="theme-color" content="#14365c">
 <meta name="robots" content="noindex">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="Golden Rule">
 <title>Board</title>
-<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='14' fill='%2314365c'/%3E%3Crect x='25' y='12' width='14' height='26' rx='7' fill='%23f2b632'/%3E%3Cpath d='M18 32a14 14 0 0 0 28 0' stroke='%23f2b632' stroke-width='4' fill='none'/%3E%3Crect x='30' y='46' width='4' height='8' fill='%23f2b632'/%3E%3C/svg%3E">
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="icon" href="icon.svg" type="image/svg+xml">
+<link rel="apple-touch-icon" href="icon-192.png">
 <style>
   :root {
     --bg: #f3f4f6; --card: #ffffff; --ink: #14181f; --muted: #5d6573; --line: #d5d9e0; --soft: #eef1f5; --grid: #e6e9ee;
@@ -245,6 +249,11 @@
   .small.alert { background: var(--warn-bg); color: var(--warn-ink); border-color: transparent; }
   footer { text-align: center; font-size: 13px; color: var(--muted); padding: 10px 0 16px; }
   footer a { color: inherit; }
+  /* "No signal" strip (gr-common.js) */
+  #grNet { margin: 8px 10px 0; border-radius: 10px; padding: 9px 12px; font-size: 14px; font-weight: 650; background: var(--warn-bg); color: var(--warn-ink); }
+  #codeCard .status { display: none; white-space: pre-wrap; border-radius: 10px; padding: 9px 12px; margin-top: 10px; font-size: 14px; }
+  #codeCard .status.err { display: block; background: var(--err-bg); color: var(--err-ink); }
+  #codeCard .status.busy { display: block; background: var(--soft); color: var(--muted); }
 </style>
 </head>
 <body>
@@ -296,19 +305,13 @@
 <div id="sheet" class="hidden" role="dialog" aria-modal="true"></div>
 
 <script src="config.js"></script>
+<script src="gr-common.js"></script>
 <script>
 (function () {
-  var ENDPOINT = (window.GR_ENDPOINTS && window.GR_ENDPOINTS.dispatch) || "";
-  var KEY = "grTechCode";
-  var OLD_KEYS = ["grNewJobCode", "grDispatchCode"];
+  // Shared helpers (access code, server calls, "no signal" strip) live in gr-common.js.
+  var $ = GR.$, get = GR.get, put = GR.put, drop = GR.drop, show = GR.show, el = GR.el;
   var PREF = "grBoardPrefs", LAST = "grBoardLast";
   var REFRESH_MS = 120000, UN = "__un", UN_COLOR = "#8a94a6";
-  function $(id) { return document.getElementById(id); }
-  function get(k) { try { return localStorage.getItem(k) || ""; } catch (e) { return ""; } }
-  function put(k, v) { try { localStorage.setItem(k, v); } catch (e) {} }
-  function drop(k) { try { localStorage.removeItem(k); } catch (e) {} }
-  function show(el, on) { el.classList.toggle("hidden", !on); }
-  function el(tag, cls, text) { var e = document.createElement(tag); if (cls) e.className = cls; if (text != null) e.textContent = text; return e; }
   function say(text, kind) { var m = $("msg"); m.textContent = text || ""; m.className = "msg" + (text ? " " + (kind || "warn") : " hidden"); sizeBoard(); }
 
   // hidden: techs switched off; shown: techs with nothing scheduled that were switched on anyway.
@@ -324,13 +327,7 @@
   function canDrag() { return DRAG_OK && S.canDispatch !== false && !mineOn(); }
 
   // ---------- server ----------
-  function api(action, data) {
-    data = data || {}; data.action = action; data.token = S.code;
-    if (ENDPOINT.indexOf("https://") !== 0) return Promise.resolve({ ok: false, error: "The board isn't connected yet. Add the Dispatch URL to config.js." });
-    return fetch(ENDPOINT, { method: "POST", headers: { "Content-Type": "text/plain" }, body: JSON.stringify(data) })
-      .then(function (r) { return r.json(); })
-      .catch(function () { return { ok: false, error: "Couldn't reach the server.", net: true }; });
-  }
+  var api = GR.client("dispatch", { name: "The board", onAuthFail: function (msg) { S.data = null; B.showCode(msg); } });
 
   // ---------- dates ----------
   function localDay(d) { d = d || new Date(); return d.getFullYear() + "-" + ("0" + (d.getMonth() + 1)).slice(-2) + "-" + ("0" + d.getDate()).slice(-2); }
@@ -731,7 +728,6 @@
 
 
   // ---------- field tools: buttons, notes, photos (saved on the phone, sent when signal returns) ----------
-  var CLOCK = (window.GR_ENDPOINTS && window.GR_ENDPOINTS.clock) || "";
   var OB_STAMP = "grClockOutbox", OB_NOTE = "grBoardNotes", OB_LINE = "grBoardLines", CAT_K = "grBoardCatalog", TODAY_K = "grClockToday";   // stamps share the Job Clock page's outbox
   var EVL = { omw: "On my way", start: "Start", finish: "Finish" };
   S.ph = [];
@@ -739,12 +735,12 @@
   function readJ(k) { try { var v = JSON.parse(get(k) || "[]"); return Array.isArray(v) ? v : []; } catch (e) { return []; } }
   function tfmt(iso) { return new Date(iso).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" }); }
   function dfmt(iso) { return new Date(iso).toLocaleString([], { weekday: "short", hour: "numeric", minute: "2-digit" }); }
+  // Field actions go through the Job Clock script. Rejects when there's no signal (so the item stays queued), replies otherwise.
+  var clockApi = GR.client("clock", { name: "Job Clock", onAuthFail: function (msg) { B.showCode(msg); } });
   function clockPost(data, ms) {
-    data.token = S.code;
-    if (CLOCK.indexOf("https://") !== 0) return Promise.reject(new Error("not connected"));
-    var ctrl = window.AbortController ? new AbortController() : null, t = ctrl ? setTimeout(function () { ctrl.abort(); }, ms || 30000) : null;
-    return fetch(CLOCK, { method: "POST", headers: { "Content-Type": "text/plain" }, body: JSON.stringify(data), signal: ctrl ? ctrl.signal : undefined })
-      .then(function (r) { return r.json(); }).then(function (r) { if (t) clearTimeout(t); return r; }, function (e) { if (t) clearTimeout(t); throw e; });
+    var action = data.action; delete data.action;
+    if (!GR.endpoint("clock")) return Promise.reject(new Error("not connected"));
+    return clockApi(action, data, { timeout: ms || 30000 }).then(function (r) { if (r.net) throw new Error(r.error); return r; });
   }
   function localStamp(num, ev) { try { var a = JSON.parse(get(TODAY_K) || "{}"); return a.__day === new Date().toDateString() && a[num] ? a[num][ev] || "" : ""; } catch (e) { return ""; } }
   function saveStamp(num, ev, at) { var a = {}; try { a = JSON.parse(get(TODAY_K) || "{}"); } catch (e) {} if (a.__day !== new Date().toDateString()) a = { __day: new Date().toDateString() }; (a[num] = a[num] || {})[ev] = at; put(TODAY_K, JSON.stringify(a)); }
@@ -815,7 +811,7 @@
   var flushing = false, ftimer = null;
   function flushSoon() { if (ftimer) clearTimeout(ftimer); ftimer = setTimeout(function () { flush(); }, 800); }
   function flush(onlyId) {
-    if (flushing || !S.code) return;
+    if (flushing || !GR.code()) return;
     var items = allItems().filter(function (it) { return onlyId ? it.x.id === onlyId : !it.x.err; });
     if (!items.length) return;
     flushing = true; var i = 0, sent = 0, stamps = 0;
@@ -825,7 +821,7 @@
       patchItem(it.kind, it.x.id, { sending: true });
       sendOne(it).then(function (r) {
         if (r && r.ok) { removeItem(it.kind, it.x.id); sent++; if (it.kind === "stamp") stamps++; if (it.kind === "line" && S.linesFor === it.x.number) loadLines(S.linesFor, true); }
-        else if (/access code|Too many wrong/.test((r && r.error) || "")) { patchItem(it.kind, it.x.id, { sending: false }); flushing = false; drop(KEY); S.code = ""; return showCode(r.error); }
+        else if (/access code|Too many wrong/.test((r && r.error) || "")) { patchItem(it.kind, it.x.id, { sending: false }); flushing = false; return; }   // gr-common already showed the code card
         else patchItem(it.kind, it.x.id, { sending: false, err: (r && r.error) || "unknown error" });
         next();
       }).catch(function () {
@@ -1101,11 +1097,11 @@
       S.loading = false; $("refresh").classList.remove("spin");
       if (want !== S.date) return load(fresh, quiet);
       if (!r.ok) {
-        if (/access code|Too many wrong/.test(r.error || "")) { drop(KEY); S.code = ""; return showCode(r.error); }
+        if (/access code|Too many wrong/.test(r.error || "")) return;   // gr-common already showed the code card
         var last = null; try { last = JSON.parse(get(LAST) || "null"); } catch (e) {}
         if (r.net && last && last.date === want) {
-          S.data = last; S.offline = true; render();
-          return say("No signal — showing the board as of " + (last.loaded_at || "earlier") + ".", "warn");
+          S.data = last; S.offline = true; render(); GR.offline(false);   // the board's own message says it
+          return say("📶 No signal — showing the board as of " + (last.loaded_at || "earlier") + ". Field tools still work; presses and notes send later.", "warn");
         }
         if (quiet && S.data && S.data.date === want) { S.offline = !!r.net; renderTop(); return; }
         S.data = null; render();
@@ -1141,34 +1137,28 @@
 
   // Today: refresh every 2 minutes while the page is on screen; move the red "now" line every minute.
   function tick() {
-    if (document.visibilityState !== "visible" || !S.code) return;
+    if (document.visibilityState !== "visible" || !GR.code()) return;
     if (S.data && S.data.date === S.today && S.date === S.today) load(false, true);
   }
   setInterval(tick, REFRESH_MS);
   setInterval(function () { if (S.data && S.data.date === S.data.today && document.visibilityState === "visible" && $("sheet").classList.contains("hidden")) { var st = $("scroller").scrollTop, sl = $("scroller").scrollLeft; render(); $("scroller").scrollTop = st; $("scroller").scrollLeft = sl; } }, 60000);
-  document.addEventListener("visibilitychange", function () { if (document.visibilityState === "visible" && S.code && S.date === S.today) load(false, true); });
+  document.addEventListener("visibilitychange", function () { if (document.visibilityState === "visible" && GR.code() && S.date === S.today) load(false, true); });
 
   // ---------- access code ----------
-  function showCode(msg) { show($("codeCard"), true); show($("app"), false); var m = $("codeMsg"); m.textContent = msg || ""; m.className = "msg" + (msg ? " err" : " hidden"); }
-  function start(code) {
-    S.code = code; put(KEY, code);
-    show($("codeCard"), false); show($("app"), true);
-    var q = (/[?&]date=(\d{4}-\d{2}-\d{2})/.exec(location.search) || [])[1];
-    S.today = localDay(); S.date = q || S.today;
-    try { S.un = JSON.parse(get("grBoardUn") || "null"); } catch (e) {} renderUnBtn();
-    // Show the last board straight away when it's the same day (instant open, works with no signal).
-    try { var last = JSON.parse(get(LAST) || "null"); if (last && last.date === S.date) { S.data = last; render(); } } catch (e) {}
-    renderTop(); sizeBoard(); load(false);
-    refreshOut(); loadPhotos().then(flushSoon); loadCatalog(false);
-  }
-  $("codeGo").onclick = function () { var c = $("code").value.trim(); if (c) start(c); };
-  $("code").onkeydown = function (e) { if (e.key === "Enter") $("codeGo").click(); };
-  $("forget").onclick = function (e) { e.preventDefault(); drop(KEY); drop(LAST); drop("grBoardUn"); drop("grBoardMe"); S.me = ""; S.un = null; S.code = ""; S.data = null; $("code").value = ""; showCode(""); };
-  (function boot() {
-    if (get(KEY)) return start(get(KEY));
-    for (var i = 0; i < OLD_KEYS.length; i++) if (get(OLD_KEYS[i])) return start(get(OLD_KEYS[i]));
-    showCode("");
-  })();
+  // No server check on open: the saved board shows at once and the day loads (or the "No signal" strip shows).
+  var B = GR.boot({
+    key: "dispatch", name: "The board", init: false,
+    ready: function () {
+      var q = (/[?&]date=(\d{4}-\d{2}-\d{2})/.exec(location.search) || [])[1];
+      S.today = localDay(); S.date = q || S.today;
+      S.un = GR.getJ("grBoardUn", null); renderUnBtn();
+      // Show the last board straight away when it's the same day (instant open, works with no signal).
+      var last = GR.getJ(LAST, null); if (last && last.date === S.date) { S.data = last; render(); }
+      renderTop(); sizeBoard(); load(false);
+      refreshOut(); loadPhotos().then(flushSoon); loadCatalog(false);
+    },
+    onForget: function () { drop(LAST); drop("grBoardUn"); drop("grBoardMe"); S.me = ""; S.un = null; S.data = null; }
+  });
 })();
 </script>
 </body>

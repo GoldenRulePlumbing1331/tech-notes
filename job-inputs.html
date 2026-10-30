@@ -5,41 +5,22 @@
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <meta name="theme-color" content="#14365c">
 <meta name="robots" content="noindex">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="Golden Rule">
 <title>Job Inputs</title>
 <link rel="manifest" href="manifest.webmanifest">
-<link rel="icon" href="icon.svg">
+<link rel="icon" href="icon.svg" type="image/svg+xml">
+<link rel="apple-touch-icon" href="icon-192.png">
+<link rel="stylesheet" href="gr.css">
 <style>
-  :root {
-    --bg: #f3f4f6; --card: #ffffff; --ink: #14181f; --muted: #5d6573; --line: #d5d9e0; --soft: #eef1f5;
-    --brand: #14365c; --accent: #f2b632; --ok-bg: #e4f4e8; --ok-ink: #14532d; --wait-bg: #fff4d6; --wait-ink: #6b4a00;
-    --err-bg: #fde8e8; --err-ink: #7f1d1d; --net-bg: #e8eefb; --net-ink: #1e3a8a;
-  }
-  @media (prefers-color-scheme: dark) {
-    :root { --bg: #0f1216; --card: #191d23; --ink: #eef1f5; --muted: #9aa3b0; --line: #2e343d; --soft: #232831;
-      --ok-bg: #12301d; --ok-ink: #b9f0c9; --err-bg: #3a1515; --err-ink: #ffc9c9; --wait-bg: #3a2e0f; --wait-ink: #ffe3a3; --net-bg: #16213f; --net-ink: #c7d6ff; }
-  }
-  * { box-sizing: border-box; }
-  html, body { margin: 0; background: var(--bg); color: var(--ink); }
-  body { font: 16px/1.45 -apple-system, "Segoe UI", Roboto, Arial, sans-serif; padding: 16px 16px calc(24px + env(safe-area-inset-bottom)); max-width: 1040px; margin: 0 auto; }
-  header { display: flex; align-items: center; gap: 10px; margin: 4px 0 16px; }
-  header .dot { width: 34px; height: 34px; border-radius: 9px; background: var(--brand); display: grid; place-items: center; color: var(--accent); font-weight: 800; text-decoration: none; flex: none; }
-  h1 { font-size: 21px; margin: 0; flex: 1; }
-  header a.nav { font-size: 15px; font-weight: 600; color: var(--brand); text-decoration: none; white-space: nowrap; }
-  @media (prefers-color-scheme: dark) { header a.nav { color: var(--accent); } }
-  .card { background: var(--card); border: 1px solid var(--line); border-radius: 14px; padding: 14px; margin-bottom: 14px; }
-  label { display: block; font-weight: 650; margin-bottom: 8px; }
-  .hint { font-size: 14px; color: var(--muted); margin-top: 8px; }
-  input[type=text], input[type=search] { font: inherit; color: var(--ink); background: var(--card); border: 1px solid var(--line); border-radius: 10px; padding: 10px 12px; }
-  .btn { padding: 12px 16px; border-radius: 12px; font: 700 16px/1 inherit; font-family: inherit; border: 1px solid var(--line); background: var(--card); color: var(--ink); cursor: pointer; }
-  .btn.go { background: var(--accent); color: #1a1300; border-color: transparent; font-size: 17px; padding: 14px 20px; }
+  body { font-size: 16px; max-width: 1040px; }
+  label { margin-bottom: 8px; }
+  input[type=text], input[type=search] { width: auto; padding: 10px 12px; }
+  .btn { width: auto; margin-top: 0; padding: 12px 16px; background: var(--card); }
+  .btn.go { font-size: 17px; padding: 14px 20px; }
   .btn.sm { padding: 8px 12px; font-size: 14px; border-radius: 9px; }
   .btn:disabled { opacity: .5; cursor: default; }
-  .hidden { display: none !important; }
-  .status { display: none; white-space: pre-wrap; border-radius: 12px; padding: 12px 14px; margin-top: 12px; font-size: 15px; }
-  .status.ok { display: block; background: var(--ok-bg); color: var(--ok-ink); }
-  .status.err { display: block; background: var(--err-bg); color: var(--err-ink); }
-  .status.wait { display: block; background: var(--wait-bg); color: var(--wait-ink); }
-  .status.busy { display: block; background: var(--soft); color: var(--muted); }
+  .status { font-size: 15px; }
   .drop { border: 2px dashed var(--line); border-radius: 14px; padding: 26px 16px; text-align: center; background: var(--soft); cursor: pointer; }
   .drop.over { border-color: var(--brand); background: var(--card); }
   .drop b { display: block; font-size: 17px; margin-bottom: 4px; }
@@ -118,56 +99,32 @@
 <footer><a href="#" id="forget">Not you? Change code</a></footer>
 
 <script src="config.js"></script>
+<script src="gr-common.js"></script>
 <script>
 (function () {
-  var ENDPOINT = (window.GR_ENDPOINTS && window.GR_ENDPOINTS.jobInputs) || "";
-  var KEY = "grTechCode";
-  function $(id) { return document.getElementById(id); }
-  function get(k) { try { return localStorage.getItem(k) || ""; } catch (e) { return ""; } }
-  function put(k, v) { try { localStorage.setItem(k, v); } catch (e) {} }
-  function drop(k) { try { localStorage.removeItem(k); } catch (e) {} }
-  function show(el, on) { el.classList.toggle("hidden", !on); }
-  function say(id, text, kind) { var m = $(id); m.textContent = text || ""; m.className = "status" + (text ? " " + (kind || "ok") : ""); }
-  function el(tag, cls, text) { var e = document.createElement(tag); if (cls) e.className = cls; if (text != null) e.textContent = text; return e; }
+  // Shared helpers (access code, server calls, "no signal" strip) live in gr-common.js.
+  var $ = GR.$, show = GR.show, say = GR.say, el = GR.el;
   function money(c) { var n = (Number(c) || 0) / 100; return (n < 0 ? "-$" : "$") + Math.abs(n).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 }); }
-  function recent(text) { try { var r = JSON.parse(get("grRecent") || "[]"); r.unshift({ tool: "Job Inputs", text: text, at: Date.now() }); put("grRecent", JSON.stringify(r.slice(0, 20))); } catch (e) {} }
-  function uid() { return Date.now().toString(36) + Math.random().toString(36).slice(2, 8); }
+  function recent(text) { GR.recent("Job Inputs", text); }
+  var uid = GR.rid;
 
-  var S = { code: "", who: "", lines: [], plan: null, over: {}, fileName: "", applied: false };
+  var S = { who: "", lines: [], plan: null, over: {}, fileName: "", applied: false };
 
   // ---------- server ----------
-  function post(data, timeoutMs) {
-    data.token = S.code;
-    if (ENDPOINT.indexOf("https://") !== 0) return Promise.resolve({ ok: false, error: "Job Inputs isn't connected yet. Add its URL to config.js as jobInputs." });
-    var ctrl = window.AbortController ? new AbortController() : null;
-    var timer = ctrl ? setTimeout(function () { ctrl.abort(); }, timeoutMs || 60000) : null;
-    return fetch(ENDPOINT, { method: "POST", headers: { "Content-Type": "text/plain" }, body: JSON.stringify(data), signal: ctrl ? ctrl.signal : undefined })
-      .then(function (r) { return r.json(); })
-      .then(function (r) { if (timer) clearTimeout(timer); return r; }, function (e) { if (timer) clearTimeout(timer); throw e; });
-  }
-  function api(action, data, timeoutMs) {
-    data = data || {}; data.action = action;
-    return post(data, timeoutMs).catch(function () { return { ok: false, error: "Couldn't reach the server — check the connection and try again.", net: true }; })
-      .then(function (r) { if (!r.ok && action !== "init" && /access code|Too many wrong/.test(r.error || "")) { drop(KEY); S.code = ""; showCode(r.error); } return r; });
-  }
+  var client = GR.client("jobInputs", { name: "Job Inputs", onAuthFail: function (msg) { B.showCode(msg); } });
+  function api(action, data, timeoutMs) { return client(action, data, { timeout: timeoutMs || 60000 }); }
 
-  // ---------- access code ----------
-  function showCode(msg) { show($("codeCard"), true); show($("app"), false); say("codeMsg", msg, "err"); }
-  function start(code) {
-    S.code = code; say("codeMsg", "Checking…", "busy");
-    api("init").then(function (r) {
-      if (!r.ok) { showCode(r.error); return; }
-      put(KEY, code); S.who = r.who || "";
-      show($("codeCard"), false); show($("app"), true); say("codeMsg", "");
+  // ---------- access code → init ----------
+  var B = GR.boot({
+    key: "jobInputs", name: "Job Inputs",
+    ready: function (r, meta) {
+      S.who = r.who || "";
       var pn = $("pendingNote"); pn.innerHTML = "";
+      if (meta.offline) { pn.textContent = "No signal — the upload needs a connection to check the jobs in Housecall Pro."; return; }
       if (r.pending) { pn.appendChild(document.createTextNode("⏳ " + r.pending + " line" + (r.pending === 1 ? "" : "s") + " from earlier uploads " + (r.pending === 1 ? "is" : "are") + " waiting for " + r.pending_jobs + " job" + (r.pending_jobs === 1 ? "" : "s") + " to be finished in HCP — they post themselves every morning. ")); }
       if (r.sheet_url) { var a = el("a", null, "Open the upload log"); a.href = r.sheet_url; a.target = "_blank"; a.rel = "noopener"; pn.appendChild(a); }
-    });
-  }
-  $("codeGo").onclick = function () { var c = $("code").value.trim(); if (c) start(c); };
-  $("code").onkeydown = function (e) { if (e.key === "Enter") $("codeGo").click(); };
-  $("forget").onclick = function (e) { e.preventDefault(); drop(KEY); S.code = ""; $("code").value = ""; showCode(""); };
-  if (get(KEY)) start(get(KEY)); else showCode("");
+    }
+  });
 
   // ---------- the CSV ----------
   var COLS = {

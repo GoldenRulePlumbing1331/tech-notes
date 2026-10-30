@@ -1,0 +1,81 @@
+/* Golden Rule voice tools — shared look. Loaded by every page before its own <style>; a page's own rules win. */
+:root {
+  --bg: #f3f4f6; --card: #ffffff; --ink: #14181f; --muted: #5d6573; --line: #d5d9e0; --soft: #eef1f5; --grid: #e6e9ee;
+  --brand: #14365c; --accent: #f2b632; --ok-bg: #e4f4e8; --ok-ink: #14532d;
+  --err-bg: #fde8e8; --err-ink: #7f1d1d; --warn-bg: #fff4d6; --warn-ink: #6b4a00; --wait-bg: #fff4d6; --wait-ink: #6b4a00;
+  --net-bg: #e8eefb; --net-ink: #1e3a8a; --rec: #c62828;
+}
+@media (prefers-color-scheme: dark) {
+  :root { --bg: #0f1216; --card: #191d23; --ink: #eef1f5; --muted: #9aa3b0; --line: #2e343d; --soft: #222831; --grid: #252b33;
+    --ok-bg: #12301d; --ok-ink: #b9f0c9; --err-bg: #3a1515; --err-ink: #ffc9c9; --warn-bg: #3a2e10; --warn-ink: #ffe3a1;
+    --wait-bg: #3a2e0f; --wait-ink: #ffe3a3; --net-bg: #16213f; --net-ink: #c7d6ff; }
+}
+* { box-sizing: border-box; }
+html, body { margin: 0; background: var(--bg); color: var(--ink); }
+body { font: 17px/1.45 -apple-system, "Segoe UI", Roboto, Arial, sans-serif;
+       padding: 16px 16px calc(24px + env(safe-area-inset-bottom)); max-width: 560px; margin: 0 auto; }
+header { display: flex; align-items: center; gap: 10px; margin: 4px 0 16px; }
+header .dot { width: 34px; height: 34px; border-radius: 9px; background: var(--brand); display: grid; place-items: center;
+              color: var(--accent); font-weight: 800; text-decoration: none; flex: none; }
+h1 { font-size: 21px; margin: 0; flex: 1; }
+header a.nav { font-size: 15px; font-weight: 600; color: var(--brand); text-decoration: none; white-space: nowrap; }
+h2 { font-size: 15px; text-transform: uppercase; letter-spacing: .06em; color: var(--muted); margin: 0 0 10px; }
+.card { background: var(--card); border: 1px solid var(--line); border-radius: 14px; padding: 14px; margin-bottom: 14px; }
+.hidden { display: none !important; }
+label { display: block; font-weight: 650; margin-bottom: 6px; }
+input, textarea, select { width: 100%; font: inherit; color: var(--ink); background: var(--card);
+                          border: 1px solid var(--line); border-radius: 10px; padding: 11px 12px; }
+input.missing { border-color: var(--rec); background: var(--err-bg); }
+textarea { min-height: 110px; resize: vertical; }
+input[type="date"], input[type="time"] { min-width: 0; -webkit-appearance: none; appearance: none; min-height: 46px; }
+.hint { font-size: 14px; color: var(--muted); margin-top: 8px; }
+.row { display: flex; gap: 8px; }
+.row > * { min-width: 0; }
+.grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+.grid .full { grid-column: 1 / -1; }
+.grid > div { min-width: 0; }
+.grid label { font-size: 14px; margin-bottom: 4px; }
+.sub { margin-top: 16px; padding-top: 14px; border-top: 1px solid var(--line); }
+.btn { width: 100%; padding: 13px; border-radius: 12px; font-family: inherit;
+       border: 1px solid var(--line); background: var(--soft); color: var(--ink); margin-top: 10px; cursor: pointer; }
+.btn:disabled { opacity: .55; }
+.btn.sm { width: auto; padding: 9px 12px; font-size: 14px; margin: 0; }
+.btn.go { padding: 18px; border: 0; background: var(--accent); color: #1a1300; font-size: 19px; font-weight: 800; }
+.link { background: none; border: 0; padding: 0; font: inherit; font-size: 15px; color: var(--brand); text-decoration: underline; cursor: pointer; }
+.status { display: none; white-space: pre-wrap; border-radius: 12px; padding: 12px 14px; margin-top: 12px; font-size: 16px; }
+.status.ok { display: block; background: var(--ok-bg); color: var(--ok-ink); }
+.status.err { display: block; background: var(--err-bg); color: var(--err-ink); }
+.status.warn, .status.wait { display: block; background: var(--warn-bg); color: var(--warn-ink); }
+.status.busy { display: block; background: var(--soft); color: var(--muted); }
+.seg { display: flex; gap: 6px; margin-bottom: 12px; }
+.seg button { flex: 1; padding: 11px 6px; font-family: inherit; border-radius: 10px;
+              border: 1px solid var(--line); background: var(--card); color: var(--ink); }
+.seg button[aria-pressed="true"] { background: var(--brand); color: #fff; border-color: var(--brand); }
+.mic { border: 0; border-radius: 12px; background: var(--brand); color: #fff; cursor: pointer;
+       width: 100%; height: 68px; font-family: inherit;
+       display: flex; justify-content: center; align-items: center; gap: 10px; }
+.mic svg { width: 26px; height: 26px; }
+.mic.rec { background: var(--rec); animation: pulse 1.2s infinite; }
+@keyframes pulse { 50% { opacity: .75; } }
+.match { display: block; width: 100%; text-align: left; font: inherit; color: var(--ink); background: var(--card);
+         border: 1px solid var(--line); border-radius: 12px; padding: 12px; margin-bottom: 8px; cursor: pointer; }
+.match:active { background: var(--soft); }
+.match b { display: block; font-size: 18px; }
+.match span { display: block; font-size: 15px; color: var(--muted); }
+.match .tag { display: inline-block; font-size: 12px; font-weight: 700; color: var(--ok-ink); background: var(--ok-bg);
+              border-radius: 6px; padding: 1px 6px; margin-left: 6px; vertical-align: middle; }
+.choice { display: flex; gap: 10px; align-items: flex-start; padding: 10px; border: 1px solid var(--line);
+          border-radius: 10px; margin-top: 8px; font-weight: 500; cursor: pointer; }
+.choice input { width: 20px; height: 20px; margin: 2px 0 0; flex: none; }
+dl { display: grid; grid-template-columns: max-content 1fr; gap: 8px 14px; margin: 0; }
+dt { color: var(--muted); font-size: 15px; }
+dd { margin: 0; font-weight: 600; overflow-wrap: anywhere; }
+dd.none { color: var(--warn-ink); font-weight: 600; font-style: italic; }
+.shows { font-size: 15px; color: var(--muted); margin-top: 8px; }
+.shows b { color: var(--ink); }
+footer { text-align: center; font-size: 13px; color: var(--muted); margin-top: 18px; }
+footer a { color: inherit; }
+@media (prefers-color-scheme: dark) { header a.nav, .link { color: var(--accent); } }
+/* "No signal" strip (gr-common.js shows it when the server can't be reached) */
+#grNet { position: sticky; top: 0; z-index: 60; margin: -8px -4px 12px; border-radius: 10px; padding: 9px 12px; font-size: 14px; font-weight: 650;
+         background: var(--warn-bg); color: var(--warn-ink); border: 1px solid rgba(0,0,0,.08); }

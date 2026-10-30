@@ -6,41 +6,16 @@
 <meta name="theme-color" content="#14365c">
 <meta name="robots" content="noindex">
 <meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="default">
 <meta name="apple-mobile-web-app-title" content="Golden Rule">
 <link rel="manifest" href="manifest.webmanifest">
 <title>Golden Rule Tools</title>
-<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='14' fill='%2314365c'/%3E%3Crect x='25' y='12' width='14' height='26' rx='7' fill='%23f2b632'/%3E%3Cpath d='M18 32a14 14 0 0 0 28 0' stroke='%23f2b632' stroke-width='4' fill='none'/%3E%3Crect x='30' y='46' width='4' height='8' fill='%23f2b632'/%3E%3C/svg%3E">
-<link rel="apple-touch-icon" href="icon.svg">
+<link rel="icon" href="icon.svg" type="image/svg+xml">
+<link rel="apple-touch-icon" href="icon-192.png">
+<link rel="stylesheet" href="gr.css">
 <style>
-  :root {
-    --bg: #f3f4f6; --card: #ffffff; --ink: #14181f; --muted: #5d6573; --line: #d5d9e0; --soft: #eef1f5;
-    --brand: #14365c; --accent: #f2b632; --ok-bg: #e4f4e8; --ok-ink: #14532d;
-    --err-bg: #fde8e8; --err-ink: #7f1d1d; --warn-bg: #fff4d6; --warn-ink: #6b4a00;
-  }
-  @media (prefers-color-scheme: dark) {
-    :root { --bg: #0f1216; --card: #191d23; --ink: #eef1f5; --muted: #9aa3b0; --line: #2e343d; --soft: #222831;
-      --ok-bg: #12301d; --ok-ink: #b9f0c9; --err-bg: #3a1515; --err-ink: #ffc9c9; --warn-bg: #3a2e10; --warn-ink: #ffe3a1; }
-  }
-  * { box-sizing: border-box; }
-  html, body { margin: 0; background: var(--bg); color: var(--ink); }
-  body { font: 17px/1.45 -apple-system, "Segoe UI", Roboto, Arial, sans-serif;
-         padding: 16px 16px calc(24px + env(safe-area-inset-bottom)); max-width: 560px; margin: 0 auto; }
-  header { display: flex; align-items: center; gap: 10px; margin: 4px 0 16px; }
-  header .dot { width: 34px; height: 34px; border-radius: 9px; background: var(--brand);
-                display: grid; place-items: center; color: var(--accent); font-weight: 800; flex: none; }
-  h1 { font-size: 21px; margin: 0; flex: 1; }
   .who { font-size: 14px; color: var(--muted); white-space: nowrap; }
-  h2 { font-size: 15px; text-transform: uppercase; letter-spacing: .06em; color: var(--muted); margin: 18px 0 10px; }
-  .card { background: var(--card); border: 1px solid var(--line); border-radius: 14px; padding: 14px; margin-bottom: 14px; }
-  .hidden { display: none !important; }
-  label { display: block; font-weight: 650; margin-bottom: 6px; }
-  input { width: 100%; font: inherit; color: var(--ink); background: var(--card); border: 1px solid var(--line); border-radius: 10px; padding: 11px 12px; }
-  .btn { width: 100%; padding: 13px; border-radius: 12px; font: 700 16px/1 inherit; font-family: inherit;
-         border: 1px solid var(--line); background: var(--soft); color: var(--ink); margin-top: 10px; cursor: pointer; }
-  .status { display: none; white-space: pre-wrap; border-radius: 12px; padding: 12px 14px; margin-top: 12px; font-size: 16px; }
-  .status.ok { display: block; background: var(--ok-bg); color: var(--ok-ink); }
-  .status.err { display: block; background: var(--err-bg); color: var(--err-ink); }
-  .status.busy { display: block; background: var(--soft); color: var(--muted); }
+  h2 { margin: 18px 0 10px; }
   .tiles { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
   .tile { display: block; text-decoration: none; color: var(--ink); background: var(--card); border: 1px solid var(--line);
           border-radius: 16px; padding: 16px 14px; min-height: 128px; position: relative; }
@@ -55,9 +30,6 @@
   .rec:first-child { border-top: 0; }
   .rec b { font-size: 13px; color: var(--muted); text-transform: uppercase; letter-spacing: .04em; margin-right: 6px; }
   .rec small { display: block; color: var(--muted); font-size: 13px; }
-  .hint { font-size: 14px; color: var(--muted); margin-top: 8px; }
-  footer { text-align: center; font-size: 13px; color: var(--muted); margin-top: 18px; }
-  footer a { color: inherit; }
 </style>
 </head>
 <body>
@@ -81,37 +53,29 @@
   <h2>Recent on this phone</h2>
   <div class="card" id="recentCard"><div class="hint">Nothing yet.</div></div>
 
-  <div class="hint" id="installHint">Tip: add this page to your home screen (browser menu → “Add to Home screen”) to open it like an app.</div>
+  <div class="hint" id="installHint">Tip: add this page to your home screen (browser menu → “Add to Home screen”) to open it like an app. Every tool then opens with no signal.</div>
 </div>
 
 <footer><a href="#" id="forget">Not you? Change code</a></footer>
 
 <script src="config.js"></script>
+<script src="gr-common.js"></script>
 <script>
 (function () {
-  var EP = window.GR_ENDPOINTS || {};
-  var KEY = "grTechCode";
-  var OLD_KEYS = ["grNewJobCode", "grDispatchCode", "grEstimateCode", "grOrderCode"];
-  function $(id) { return document.getElementById(id); }
-  function get(k) { try { return localStorage.getItem(k) || ""; } catch (e) { return ""; } }
-  function put(k, v) { try { localStorage.setItem(k, v); } catch (e) {} }
-  function drop(k) { try { localStorage.removeItem(k); } catch (e) {} }
-  function show(el, on) { el.classList.toggle("hidden", !on); }
-  function say(id, text, kind) { var m = $(id); m.textContent = text || ""; m.className = "status" + (text ? " " + (kind || "ok") : ""); }
-  function el(tag, cls, text) { var e = document.createElement(tag); if (cls) e.className = cls; if (text != null) e.textContent = text; return e; }
+  var $ = GR.$, el = GR.el, show = GR.show;
 
   var TOOLS = [
-    { key: "notes",    href: "index.html",    name: "Job Notes",      desc: "Say what you did — goes on the invoice.",
+    { key: "notes",    href: "index.html",    name: "Job Notes",      desc: "Say what you did — goes on the invoice.", box: "grNotesOutbox",
       icon: "M4 4h16v2H4zm0 5h16v2H4zm0 5h10v2H4zm0 5h7v2H4z" },
     { key: "newJob",   href: "new-job.html",  name: "New Job",        desc: "Book a job for a new or repeat customer.",
       icon: "M11 5h2v6h6v2h-6v6h-2v-6H5v-2h6z" },
     { key: "dispatch", href: "dispatch.html", name: "Dispatch",       desc: "Move a job, change the crew, see the board.",
       icon: "M7 2h2v2h6V2h2v2h3v18H4V4h3zm-1 7v11h12V9zm2 2h3v3H8zm5 0h3v3h-3z" },
-    { key: "board",    ep: "dispatch", href: "board.html", name: "Board", desc: "Today's schedule by tech — who's where, toggle techs.",
+    { key: "board",    ep: "dispatch", href: "board.html", name: "Board", desc: "Today's schedule by tech — who's where, toggle techs.", box: "board",
       icon: "M3 4h18v16H3zm2 2v12h3V6zm5 0v12h4V6zm6 0v12h3V6zM6 8h1v3H6zm5 2h2v4h-2zm6-1h1v5h-1z" },
     { key: "estimate", href: "estimate.html", name: "Estimate",       desc: "Describe the options — get a draft estimate.",
       icon: "M6 2h9l5 5v15H6zm8 1.5V8h4.5zM8 11h8v2H8zm0 4h8v2H8zm0-8h4v2H8z" },
-    { key: "clock",    href: "clock.html",    name: "Job Clock",      desc: "On my way / Start / Finish — works with no signal.",
+    { key: "clock",    href: "clock.html",    name: "Job Clock",      desc: "On my way / Start / Finish — works with no signal.", box: "grClockOutbox",
       icon: "M12 2a10 10 0 100 20 10 10 0 000-20zm0 2a8 8 0 110 16 8 8 0 010-16zm-1 3h2v5.6l3.5 2.1-1 1.7L11 13.4z" },
     { key: "order",    href: "order.html",    name: "Order Material", desc: "Work in progress — not usable yet.", wip: true,
       icon: "M3 4h2l3 10h10l3-7H7.4M9 18a1.5 1.5 0 100 3 1.5 1.5 0 000-3zm8 0a1.5 1.5 0 100 3 1.5 1.5 0 000-3z" },
@@ -119,26 +83,28 @@
       icon: "M12 3l5 5h-3v6h-4V8H7zM5 17h14v2H5zm0-2h14v1H5z" }
   ];
 
-  // Job Notes saved with no signal (index.html's outbox) — shown as a badge so nobody forgets them.
-  function queued(key) { try { var b = JSON.parse(get(key) || "[]"); return Array.isArray(b) ? b.length : 0; } catch (e) { return 0; } }
+  // Things saved with no signal (Job Notes, Job Clock presses, Board notes/line items) show as a badge so nobody forgets them.
+  function waiting(t) {
+    if (t.box === "board") return GR.queued("grBoardNotes") + GR.queued("grBoardLines");
+    return t.box ? GR.queued(t.box) : 0;
+  }
   function renderTiles() {
     var box = $("tiles"); box.innerHTML = "";
     TOOLS.forEach(function (t) {
-      var ep = EP[t.ep || t.key];
-      var on = !!(ep && ep.indexOf("https://") === 0);
+      var on = !!GR.endpoint(t.ep || t.key);
       var a = el("a", "tile" + (on ? "" : " off")); a.href = t.href;
       var ic = el("div", "ic"); ic.innerHTML = '<svg viewBox="0 0 24 24"><path d="' + t.icon + '"/></svg>'; a.appendChild(ic);
       a.appendChild(el("b", null, t.name)); a.appendChild(el("span", null, t.desc));
       if (!on) a.appendChild(el("div", "badge", "Not connected"));
       else if (t.wip) { a.classList.add("off"); a.appendChild(el("div", "badge", "Work in progress")); }
-      else if (t.key === "notes" || t.key === "clock") { var q = queued(t.key === "notes" ? "grNotesOutbox" : "grClockOutbox"); if (q) a.appendChild(el("div", "badge", q + " waiting to send")); }
+      else { var q = waiting(t); if (q) a.appendChild(el("div", "badge", q + " waiting to send")); }
       box.appendChild(a);
     });
   }
   function renderRecent() {
     var box = $("recentCard"); box.innerHTML = "";
-    var r = []; try { r = JSON.parse(get("grRecent") || "[]"); } catch (e) {}
-    if (!r.length) { box.appendChild(el("div", "hint", "Nothing yet. Things you do in the tools show up here.")); return; }
+    var r = GR.getJ("grRecent", []);
+    if (!Array.isArray(r) || !r.length) { box.appendChild(el("div", "hint", "Nothing yet. Things you do in the tools show up here.")); return; }
     r.slice(0, 10).forEach(function (x) {
       var d = el("div", "rec"); d.appendChild(el("b", null, x.tool)); d.appendChild(document.createTextNode(x.text || ""));
       d.appendChild(el("small", null, new Date(x.at).toLocaleString([], { weekday: "short", month: "short", day: "numeric", hour: "numeric", minute: "2-digit" })));
@@ -146,36 +112,21 @@
     });
   }
 
-  // Validate the code against the first connected tool that has an "init" action.
-  function validate(code) {
-    var order = ["dispatch", "estimate", "order", "newJob"];
-    var url = null;
-    for (var i = 0; i < order.length; i++) if (EP[order[i]] && EP[order[i]].indexOf("https://") === 0) { url = EP[order[i]]; break; }
-    if (!url) return Promise.resolve({ ok: true, who: "" });
-    return fetch(url, { method: "POST", headers: { "Content-Type": "text/plain" }, body: JSON.stringify({ action: "init", token: code }) })
-      .then(function (r) { return r.json(); })
-      .catch(function () { return { ok: true, who: "", offline: true }; });
-  }
-  function showCode(msg) { show($("codeCard"), true); show($("app"), false); say("codeMsg", msg, "err"); $("who").textContent = ""; }
-  function start(code, quiet) {
-    say("codeMsg", "Checking…", "busy");
-    validate(code).then(function (r) {
-      if (!r.ok) { if (quiet) showCode(""); else showCode(r.error || "That code didn't work."); return; }
-      put(KEY, code); put("grNewJobCode", code);   // New Job page keeps its own key
-      $("who").textContent = r.who ? "Hi, " + r.who.split(" ")[0] : (r.offline ? "Offline" : "");
-      show($("codeCard"), false); show($("app"), true); say("codeMsg", "");
+  // The code is checked against the first connected tool; with no signal the tiles open anyway (every tool keeps working offline).
+  var check = ["dispatch", "estimate", "newJob", "clock"].filter(GR.endpoint)[0];
+  var WHO = "grWho";
+  GR.boot({
+    key: check || "dispatch", name: "Golden Rule Tools", init: !!check,
+    ready: function (r, meta) {
+      if (r && r.who) GR.put(WHO, r.who);
+      var who = (r && r.who) || GR.get(WHO);
+      $("who").textContent = who ? "Hi, " + who.split(" ")[0] : (meta.offline ? "Offline" : "");
       renderTiles(); renderRecent();
-    });
-  }
-  $("codeGo").onclick = function () { var c = $("code").value.trim(); if (c) start(c); };
-  $("code").onkeydown = function (e) { if (e.key === "Enter") $("codeGo").click(); };
-  $("forget").onclick = function (e) { e.preventDefault(); [KEY].concat(OLD_KEYS).forEach(drop); $("code").value = ""; showCode(""); };
-  (function boot() {
-    if (get(KEY)) return start(get(KEY), true);
-    for (var i = 0; i < OLD_KEYS.length; i++) if (get(OLD_KEYS[i])) return start(get(OLD_KEYS[i]), true);
-    showCode("");
-  })();
+    },
+    onForget: function () { GR.drop(WHO); $("who").textContent = ""; }
+  });
   if (window.matchMedia && window.matchMedia("(display-mode: standalone)").matches) show($("installHint"), false);
+  document.addEventListener("visibilitychange", function () { if (!document.hidden && !$("app").classList.contains("hidden")) { renderTiles(); renderRecent(); } });
 })();
 </script>
 </body>

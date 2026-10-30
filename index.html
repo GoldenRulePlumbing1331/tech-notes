@@ -5,43 +5,22 @@
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <meta name="theme-color" content="#14365c">
 <meta name="robots" content="noindex">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="Golden Rule">
+<link rel="manifest" href="manifest.webmanifest">
 <title>Tech Details</title>
-<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='14' fill='%2314365c'/%3E%3Crect x='25' y='12' width='14' height='26' rx='7' fill='%23f2b632'/%3E%3Cpath d='M18 32a14 14 0 0 0 28 0' stroke='%23f2b632' stroke-width='4' fill='none'/%3E%3Crect x='30' y='46' width='4' height='8' fill='%23f2b632'/%3E%3C/svg%3E">
+<link rel="icon" href="icon.svg" type="image/svg+xml">
+<link rel="apple-touch-icon" href="icon-192.png">
+<link rel="stylesheet" href="gr.css">
 <style>
-  :root {
-    --bg: #f3f4f6; --card: #ffffff; --ink: #14181f; --muted: #5d6573; --line: #d5d9e0;
-    --brand: #14365c; --accent: #f2b632; --ok-bg: #e4f4e8; --ok-ink: #14532d; --wait-bg: #fff4d6; --wait-ink: #6b4a00;
-    --err-bg: #fde8e8; --err-ink: #7f1d1d; --rec: #c62828;
-  }
-  @media (prefers-color-scheme: dark) {
-    :root { --bg: #0f1216; --card: #191d23; --ink: #eef1f5; --muted: #9aa3b0; --line: #2e343d;
-      --ok-bg: #12301d; --ok-ink: #b9f0c9; --err-bg: #3a1515; --err-ink: #ffc9c9; --wait-bg: #3a2e0f; --wait-ink: #ffe3a3; }
-  }
-  * { box-sizing: border-box; }
-  html, body { margin: 0; background: var(--bg); color: var(--ink); }
-  body { font: 17px/1.45 -apple-system, "Segoe UI", Roboto, Arial, sans-serif;
-         padding: 16px 16px calc(24px + env(safe-area-inset-bottom)); max-width: 560px; margin: 0 auto; }
-  header { display: flex; align-items: center; gap: 10px; margin: 4px 0 16px; }
-  header .dot { width: 34px; height: 34px; border-radius: 9px; background: var(--brand);
-                display: grid; place-items: center; color: var(--accent); font-weight: 800; text-decoration: none; flex: none; }
-  h1 { font-size: 21px; margin: 0; flex: 1; }
-  header a.nav { font-size: 15px; font-weight: 600; color: var(--brand); text-decoration: none; white-space: nowrap; }
-  @media (prefers-color-scheme: dark) { header a.nav { color: var(--accent); } }
-  .card { background: var(--card); border: 1px solid var(--line); border-radius: 14px; padding: 14px; margin-bottom: 14px; }
-  label { display: block; font-weight: 650; margin-bottom: 8px; }
-  .row { display: flex; gap: 10px; align-items: stretch; }
-  input, textarea { width: 100%; font: inherit; color: var(--ink); background: var(--card);
-                    border: 1px solid var(--line); border-radius: 10px; padding: 12px; }
+  label { margin-bottom: 8px; }
+  .row { gap: 10px; align-items: stretch; }
+  input, textarea { padding: 12px; }
   #job { font-size: 26px; font-weight: 700; letter-spacing: 1px; }
-  textarea { min-height: 150px; resize: vertical; }
-  .mic { flex: 0 0 64px; border: 0; border-radius: 12px; background: var(--brand); color: #fff;
-         display: grid; place-items: center; cursor: pointer; }
+  textarea { min-height: 150px; }
+  .mic { width: auto; height: auto; flex: 0 0 64px; display: grid; place-items: center; }
   .mic svg { width: 28px; height: 28px; }
-  .mic.big { width: 100%; height: 64px; flex: none; margin-top: 10px; font-family: inherit; font-size: 18px; font-weight: 650; gap: 10px;
-             display: flex; justify-content: center; align-items: center; }
-  .mic.rec { background: var(--rec); animation: pulse 1.2s infinite; }
-  @keyframes pulse { 50% { opacity: .75; } }
-  .hint { font-size: 14px; color: var(--muted); margin-top: 8px; }
+  .mic.big { width: 100%; height: 64px; flex: none; margin-top: 10px; font-size: 18px; font-weight: 650; display: flex; }
   .toggle { display: flex; gap: 8px; margin-top: 12px; }
   .toggle button { flex: 1; padding: 11px; font-family: inherit; font-size: 15px; font-weight: 600; border-radius: 10px;
                    border: 1px solid var(--line); background: var(--card); color: var(--ink); }
@@ -49,10 +28,7 @@
   #send { width: 100%; padding: 18px; border: 0; border-radius: 12px; background: var(--accent);
           color: #1a1300; font-family: inherit; font-size: 19px; font-weight: 800; }
   #send:disabled { opacity: .55; }
-  #msg { display: none; white-space: pre-wrap; border-radius: 12px; padding: 14px; margin-top: 14px; }
-  #msg.ok { display: block; background: var(--ok-bg); color: var(--ok-ink); }
-  #msg.err { display: block; background: var(--err-bg); color: var(--err-ink); }
-  #msg.wait { display: block; background: var(--wait-bg); color: var(--wait-ink); }
+  #msg { padding: 14px; margin-top: 14px; }
   .ob { border-top: 1px solid var(--line); padding: 10px 0; }
   .ob:first-child { border-top: 0; padding-top: 2px; }
   .ob b { display: block; }
@@ -62,9 +38,6 @@
   .ob .acts { display: flex; gap: 8px; margin-top: 8px; }
   .ob .acts button { flex: 1; padding: 9px; font-family: inherit; font-size: 14px; font-weight: 600; border-radius: 9px;
                      border: 1px solid var(--line); background: var(--card); color: var(--ink); }
-  #codeCard { display: none; }
-  a { color: inherit; }
-  footer { text-align: center; font-size: 13px; color: var(--muted); margin-top: 18px; }
 </style>
 </head>
 <body>
@@ -74,12 +47,15 @@
   <a class="nav" href="home.html">All tools →</a>
 </header>
 
-<div class="card" id="codeCard">
+<div class="card hidden" id="codeCard">
   <label for="code">Your access code</label>
   <input id="code" inputmode="numeric" autocomplete="off" placeholder="8-digit code">
-  <div class="hint">Enter it once. This phone remembers it after your first send goes through.</div>
+  <button class="btn" id="codeGo">Continue</button>
+  <div class="status" id="codeMsg"></div>
+  <div class="hint">One code works for every tool on this phone.</div>
 </div>
 
+<div id="app" class="hidden">
 <div class="card">
   <label for="job">Job number</label>
   <div class="row">
@@ -105,33 +81,27 @@
 </div>
 
 <button id="send">Send to Housecall Pro</button>
-<div id="msg" role="status" aria-live="polite"></div>
+<div id="msg" class="status" role="status" aria-live="polite"></div>
 
-<div class="card" id="outboxCard" style="display:none">
+<div class="card hidden" id="outboxCard">
   <label>Waiting to send</label>
   <div class="hint" id="outboxHint">Saved on this phone. They send themselves when you're back in signal, or next time you open this page.</div>
   <div id="outboxList"></div>
+</div>
 </div>
 
 <footer><a href="#" id="forget">Not you? Change code</a></footer>
 
 <script src="config.js"></script>
+<script src="gr-common.js"></script>
 <script>
 (function () {
-  var ENDPOINT = (window.GR_ENDPOINTS && window.GR_ENDPOINTS.notes) ||
-                 "https://script.google.com/macros/s/AKfycbzmZAs9GmVh6srwcwMabNf2LKEjMH1lumMvy5vlB1AKVbMMjQnGfTmN0z67UpTQc4JC_w/exec";
-  var KEY = "grTechCode";
-  function $(id) { return document.getElementById(id); }
-  function get(k) { try { return localStorage.getItem(k) || ""; } catch (e) { return ""; } }
-  function put(k, v) { try { localStorage.setItem(k, v); } catch (e) {} }
-  function drop(k) { try { localStorage.removeItem(k); } catch (e) {} }
+  var $ = GR.$, el = GR.el, show = GR.show;
+  var ENDPOINT = GR.endpoint("notes");
+  function say(text, kind) { GR.say("msg", text, kind); }
 
-  function refreshWho() {
-    var has = !!get(KEY);
-    $("codeCard").style.display = has ? "none" : "block";
-  }
-  refreshWho();
-  $("forget").onclick = function (e) { e.preventDefault(); drop(KEY); $("code").value = ""; refreshWho(); };
+  // No server check on open: the code is proven by the first note that goes through, so the page works with no signal.
+  GR.boot({ key: "notes", init: false, ready: function () { renderBox(); flushSoon(); } });
 
   var mode = "replace";
   function setMode(m) {
@@ -142,112 +112,40 @@
   $("modeReplace").onclick = function () { setMode("replace"); };
   $("modeAppend").onclick = function () { setMode("append"); };
 
-  function show(text, ok, kind) { var m = $("msg"); m.textContent = text; m.className = kind || (ok ? "ok" : "err"); }
+  // What's typed or dictated stays on the phone until it's sent.
+  GR.draft($("notes"), "notes");
+  GR.draft($("job"), "notesJob");
 
   // ---- speech ----
-  var SR = window.SpeechRecognition || window.webkitSpeechRecognition;
-  if (!SR) {
-    $("micJob").style.display = "none";
-    $("micNotes").style.display = "none";
+  if (!GR.speech) {
+    show($("micJob"), false); show($("micNotes"), false);
     $("notes").placeholder = "Voice input isn't supported in this browser. Use Chrome, or the microphone on your keyboard.";
   }
-
   var WORDS = { zero: 0, oh: 0, o: 0, one: 1, won: 1, two: 2, to: 2, too: 2, three: 3, four: 4, for: 4, five: 5,
                 six: 6, seven: 7, eight: 8, ate: 8, nine: 9 };
   function toDigits(s) {
-    return s.toLowerCase().replace(/[a-z]+/g, function (w) { return w in WORDS ? String(WORDS[w]) : " "; })
-            .replace(/[^0-9-]/g, "");
+    return s.toLowerCase().replace(/[a-z]+/g, function (w) { return w in WORDS ? String(WORDS[w]) : " "; }).replace(/[^0-9-]/g, "");
   }
-
-  var active = null;
-  // Stop listening; if cb is given, call it once the last phrase has been written in.
-  function stopAll(cb) {
-    if (!active) { if (cb) cb(); return; }
-    if (cb) active.after.push(cb);
-    active.keep = false;
-    try { active.rec.stop(); } catch (e) {}
-  }
-
-  function listen(btn, opts) {
-    if (active && active.btn === btn) { stopAll(); return; }
-    stopAll();
-    // Chrome on Android repeats words in continuous mode, so we always listen one
-    // phrase at a time and restart between phrases while the button is on.
-    var state = { btn: btn, keep: !!opts.continuous, rec: null, lastHeard: Date.now(), after: [] };
-    var base = opts.base ? opts.base() : "";
-    function start() {
-      var rec = new SR();
-      rec.lang = "en-US";
-      rec.continuous = false;
-      rec.interimResults = true;
-      rec.maxAlternatives = 1;
-      state.rec = rec;
-      rec.onresult = function (ev) {
-        // Use only the newest result; Android can resend earlier partials.
-        var r = ev.results[ev.results.length - 1];
-        var text = r[0].transcript.trim();
-        state.lastHeard = Date.now();
-        if (r.isFinal) opts.onText(base, text + " ", "");
-        else opts.onText(base, "", text);
-      };
-      rec.onerror = function (ev) {
-        if (ev.error === "not-allowed" || ev.error === "service-not-allowed") {
-          state.keep = false;
-          show("❌ Microphone is blocked. Allow microphone access for this site in your browser settings.", false);
-        } else if (ev.error === "network") {
-          // Chrome's voice typing needs a connection. The keyboard's own mic key works offline.
-          state.keep = false;
-          show("📶 No signal for voice. Tap the box and use the microphone key on your keyboard instead — it works offline. Your note still saves and sends itself later.", false, "wait");
-        }
-      };
-      rec.onend = function () {
-        base = opts.base ? opts.base() : base;
-        var idle = Date.now() - state.lastHeard > 20000;  // stop after 20s of silence
-        if (state.keep && !idle && active === state) { try { start(); } catch (e) { finish(); } }
-        else finish();
-      };
-      rec.start();
-    }
-    function finish() {
-      btn.classList.remove("rec");
-      if (opts.label) opts.label(false);
-      if (active === state) active = null;
-      if (opts.done) opts.done();
-      var cbs = state.after; state.after = [];
-      cbs.forEach(function (f) { f(); });
-    }
-    active = state;
-    btn.classList.add("rec");
-    if (opts.label) opts.label(true);
-    try { start(); } catch (e) { finish(); }
-  }
-
   $("micJob").onclick = function () {
-    listen($("micJob"), {
-      continuous: false,
+    GR.listen($("micJob"), {
+      continuous: false, onError: say,
       onText: function (_b, fin, interim) { var d = toDigits(fin + interim); if (d) $("job").value = d; }
     });
   };
-
-  $("micNotes").onclick = function () {
-    listen($("micNotes"), {
-      continuous: true,
-      base: function () { var v = $("notes").value.trim(); return v ? v + " " : ""; },
-      onText: function (base, fin, interim) { $("notes").value = (base + fin + interim).replace(/\s+/g, " ").trimStart(); },
-      label: function (on) { $("micNotesLabel").textContent = on ? "Listening… tap to stop" : "Tap to talk"; }
-    });
-  };
+  GR.micFor($("micNotes"), $("notes"), {
+    label: function (on) { $("micNotesLabel").textContent = on ? "Listening… tap to stop" : "Tap to talk"; },
+    onError: say
+  });
 
   // ---- send ----
   $("send").onclick = function () {
     var b = $("send");
     if (b.disabled) return;
-    if (!active) { send(); return; }
     // Still listening: stop the mic and wait for the last phrase before sending.
     b.disabled = true; b.textContent = "Finishing…";
     var done = false;
     function go() { if (done) return; done = true; b.disabled = false; send(); }
-    stopAll(go);
+    GR.stopAll(go);
     setTimeout(go, 2500);
   };
 
@@ -255,49 +153,54 @@
   //      server stays queued and goes out on its own when signal returns (or next time the page opens).
   var OUTBOX = "grNotesOutbox";
   var TIMEOUT_MS = 40000;   // a send normally takes 5–15 s (Haiku cleanup + HCP); past this we treat it as no signal
-  function readBox() { try { var b = JSON.parse(get(OUTBOX) || "[]"); return Array.isArray(b) ? b : []; } catch (e) { return []; } }
-  function writeBox(b) { put(OUTBOX, JSON.stringify(b)); renderBox(); }
+  function readBox() { var b = GR.getJ(OUTBOX, []); return Array.isArray(b) ? b : []; }
+  function writeBox(b) { GR.put(OUTBOX, JSON.stringify(b)); renderBox(); }
   function boxUpdate(id, patch) { var b = readBox(); b.forEach(function (x) { if (x.id === id) Object.keys(patch).forEach(function (k) { x[k] = patch[k]; }); }); writeBox(b); }
   function boxRemove(id) { writeBox(readBox().filter(function (x) { return x.id !== id; })); }
-  function newId() { return Date.now().toString(36) + Math.random().toString(36).slice(2, 8); }
   function when(t) { return new Date(t).toLocaleString([], { weekday: "short", hour: "numeric", minute: "2-digit" }); }
 
-  // One attempt at the server. Resolves {ok, text} for a real reply; rejects on no signal / timeout.
+  // One attempt at the server. Resolves {ok, text} for a real ✅/❌ reply; rejects on no signal, timeout, or an error
+  // page from Google (so the note stays queued instead of being dropped).
   function post(item) {
-    var ctrl = window.AbortController ? new AbortController() : null;
-    var timer = ctrl ? setTimeout(function () { ctrl.abort(); }, TIMEOUT_MS) : null;
-    return fetch(ENDPOINT, {
-      method: "POST", headers: { "Content-Type": "text/plain" }, signal: ctrl ? ctrl.signal : undefined,
-      body: JSON.stringify({ token: item.token, job: item.job, summary: item.summary, mode: item.mode, req_id: item.id })
-    }).then(function (r) { return r.text(); }).then(function (t) { return { ok: t.indexOf("✅") === 0, text: t }; })
-      .then(function (r) { if (timer) clearTimeout(timer); return r; }, function (e) { if (timer) clearTimeout(timer); throw e; });
+    if (!ENDPOINT) return Promise.resolve({ ok: false, text: "❌ Job Notes isn't connected yet. Add its URL to config.js." });
+    return GR.post(ENDPOINT, { token: item.token, job: item.job, summary: item.summary, mode: item.mode, req_id: item.id }, TIMEOUT_MS)
+      .then(function (r) { if (!r.ok) throw new Error("http " + r.status); return r.text(); })
+      .then(function (t) {
+        t = t.trim();
+        if (t.indexOf("✅") !== 0 && t.indexOf("❌") !== 0) throw new Error("unexpected reply");
+        GR.offline(false);
+        return { ok: t.indexOf("✅") === 0, text: t };
+      });
   }
   function sent(item, text) {
     boxRemove(item.id);
-    if (!get(KEY)) put(KEY, item.token);
-    try { var r = JSON.parse(get("grRecent") || "[]"); r.unshift({ tool: "Job Notes", text: "Job " + item.job, at: Date.now() }); put("grRecent", JSON.stringify(r.slice(0, 20))); } catch (e) {}
-    refreshWho();
+    GR.recent("Job Notes", "Job " + item.job);
     return text;
   }
 
   function send() {
-    var code = get(KEY) || $("code").value.trim();
+    var code = GR.code() || $("code").value.trim();
     var job = $("job").value.trim();
     var notes = $("notes").value.trim();
-    if (!code) { show("❌ Enter your access code first.", false); return; }
-    if (!/^\d+(-\d+)?$/.test(job)) { show("❌ Say or type the job number.", false); return; }
-    if (!notes) { show("❌ Add your details first.", false); return; }
-    var item = { id: newId(), token: code, job: job, summary: notes, mode: mode, at: Date.now() };
+    if (!code) { say("❌ Enter your access code first.", "err"); return; }
+    if (!/^\d+(-\d+)?$/.test(job)) { say("❌ Say or type the job number.", "err"); return; }
+    if (!notes) { say("❌ Add your details first.", "err"); return; }
+    var item = { id: GR.rid(), token: code, job: job, summary: notes, mode: mode, at: Date.now() };
     var box = readBox(); box.push(item); writeBox(box);     // saved before we even try
+    GR.drop("grDraft:notes"); GR.drop("grDraft:notesJob");
     var b = $("send");
-    b.disabled = true; b.textContent = "Sending…"; $("msg").className = "";
+    b.disabled = true; b.textContent = "Sending…"; say("");
     post(item).then(function (r) {
-      if (r.ok) { show(sent(item, r.text), true); $("notes").value = ""; setMode("replace"); }
-      else { boxRemove(item.id); show(r.text, false); }   // the server answered: a real problem to fix here (job number, code…)
+      if (r.ok) { say(sent(item, r.text), "ok"); $("notes").value = ""; setMode("replace"); }
+      else {
+        boxRemove(item.id); say(r.text, "err");   // the server answered: a real problem to fix here (job number, code…)
+        if (/access code|Too many wrong/.test(r.text)) { GR.forgetCode(); GR.show($("codeCard"), true); GR.show($("app"), false); GR.say("codeMsg", r.text.replace(/^❌\s*/, ""), "err"); }
+      }
     }).catch(function () {
       boxUpdate(item.id, { tries: 1, last: Date.now() });
+      GR.offline(true);
       $("notes").value = ""; setMode("replace");
-      show("📶 No signal — saved. Job " + job + " will send itself when you're back in range, or next time you open this page. (Anything you type now is a new note.)", false, "wait");
+      say("📶 No signal — saved. Job " + job + " will send itself when you're back in range, or next time you open this page. (Anything you type now is a new note.)", "wait");
     }).then(function () { b.disabled = false; b.textContent = "Send to Housecall Pro"; flushSoon(); });
   }
 
@@ -311,7 +214,7 @@
     flushing = true;
     var i = 0, anySent = false;
     (function next() {
-      if (i >= items.length) { flushing = false; if (anySent) show("✅ Saved notes sent." + (readBox().length ? " " + readBox().length + " still waiting." : ""), true); return; }
+      if (i >= items.length) { flushing = false; if (anySent) say("✅ Saved notes sent." + (readBox().length ? " " + readBox().length + " still waiting." : ""), "ok"); return; }
       var item = items[i++];
       if (!readBox().some(function (x) { return x.id === item.id; })) return next();   // deleted meanwhile
       boxUpdate(item.id, { sending: true });
@@ -322,31 +225,29 @@
       }).catch(function () {
         boxUpdate(item.id, { sending: false, tries: (item.tries || 0) + 1, last: Date.now() });
         flushing = false;   // no signal: stop here, the rest will fail the same way
+        GR.offline(true);
         renderBox();
       });
     })();
   }
   function renderBox() {
     var box = readBox(), card = $("outboxCard"), list = $("outboxList");
-    card.style.display = box.length ? "block" : "none";
+    show(card, box.length > 0);
     list.innerHTML = "";
     box.forEach(function (x) {
-      var d = document.createElement("div"); d.className = "ob";
-      var t = document.createElement("b"); t.textContent = "Job " + x.job + " · " + when(x.at) + (x.mode === "append" ? " · add to details" : ""); d.appendChild(t);
-      var p = document.createElement("div"); p.className = "txt"; p.textContent = x.summary; d.appendChild(p);
-      var st = document.createElement("div"); st.className = "st" + (x.err ? " err" : "");
-      st.textContent = x.sending ? "Sending…" : x.err ? "❌ " + x.err + " — fix it with Edit, or delete it." : "Waiting for signal" + (x.tries ? " · tried " + x.tries + "×" : ""); d.appendChild(st);
-      var acts = document.createElement("div"); acts.className = "acts";
+      var d = el("div", "ob");
+      d.appendChild(el("b", null, "Job " + x.job + " · " + when(x.at) + (x.mode === "append" ? " · add to details" : "")));
+      d.appendChild(el("div", "txt", x.summary));
+      d.appendChild(el("div", "st" + (x.err ? " err" : ""), x.sending ? "Sending…" : x.err ? "❌ " + x.err + " — fix it with Edit, or delete it." : "Waiting for signal" + (x.tries ? " · tried " + x.tries + "×" : "")));
+      var acts = el("div", "acts");
       [["Send now", function () { boxUpdate(x.id, { err: "" }); flush(x.id); }],
-       ["Edit", function () { $("job").value = x.job; $("notes").value = x.summary; setMode(x.mode === "append" ? "append" : "replace"); boxRemove(x.id); window.scrollTo({ top: 0, behavior: "smooth" }); }],
+       ["Edit", function () { $("job").value = x.job; $("notes").value = x.summary; setMode(x.mode === "append" ? "append" : "replace"); boxRemove(x.id); GR.saveDrafts(); window.scrollTo({ top: 0, behavior: "smooth" }); }],
        ["Delete", function () { if (confirm("Delete the saved note for job " + x.job + "?")) boxRemove(x.id); }]
-      ].forEach(function (a) { var bt = document.createElement("button"); bt.textContent = a[0]; bt.onclick = a[1]; if (x.sending) bt.disabled = true; acts.appendChild(bt); });
+      ].forEach(function (a) { var bt = el("button", null, a[0]); bt.onclick = a[1]; if (x.sending) bt.disabled = true; acts.appendChild(bt); });
       d.appendChild(acts);
       list.appendChild(d);
     });
   }
-  renderBox();
-  flushSoon();
   window.addEventListener("online", flushSoon);
   document.addEventListener("visibilitychange", function () { if (!document.hidden) flushSoon(); });
   setInterval(function () { if (!document.hidden && readBox().some(function (x) { return !x.err; })) flush(); }, 60000);
