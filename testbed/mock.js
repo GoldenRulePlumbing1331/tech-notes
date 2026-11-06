@@ -40,6 +40,17 @@ const handlers = {
         warnings: [], events_stale: false, loaded_at: "12:30 PM" };
       case "unassigned": return { ok: true, today: TODAY, items: [], warnings: [], counts: { past: 0, upcoming: 0, unscheduled: 0 }, loaded_at: "12:30 PM" };
       case "events_sync": return { ok: true, skipped: true };
+      case "capacity": return { ok: true, date: p.date || TODAY, label: "Fri, Oct 30", today: TODAY, is_today: true, past: false, now_min: 600, day_start: 480, day_end: 960, cursor: 600, over: false,
+        drive_min: 22, typical_min: 90, typical_range: [60, 150], loaded_at: "12:30 PM", warnings: [], learned: false, stats_stale: false,
+        stats_info: { used: 4120, seen: 5210, from: "Nov 6, 2025", at: "Nov 6" },
+        common: [{ label: "Service Call", min: 85, p25: 60, p75: 120, n: 2100, crew: 1 }, { label: "Water Heater Replacement", min: 195, p25: 160, p75: 240, n: 310, crew: 2 }, { label: "Drain Cleaning", min: 80, p25: 55, p75: 110, n: 640, crew: 1 }],
+        techs: [
+          { id: "e1", name: "Kyle Hunt", short: "Kyle H.", initials: "KH", color: "#1e88e5", truck: true, scheduled: true, off: false, jobs: 2, left: 1, done: 1, rem_min: 112, blocked_min: 0, open_min: 248, finish_min: 712,
+            items: [{ number: "49370", kind: "job", customer: "CustomerTest", time: "9:00 AM–11:00 AM", state: "todo", typical: 90, basis: "Service Call (2100 jobs)", rem: 112, note: "" }] },
+          { id: "e2", name: "Mike Smith", short: "Mike S.", initials: "MS", color: "#43a047", truck: true, scheduled: true, off: false, jobs: 3, left: 3, done: 0, rem_min: 420, blocked_min: 0, open_min: -60, finish_min: 1020,
+            items: [{ number: "49371", kind: "job", customer: "DoeJohn", time: "10:00 AM–2:00 PM", state: "work", typical: 195, basis: "Water Heater Replacement (310 jobs)", rem: 150, note: "" }] },
+          { id: "e3", name: "Dave Jones", short: "Dave J.", initials: "DJ", color: "#8e24aa", truck: true, scheduled: false, off: false, jobs: 0, left: 0, done: 0, rem_min: 0, blocked_min: 0, open_min: 360, finish_min: 600, items: [] }] };
+      case "cap_stats": return { ok: true, skipped: true };
     }
     return { ok: false, error: "Unknown action." };
   },
