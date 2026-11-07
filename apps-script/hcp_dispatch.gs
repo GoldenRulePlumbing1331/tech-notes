@@ -55,6 +55,9 @@
  *   unschedule {req_id, job_id}        → removes the schedule (job goes back to "needs scheduling")
  *   capacity {date}                    → per-tech time left that day + what typical jobs still fit (Board "Room left?")
  *   cap_stats {force}                  → re-learns job lengths from the last year (the page calls it when they're stale)
+ *   loose_ends {date, range}           → day or week: finished jobs with no price (and no "no charge"-type reason), jobs
+ *                                        in progress with no return visit or next segment, finished jobs with no
+ *                                        Technician's Notes / line items (unless it's all standard price-book services)
  */
 
 const DP = {
@@ -98,6 +101,7 @@ function dispatchAction_(p) {
       case 'unschedule': mustDispatch_(who); return dpUnschedule_(p, who);
       case 'capacity':   return Object.assign({ ok: true }, capCapacity_(p.date, !!p.fresh));   // Board "Room left?" button
       case 'cap_stats':  return capRefreshStats_(!!p.force);                                    // re-learn job lengths (background)
+      case 'loose_ends': return Object.assign({ ok: true }, leLooseEnds_(p.date, p.range, !!p.fresh));   // Board "Loose ends" button
       default:           throw new Error('Unknown action.');
     }
   } catch (err) {
@@ -525,7 +529,7 @@ function capLines_(ids) {
   for (let i = 0; i < ids.length; i += CAP.LINES_BATCH) {
     const chunk = ids.slice(i, i + CAP.LINES_BATCH);
     hcpAll_(chunk.map(id => `/jobs/${encodeURIComponent(id)}/line_items`)).forEach((r, k) => {
-      if (r.body) out[chunk[k]] = (r.body.data || []).map(l => ({ name: l.name || '', description: l.description || '' }));
+      if (r.body) out[chunk[k]] = (r.body.data || []).map(l => ({ name: l.name || '', description: l.description || '', pb: !!l.service_item_id, kind: l.kind || '', amount: Number(l.amount) || (Number(l.unit_price) || 0) * (Number(l.quantity) || 0) }));
     });
   }
   return out;
@@ -693,6 +697,121 @@ function capCapacity_(date, fresh) {
            common: common, techs: techs, warnings: day.warnings || [], loaded_at: day.loaded_at,
            learning: learning, stats_info: stats ? { used: stats.used, seen: stats.seen, from: stats.from, at: dpFmt_(new Date(stats.at), 'MMM d'), via: stats.via || {} } : null,
            stats_stale: learning || Date.now() - stats.at > CAP.STATS_MAX_AGE_MS };
+}
+
+/* ───────────── "Loose ends" — jobs that need a look before billing ───────────── */
+
+const LE = {
+  // A finished $0 job is fine when the job says why. Checked against tags, description, notes and line items.
+  EXCUSE_RX: /no.?charge|\bn\/?c\b|warranty|call.?back|re-?call|billing on return|bill(ed|ing)? (on|at|after) return|no.?bill|do not bill|don'?t bill|not bill|courtesy|goodwill|\bfree\b|go.?back|return (trip|visit)|estimate only|quote only|no.?show|cancel|rescheduled|part of job|see job|billed (on|under|with)|invoiced (on|under|with)|paid (on|under|with)|included (in|with)|comp(ed|limentary)?\b|training|shop|internal/i,
+  TECH_NOTES: "technician's notes",
+  GENERIC_LINE_RE: /^(service (call|fee)|trip (charge|fee)|dispatch|diagnostic|labor|labour|hourly|misc|materials?|parts?|tax|discount|deposit|credit card fee|fuel|travel|minimum)\b/i,
+  BACK_DAYS: 0,
+};
+
+function leWeek_(date, tz) {
+  const d = Utilities.parseDate(date + ' 12:00', tz, 'yyyy-MM-dd HH:mm');
+  const dow = Number(Utilities.formatDate(d, tz, 'u')) % 7;             // 1=Mon … 7=Sun → Sun=0
+  const mon = new Date(d.getTime() - ((dow + 6) % 7) * 86400000);
+  return { from: Utilities.formatDate(mon, tz, 'yyyy-MM-dd'), to: Utilities.formatDate(new Date(mon.getTime() + 6 * 86400000), tz, 'yyyy-MM-dd') };
+}
+
+/** One job shaped for the list. */
+function leOut_(j, why, detail) {
+  const c = j.customer || {}, a = j.address || {}, s = j.schedule || {}, st = dpDate_(s.scheduled_start), ts = j.work_timestamps || {};
+  return { job_id: j.id, number: String(j.invoice_number || ''), why: why, detail: detail,
+    customer: ((c.last_name || '') + (c.first_name || '')).replace(/\s+/g, '') || c.company || '(no name)',
+    address: [a.street, a.city].filter(Boolean).join(', '), title: String(j.description || '').split('\n')[0].slice(0, 120),
+    date: st ? dpFmt_(st, 'yyyy-MM-dd') : '', when: st ? dpFmt_(st, 'EEE, MMM d · h:mm a') : 'Not scheduled', sort: st ? st.getTime() : 0,
+    status: j.work_status || '', amount: (Number(j.total_amount) || 0) / 100,
+    techs: (j.assigned_employees || []).map(e => [e.first_name, e.last_name].filter(Boolean).join(' ')),
+    done: ts.completed_at ? dpFmt_(dpDate_(ts.completed_at), 'EEE h:mm a') : '', started: ts.started_at ? dpFmt_(dpDate_(ts.started_at), 'EEE h:mm a') : '',
+    tags: (j.tags || []).map(t => (t && t.name) || t).filter(Boolean).slice(0, 6),
+    url: 'https://pro.housecallpro.com/app/jobs/' + j.id };
+}
+
+/** Text that could carry a "no charge"-type reason: tags, description, notes, line items. */
+function leExcuse_(j, lines) {
+  const bits = [].concat((j.tags || []).map(t => (t && t.name) || t), [j.description || ''], (j.notes || []).map(n => (n && n.content) || ''),
+                         (lines || []).map(l => l.name + ' ' + l.description));
+  for (const b of bits) { const m = LE.EXCUSE_RX.exec(String(b || '')); if (m) return m[0]; }
+  return '';
+}
+
+/** Is there another open job on the same base number (49040 → 49040-2) or a later appointment on this one? */
+function leHasNext_(j, siblings, now) {
+  const appts = (j.schedule || {}).appointments || j.appointments || [];
+  if (appts.some(a => { const d = dpDate_(a.start_time) || (a.start_date ? new Date(a.start_date + 'T23:59:00Z') : null); return d && d > now; })) return 'a later appointment on this job';
+  const base = String(j.invoice_number || '').split('-')[0];
+  const sib = (siblings || []).filter(x => x.id !== j.id && String(x.invoice_number || '').split('-')[0] === base && !x.deleted_at && !x.canceled_at && !/cancel|complete/.test(x.work_status || ''))[0];
+  return sib ? 'segment ' + sib.invoice_number + ' (' + (sib.work_status || '') + ')' : '';
+}
+
+function leLooseEnds_(date, range, fresh) {
+  date = /^\d{4}-\d{2}-\d{2}$/.test(date || '') ? date : dpToday_();
+  range = range === 'week' ? 'week' : 'day';
+  const cache = CacheService.getScriptCache(), key = 'le_' + range + '_' + date;
+  if (!fresh) { const hit = cache.get(key); if (hit) { try { return JSON.parse(hit); } catch (_) {} } }
+  const tz = dpTz_(), now = new Date();
+  const span = range === 'week' ? leWeek_(date, tz) : { from: date, to: date };
+  const from = Utilities.parseDate(span.from + ' 00:00', tz, 'yyyy-MM-dd HH:mm'), to = new Date(Utilities.parseDate(span.to + ' 00:00', tz, 'yyyy-MM-dd HH:mm').getTime() + 86400000);
+  const warnings = [], jobs = [];
+  const q = `/jobs?page_size=100&expand[]=appointments&scheduled_start_min=${encodeURIComponent(dpIso_(from))}&scheduled_start_max=${encodeURIComponent(dpIso_(to))}&sort_by=created_at&sort_direction=desc`;
+  try {
+    for (let page = 1; page <= 8; page++) {
+      const r = hcp_('get', q + `&page=${page}`);
+      (r.jobs || []).forEach(j => { if (!j.deleted_at && !j.canceled_at && !/cancel/.test(j.work_status || '')) jobs.push(j); });
+      if (!(r.jobs || []).length || page >= (r.total_pages || 0)) break;
+    }
+  } catch (e) { warnings.push('Jobs: ' + e.message); }
+  // Every in-progress job, whenever it was scheduled — a job left running from last month is exactly the point.
+  try {
+    for (let page = 1; page <= 3; page++) {
+      const r = hcp_('get', `/jobs?page_size=100&expand[]=appointments&work_status[]=in_progress&sort_by=created_at&sort_direction=desc&page=${page}`);
+      (r.jobs || []).forEach(j => { if (!jobs.some(x => x.id === j.id) && !j.deleted_at && !j.canceled_at) jobs.push(j); });
+      if (!(r.jobs || []).length || page >= (r.total_pages || 0)) break;
+    }
+  } catch (e) { warnings.push('In-progress jobs: ' + e.message); }
+
+  const finished = jobs.filter(j => /complete/.test(j.work_status || '') || (j.work_timestamps || {}).completed_at);
+  const running = jobs.filter(j => finished.indexOf(j) === -1 && (/progress/.test(j.work_status || '') || (j.work_timestamps || {}).started_at));
+  const lines = capLines_(finished.map(j => j.id));
+
+  // Segments of the running jobs: other jobs on the same customer (one call per customer).
+  const sibs = {};
+  const custIds = {}; running.forEach(j => { const id = (j.customer || {}).id; if (id) custIds[id] = 1; });
+  hcpAll_(Object.keys(custIds).map(id => `/jobs?customer_id=${encodeURIComponent(id)}&page_size=30&sort_by=created_at&sort_direction=desc&expand[]=appointments`)).forEach((r, i) => {
+    sibs[Object.keys(custIds)[i]] = (r.body && r.body.jobs) || [];
+  });
+
+  const noPrice = [], stuck = [], noNotes = [];
+  finished.forEach(j => {
+    const L = lines[j.id];
+    const amt = Number(j.total_amount) || 0, sub = Number(j.subtotal) || 0;
+    if (amt <= 0 && sub <= 0) {
+      const why = leExcuse_(j, L);
+      if (why) return;                                   // $0 and the job says why — nothing to chase
+      noPrice.push(leOut_(j, 'no price', L ? (L.length ? L.length + ' line item' + (L.length === 1 ? '' : 's') + ', all $0' : 'no line items') : 'line items not checked'));
+    }
+    if (!L || (amt <= 0 && sub <= 0)) return;            // already listed under "no price"
+    const real = L.filter(l => !LE.GENERIC_LINE_RE.test(l.name) && !/discount|gratuity/.test(l.kind));
+    const notes = L.filter(l => l.name.trim().toLowerCase() === LE.TECH_NOTES && String(l.description || '').trim().length > 10);
+    const nonPb = real.filter(l => !l.pb && l.name.trim().toLowerCase() !== LE.TECH_NOTES);
+    if (!L.length) noNotes.push(leOut_(j, 'nothing on the job', 'no line items and no Technician\'s Notes'));
+    else if (!notes.length && (nonPb.length || !real.length)) noNotes.push(leOut_(j, 'no tech notes', real.length ? nonPb.length + ' custom line' + (nonPb.length === 1 ? '' : 's') + ', none from the price book' : 'only ' + L.map(l => l.name).slice(0, 3).join(', ')));
+  });
+  running.forEach(j => {
+    const next = leHasNext_(j, sibs[(j.customer || {}).id], now);
+    if (!next) stuck.push(leOut_(j, 'in progress, no return visit', 'started ' + (leOut_(j).started || '?') + ' · no later appointment and no other open segment'));
+  });
+  const bySort = (a, b) => a.sort - b.sort || a.number.localeCompare(b.number);
+  noPrice.sort(bySort); stuck.sort(bySort); noNotes.sort(bySort);
+  const out = { date: date, range: range, from: span.from, to: span.to, today: dpToday_(),
+                label: range === 'week' ? Utilities.formatDate(from, tz, 'MMM d') + ' – ' + Utilities.formatDate(new Date(to.getTime() - 1), tz, 'MMM d') : Utilities.formatDate(from, tz, 'EEE, MMM d'),
+                checked: { finished: finished.length, running: running.length, total: jobs.length },
+                no_price: noPrice, stuck: stuck, no_notes: noNotes, warnings: warnings, loaded_at: dpFmt_(new Date(), 'h:mm a') };
+  try { cache.put(key, JSON.stringify(out), 120); } catch (_) {}
+  return out;
 }
 
 /**

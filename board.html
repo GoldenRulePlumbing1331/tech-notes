@@ -248,7 +248,8 @@
   .ob .oa button { flex: 1; padding: 8px; border-radius: 9px; border: 1px solid var(--line); background: var(--card); color: var(--ink); font: inherit; font-size: 14px; font-weight: 650; cursor: pointer; }
   .small.alert { background: var(--warn-bg); color: var(--warn-ink); border-color: transparent; }
   .dd .sm { display: none; }
-  @media (max-width: 480px) { .dd .lg, .dd .caret, #unBtn svg { display: none; } .dd .sm { display: inline; } .dd { gap: 4px; padding: 0 6px; } .tools { gap: 5px; } }
+  @media (max-width: 480px) { .dd .lg, .dd .caret, #unBtn svg, #looseBtn svg, #roomBtn svg { display: none; } .dd .sm { display: inline; } .dd { gap: 4px; padding: 0 8px; flex: none; } .tools { gap: 5px; overflow-x: auto; scrollbar-width: none; } .tools::-webkit-scrollbar { display: none; } #techBtn { flex: none; } }
+  .lerow .why { display: inline-block; font-size: 11px; font-weight: 750; padding: 1px 6px; border-radius: 5px; margin-left: 4px; vertical-align: 1px; background: var(--warn-bg); color: var(--warn-ink); }
   /* "Room left?" sheet */
   .capbig { font-size: 30px; font-weight: 800; line-height: 1.1; margin: 6px 0 2px; }
   .capbig small { font-size: 16px; font-weight: 650; color: var(--muted); }
@@ -293,7 +294,8 @@
     <div class="tools">
       <button class="dd" id="techBtn" aria-haspopup="true" aria-expanded="false"><svg viewBox="0 0 24 24"><path d="M16 11a3 3 0 1 0 0-6 3 3 0 0 0 0 6zm-8 0a3 3 0 1 0 0-6 3 3 0 0 0 0 6zm0 2c-2.7 0-8 1.3-8 4v2h16v-2c0-2.7-5.3-4-8-4zm8 0c-.3 0-.7 0-1.1.1A4.2 4.2 0 0 1 17 17v2h7v-2c0-2.7-5.3-4-8-4z"/></svg><span>Techs</span><em id="techCount"></em><span class="caret">▼</span></button>
       <button class="dd" id="unBtn"><svg viewBox="0 0 24 24"><path d="M19 3h-4.2a3 3 0 0 0-5.6 0H5v18h14zm-7 0a1 1 0 1 1 0 2 1 1 0 0 1 0-2zm1 15h-2v-2h2zm0-4h-2V8h2z"/></svg><span class="lg">All unassigned</span><span class="sm">Unassigned</span><em class="badge zero" id="unCount">…</em></button>
-      <button class="dd" id="roomBtn" title="How much open time is left — can we fit more jobs?"><svg viewBox="0 0 24 24"><path d="M12 2a10 10 0 100 20 10 10 0 000-20zm0 2a8 8 0 110 16 8 8 0 010-16zm-1 3h2v5.6l3.5 2.1-1 1.7L11 13.4z"/></svg><span class="lg">Room left?</span><span class="sm">Room?</span></button>
+      <button class="dd" id="roomBtn" title="How much open time is left — can we fit more jobs?"><svg viewBox="0 0 24 24"><path d="M12 2a10 10 0 100 20 10 10 0 000-20zm0 2a8 8 0 110 16 8 8 0 010-16zm-1 3h2v5.6l3.5 2.1-1 1.7L11 13.4z"/></svg><span class="lg">Room left?</span><span class="sm">Room left</span></button>
+      <button class="dd" id="looseBtn" title="Finished with no price, stuck in progress, or missing tech notes"><svg viewBox="0 0 24 24"><path d="M12 2 1 21h22zm0 6 7.5 13h-15zm-1 4v4h2v-4zm0 5v2h2v-2z"/></svg><span class="lg">Loose ends</span><span class="sm">Loose ends</span><em class="badge zero" id="looseCount"></em></button>
     </div>
     <div class="chips" id="chips"></div>
     <div class="sub">
@@ -516,7 +518,7 @@
   }
   function openUnassigned() {
     closeMenu();
-    var sh = $("sheet"); sh.innerHTML = ""; sh.appendChild(el("div", "grab")); S.sheetRoom = false; S.sheetIsUn = true; S.sheetOut = false;
+    var sh = $("sheet"); sh.innerHTML = ""; sh.appendChild(el("div", "grab")); S.sheetRoom = false; S.sheetLoose = false; S.sheetIsUn = true; S.sheetOut = false;
     sh.appendChild(el("h3", null, "Unassigned jobs"));
     var u = S.un;
     if (!u) { sh.appendChild(el("div", "kind", "Loading…")); loadUn(false); }
@@ -541,6 +543,65 @@
   }
   $("unBtn").onclick = openUnassigned;
 
+  // ---------- "Loose ends" — finished with no price, stuck in progress, missing tech notes ----------
+  if (!prefs.leRange) prefs.leRange = "day";
+  function looseTotal(r) { return r ? (r.no_price.length + r.stuck.length + r.no_notes.length) : 0; }
+  function renderLooseBtn() { var b = $("looseCount"), r = S.loose; if (!r || r.date !== S.date) { b.textContent = ""; b.className = "badge zero"; return; } var n = looseTotal(r); b.textContent = String(n); b.className = "badge" + (n ? "" : " zero"); }
+  function loadLoose(fresh, quiet) {
+    var want = S.date, range = prefs.leRange;
+    return api("loose_ends", { date: want, range: range, fresh: !!fresh }, { timeout: 120000 }).then(function (r) {
+      if (r && r.ok) { S.loose = r; S.looseAt = Date.now(); }
+      renderLooseBtn();
+      if (S.sheetLoose && S.date === want) { if (r && r.ok) renderLoose(); else if (!quiet) { var sh = $("sheet"); sh.appendChild(el("div", "msg err", "❌ " + ((r && r.error) || "Couldn't check."))); } }
+      return r;
+    });
+  }
+  function openLoose(fresh) {
+    closeMenu();
+    var sh = $("sheet"); S.sheetIsUn = false; S.sheetOut = false; S.sheetRoom = false; S.sheetLoose = true;
+    if (S.loose && S.loose.date === S.date && S.loose.range === prefs.leRange && !fresh) { renderLoose(); return; }
+    sh.innerHTML = ""; sh.appendChild(el("div", "grab")); sh.appendChild(el("h3", null, "Loose ends")); sh.appendChild(el("div", "kind", "Checking " + (prefs.leRange === "week" ? "the week" : dayLabel(S.date)) + "…"));
+    show($("shade"), true); show(sh, true);
+    loadLoose(fresh);
+  }
+  function lerow(it) {
+    var r = el("button", "row lerow");
+    var tm = el("div", "tm", it.when.split(" · ")[1] || "—"); tm.appendChild(el("small", null, it.when.split(" · ")[0])); r.appendChild(tm);
+    var bd = el("div", "bd"), nm = el("b", null, it.customer); nm.appendChild(el("span", "why", it.why)); bd.appendChild(nm);
+    bd.appendChild(el("span", null, (it.title || "—") + (it.techs.length ? " · " + it.techs.join(", ") : "")));
+    bd.appendChild(el("span", null, it.detail)); r.appendChild(bd);
+    r.appendChild(el("div", "am", it.amount ? money(it.amount) : "#" + it.number));
+    r.onclick = function () { openSheet({ kind: "job", job_id: it.job_id, number: it.number, customer: it.customer, title: it.title, address: it.address, employee_ids: [], status: it.status, amount: it.amount, tags: it.tags, url: it.url, date: it.date, when: it.when + (it.done ? " · done " + it.done : it.started ? " · started " + it.started : ""), time: "" }, null, function () { openLoose(false); }); };
+    return r;
+  }
+  function renderLoose() {
+    var r = S.loose, sh = $("sheet"); sh.innerHTML = ""; sh.appendChild(el("div", "grab"));
+    sh.appendChild(el("h3", null, "Loose ends"));
+    var sub = el("div", "sub"); sub.style.padding = "4px 0 8px";
+    var seg = el("div", "seg"); var bD = el("button", null, "Day"), bW = el("button", null, "Week");
+    bD.className = prefs.leRange === "day" ? "on" : ""; bW.className = prefs.leRange === "week" ? "on" : "";
+    bD.onclick = function () { prefs.leRange = "day"; savePrefs(); openLoose(false); }; bW.onclick = function () { prefs.leRange = "week"; savePrefs(); openLoose(false); };
+    seg.appendChild(bD); seg.appendChild(bW); sub.appendChild(seg);
+    sub.appendChild(el("span", "sum", r.label + " · " + r.checked.finished + " finished, " + r.checked.running + " in progress · as of " + r.loaded_at)); sh.appendChild(sub);
+    var n = looseTotal(r);
+    sh.appendChild(el("div", "kind", n ? n + (n === 1 ? " job needs" : " jobs need") + " a look before billing." : "✅ Nothing loose — every finished job has a price and notes, and nothing is stuck in progress."));
+    function group(title, items, hint) {
+      sh.appendChild(el("div", "ugrp" + (items.length ? " warn" : ""), title + " (" + items.length + ")"));
+      if (!items.length) { sh.appendChild(el("div", "sub2", "None.")); return; }
+      sh.appendChild(el("div", "sub2", hint));
+      items.forEach(function (it) { sh.appendChild(lerow(it)); });
+    }
+    group("Finished, no price", r.no_price, "Total is $0 and nothing on the job says why (no charge, warranty, callback, billing on return…). Tags, notes and line items were checked.");
+    group("In progress, no return visit", r.stuck, "Started but not finished, with no later appointment and no other open segment on the same job number. Includes older jobs, not just this " + (r.range === "week" ? "week" : "day") + ".");
+    group("Finished, no tech notes", r.no_notes, "No Technician's Notes line and the work isn't all standard price-book services, so the invoice doesn't say what was done.");
+    if ((r.warnings || []).length) sh.appendChild(el("div", "msg warn", "Some of it couldn't load: " + r.warnings.join(" · ")));
+    var acts = el("div", "acts");
+    var rf = el("button", "btn", "Refresh"); rf.onclick = function () { openLoose(true); }; acts.appendChild(rf);
+    var cl = el("button", "btn", "Close"); cl.onclick = closeSheet; acts.appendChild(cl);
+    sh.appendChild(acts); show($("shade"), true); show(sh, true);
+  }
+  $("looseBtn").onclick = function () { openLoose(false); };
+
   // ---------- "Room left?" — open time per tech, from how long jobs usually take ----------
   if (!prefs.capOff) prefs.capOff = {}; if (!prefs.capOn) prefs.capOn = {};
   function dur(m) { m = Math.round(Math.abs(m)); var h = Math.floor(m / 60), mm = m % 60; return h ? h + "h" + (mm ? " " + mm + "m" : "") : mm + "m"; }
@@ -563,7 +624,7 @@
   function renderLearnNote() { var n = $("capLearn"); if (n) n.textContent = "Learning how long jobs take from the last year of HCP jobs" + (S.capProgress ? " (" + S.capProgress + ")" : "") + " — the numbers below use defaults until it's done (10–20 min the first time)."; }
   function openRoom(fresh) {
     closeMenu();
-    var sh = $("sheet"); S.sheetIsUn = false; S.sheetOut = false; S.sheetRoom = true;
+    var sh = $("sheet"); S.sheetIsUn = false; S.sheetOut = false; S.sheetLoose = false; S.sheetRoom = true;
     var want = S.date;
     if (!S.room || S.room.date !== want || fresh) {
       sh.innerHTML = ""; sh.appendChild(el("div", "grab")); sh.appendChild(el("h3", null, "Room left?"));
@@ -1154,7 +1215,7 @@
 
   function openOutbox() {
     closeMenu();
-    var sh = $("sheet"); sh.innerHTML = ""; sh.appendChild(el("div", "grab")); S.sheetRoom = false; S.sheetIsUn = false; S.sheetOut = true;
+    var sh = $("sheet"); sh.innerHTML = ""; sh.appendChild(el("div", "grab")); S.sheetRoom = false; S.sheetLoose = false; S.sheetIsUn = false; S.sheetOut = true;
     sh.appendChild(el("h3", null, "Waiting to send"));
     sh.appendChild(el("div", "kind", "Saved on this phone with the time you pressed. They send themselves when signal returns."));
     var items = allItems();
@@ -1180,11 +1241,11 @@
   setInterval(function () { if (document.visibilityState === "visible" && allItems().some(function (it) { return !it.x.err; })) flush(); }, 60000);
 
   // ---------- detail sheet ----------
-  function closeSheet() { show($("shade"), false); show($("sheet"), false); S.sheetIsUn = false; S.sheetOut = false; S.sheetRoom = false; S.linesFor = ""; S.linesBox = null; }
+  function closeSheet() { show($("shade"), false); show($("sheet"), false); S.sheetIsUn = false; S.sheetOut = false; S.sheetRoom = false; S.sheetLoose = false; S.linesFor = ""; S.linesBox = null; }
   function kv(box, label, content) { var r = el("div", "kv"); r.appendChild(el("span", null, label)); var v = el("span"); if (typeof content === "string") v.textContent = content; else v.appendChild(content); r.appendChild(v); box.appendChild(r); }
   function link(href, text, blank) { var a = el("a", null, text); a.href = href; if (blank) { a.target = "_blank"; a.rel = "noopener"; } return a; }
   function openSheet(it, c, back) {
-    var sh = $("sheet"); sh.innerHTML = ""; sh.appendChild(el("div", "grab")); S.sheetRoom = false; S.sheetIsUn = false; S.sheetOut = false;
+    var sh = $("sheet"); sh.innerHTML = ""; sh.appendChild(el("div", "grab")); S.sheetRoom = false; S.sheetLoose = false; S.sheetIsUn = false; S.sheetOut = false;
     var tm = S.data ? techMap() : {}, s = stateOf(it);
     sh.appendChild(el("h3", null, it.kind === "event" ? it.title : it.customer));
     var kind = it.kind === "job" ? "Job #" + (it.number || "?") : it.kind === "estimate" ? "Estimate #" + (it.number || "?") : "Event";
@@ -1244,6 +1305,7 @@
       if (r.me !== undefined) { S.me = r.me || ""; put("grBoardMe", S.me); }
       if (r.can_dispatch !== undefined) S.canDispatch = !!r.can_dispatch;
       if (!S.un || fresh || Date.now() - (S.unAt || 0) > REFRESH_MS - 5000) { S.unAt = Date.now(); loadUn(fresh); }
+      if (!S.loose || S.loose.date !== want || fresh || Date.now() - (S.looseAt || 0) > 10 * 60000) loadLoose(fresh, true);
       S.data = r; put(LAST, JSON.stringify(r));
       say((r.warnings || []).length ? "Some of the schedule couldn't load: " + r.warnings.join(" · ") : "");
       render();
@@ -1255,7 +1317,7 @@
       }
     });
   }
-  function go(ymd) { if (!ymd) return; S.date = ymd; closeSheet(); closeMenu(); renderTop(); load(false); try { history.replaceState(null, "", "?date=" + ymd); } catch (e) {} }
+  function go(ymd) { if (!ymd) return; S.date = ymd; closeSheet(); closeMenu(); renderTop(); renderLooseBtn(); load(false); try { history.replaceState(null, "", "?date=" + ymd); } catch (e) {} }
   $("prev").onclick = function () { go(addDays(S.date, -1)); };
   $("next").onclick = function () { go(addDays(S.date, 1)); };
   $("todayBtn").onclick = function () { go(S.today || localDay()); };
