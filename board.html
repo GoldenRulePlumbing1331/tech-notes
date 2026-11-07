@@ -247,6 +247,21 @@
   .ob .oa { display: flex; gap: 8px; margin-top: 8px; }
   .ob .oa button { flex: 1; padding: 8px; border-radius: 9px; border: 1px solid var(--line); background: var(--card); color: var(--ink); font: inherit; font-size: 14px; font-weight: 650; cursor: pointer; }
   .small.alert { background: var(--warn-bg); color: var(--warn-ink); border-color: transparent; }
+  .dd .sm { display: none; }
+  @media (max-width: 480px) { .dd .lg, .dd .caret, #unBtn svg { display: none; } .dd .sm { display: inline; } .dd { gap: 4px; padding: 0 6px; } .tools { gap: 5px; } }
+  /* "Room left?" sheet */
+  .capbig { font-size: 30px; font-weight: 800; line-height: 1.1; margin: 6px 0 2px; }
+  .capbig small { font-size: 16px; font-weight: 650; color: var(--muted); }
+  .capfit { font-size: 16px; font-weight: 650; margin-bottom: 4px; }
+  .capfit.none { color: var(--warn-ink); }
+  .row .am.pos { color: var(--ok-ink); } .row .am.neg { color: var(--err-ink); } .row .am small { display: block; font-weight: 500; color: var(--muted); font-size: 12px; }
+  .row .av { width: 30px; height: 30px; font-size: 12px; flex: none; }
+  .row.dim { opacity: .55; }
+  .capdet { margin: 0 0 6px 40px; border-left: 3px solid var(--grid); padding: 2px 0 2px 10px; font-size: 13px; color: var(--muted); }
+  .capdet div { padding: 3px 0; } .capdet b { color: var(--ink); font-weight: 650; }
+  .capnote { font-size: 12.5px; color: var(--muted); margin-top: 12px; line-height: 1.4; }
+  .incl { flex: none; border: 1px solid var(--line); background: var(--card); border-radius: 8px; padding: 5px 8px; font-size: 12px; font-weight: 700; cursor: pointer; margin-top: 2px; }
+  .incl.on { background: var(--brand); color: #fff; border-color: var(--brand); }
   footer { text-align: center; font-size: 13px; color: var(--muted); padding: 10px 0 16px; }
   footer a { color: inherit; }
   /* "No signal" strip (gr-common.js) */
@@ -277,7 +292,8 @@
     </div>
     <div class="tools">
       <button class="dd" id="techBtn" aria-haspopup="true" aria-expanded="false"><svg viewBox="0 0 24 24"><path d="M16 11a3 3 0 1 0 0-6 3 3 0 0 0 0 6zm-8 0a3 3 0 1 0 0-6 3 3 0 0 0 0 6zm0 2c-2.7 0-8 1.3-8 4v2h16v-2c0-2.7-5.3-4-8-4zm8 0c-.3 0-.7 0-1.1.1A4.2 4.2 0 0 1 17 17v2h7v-2c0-2.7-5.3-4-8-4z"/></svg><span>Techs</span><em id="techCount"></em><span class="caret">▼</span></button>
-      <button class="dd" id="unBtn"><svg viewBox="0 0 24 24"><path d="M19 3h-4.2a3 3 0 0 0-5.6 0H5v18h14zm-7 0a1 1 0 1 1 0 2 1 1 0 0 1 0-2zm1 15h-2v-2h2zm0-4h-2V8h2z"/></svg><span>All unassigned</span><em class="badge zero" id="unCount">…</em></button>
+      <button class="dd" id="unBtn"><svg viewBox="0 0 24 24"><path d="M19 3h-4.2a3 3 0 0 0-5.6 0H5v18h14zm-7 0a1 1 0 1 1 0 2 1 1 0 0 1 0-2zm1 15h-2v-2h2zm0-4h-2V8h2z"/></svg><span class="lg">All unassigned</span><span class="sm">Unassigned</span><em class="badge zero" id="unCount">…</em></button>
+      <button class="dd" id="roomBtn" title="How much open time is left — can we fit more jobs?"><svg viewBox="0 0 24 24"><path d="M12 2a10 10 0 100 20 10 10 0 000-20zm0 2a8 8 0 110 16 8 8 0 010-16zm-1 3h2v5.6l3.5 2.1-1 1.7L11 13.4z"/></svg><span class="lg">Room left?</span><span class="sm">Room?</span></button>
     </div>
     <div class="chips" id="chips"></div>
     <div class="sub">
@@ -500,7 +516,7 @@
   }
   function openUnassigned() {
     closeMenu();
-    var sh = $("sheet"); sh.innerHTML = ""; sh.appendChild(el("div", "grab")); S.sheetIsUn = true; S.sheetOut = false;
+    var sh = $("sheet"); sh.innerHTML = ""; sh.appendChild(el("div", "grab")); S.sheetRoom = false; S.sheetIsUn = true; S.sheetOut = false;
     sh.appendChild(el("h3", null, "Unassigned jobs"));
     var u = S.un;
     if (!u) { sh.appendChild(el("div", "kind", "Loading…")); loadUn(false); }
@@ -524,6 +540,122 @@
     show($("shade"), true); show(sh, true);
   }
   $("unBtn").onclick = openUnassigned;
+
+  // ---------- "Room left?" — open time per tech, from how long jobs usually take ----------
+  if (!prefs.capOff) prefs.capOff = {}; if (!prefs.capOn) prefs.capOn = {};
+  function dur(m) { m = Math.round(Math.abs(m)); var h = Math.floor(m / 60), mm = m % 60; return h ? h + "h" + (mm ? " " + mm + "m" : "") : mm + "m"; }
+  function capCounted(t) {
+    if (t.off) return false;
+    if (prefs.capOff[t.id]) return false;
+    if (prefs.capOn[t.id]) return true;
+    return t.truck && t.scheduled;
+  }
+  // Learning job lengths reads every job's line items, so the server does it in ~4-minute chunks; keep asking until it's done.
+  function capLearn(onDone) {
+    if (S.capLearning) return; S.capLearning = true;
+    (function step() {
+      api("cap_stats", {}, { timeout: 330000 }).then(function (x) {
+        if (x && x.ok && x.more) { S.capProgress = x.page && x.total ? "page " + x.page + " of " + x.total : ""; if (S.sheetRoom) renderLearnNote(); return setTimeout(step, x.busy ? 15000 : 500); }
+        S.capLearning = false; S.capProgress = ""; if (x && x.ok && !x.skipped && onDone) onDone();
+      });
+    })();
+  }
+  function renderLearnNote() { var n = $("capLearn"); if (n) n.textContent = "Learning how long jobs take from the last year of HCP jobs" + (S.capProgress ? " (" + S.capProgress + ")" : "") + " — the numbers below use defaults until it's done (10–20 min the first time)."; }
+  function openRoom(fresh) {
+    closeMenu();
+    var sh = $("sheet"); S.sheetIsUn = false; S.sheetOut = false; S.sheetRoom = true;
+    var want = S.date;
+    if (!S.room || S.room.date !== want || fresh) {
+      sh.innerHTML = ""; sh.appendChild(el("div", "grab")); sh.appendChild(el("h3", null, "Room left?"));
+      sh.appendChild(el("div", "kind", "Working it out…"));
+      show($("shade"), true); show(sh, true);
+      api("capacity", { date: want, fresh: !!fresh }, { timeout: 120000 }).then(function (r) {
+        if (!S.sheetRoom || S.date !== want) return;
+        if (!r.ok) { sh.appendChild(el("div", "msg err", "❌ " + (r.error || "Couldn't work it out."))); return; }
+        S.room = r; renderRoom();
+        if (r.stats_stale) capLearn(function () { if (S.sheetRoom && S.date === want) openRoom(true); });
+      });
+      return;
+    }
+    renderRoom();
+  }
+  function renderRoom() {
+    var r = S.room, sh = $("sheet"); sh.innerHTML = ""; sh.appendChild(el("div", "grab"));
+    var when = r.is_today ? "today" : dayLabel(r.date);
+    sh.appendChild(el("h3", null, "Room left " + (r.is_today ? "today" : "on " + dayLabel(r.date))));
+    var per = (r.typical_min || 90) + (r.drive_min || 0);
+    var counted = r.techs.filter(capCounted), open = 0, fits = 0;
+    counted.forEach(function (t) { if (t.open_min > 0) { open += t.open_min; fits += Math.floor(t.open_min / per); } });
+    if (r.past) sh.appendChild(el("div", "kind", "That day is over."));
+    else if (r.over) sh.appendChild(el("div", "kind", "The workday (" + hm(r.day_start) + "–" + hm(r.day_end) + ") is over — try tomorrow."));
+    else {
+      var big = el("div", "capbig", (Math.round(open / 30) / 2) + " hrs"); big.appendChild(el("small", null, " open across " + counted.length + (counted.length === 1 ? " tech" : " techs"))); sh.appendChild(big);
+      sh.appendChild(el("div", "capfit" + (fits ? "" : " none"), fits ? "≈ " + fits + " more typical job" + (fits === 1 ? "" : "s") + " (" + dur(r.typical_min) + " + " + dur(r.drive_min) + " drive each)" : "No room for another typical job (" + dur(per) + " with drive)."));
+    }
+    if (r.learning) { var ln = el("div", "msg warn"); ln.id = "capLearn"; sh.appendChild(ln); renderLearnNote(); }
+    sh.appendChild(el("div", "kind", "Workday " + hm(r.day_start) + "–" + hm(r.day_end) + (r.is_today && !r.over ? " · counting from " + hm(r.cursor) : "") + " · as of " + (r.loaded_at || "")));
+
+    function techRow(t, mode) {
+      var wrap = el("div"), row = el("button", "row" + (mode === "dim" ? " dim" : ""));
+      var av = el("div", "av", t.initials || t.name.charAt(0)); av.style.setProperty("--c", t.color || "#4a6fa5"); row.appendChild(av);
+      var bd = el("div", "bd"); bd.appendChild(el("b", null, t.name));
+      var sub = t.off ? (t.off_label || "Off") : !t.jobs ? "Nothing on the schedule" :
+        t.left + " of " + t.jobs + " left" + (t.finish_min != null && !r.past && t.left ? " · done ≈ " + hm(Math.min(t.finish_min, 1439)) : t.left ? "" : " · all done");
+      bd.appendChild(el("span", null, sub)); row.appendChild(bd);
+      var am = el("div", "am " + (t.open_min >= 0 ? "pos" : "neg"), t.off || r.past ? "—" : (t.open_min >= 0 ? "+" : "−") + dur(t.open_min));
+      if (!t.off && !r.past) am.appendChild(el("small", null, t.open_min >= 0 ? (Math.floor(t.open_min / per) ? Math.floor(t.open_min / per) + " job" + (Math.floor(t.open_min / per) === 1 ? "" : "s") : "open") : "over"));
+      row.appendChild(am);
+      var det = el("div", "capdet hidden");
+      if (!t.items.length) det.appendChild(el("div", null, "Open the whole workday if they're working."));
+      t.items.forEach(function (x) {
+        var d = el("div"); d.appendChild(el("b", null, (x.kind === "estimate" ? "Est " : "#") + x.number + " " + x.customer));
+        d.appendChild(document.createTextNode(" · " + x.time + " · " + (x.state === "done" ? "done" : (x.state === "work" ? "working, ≈ " + dur(x.rem) + " left" : x.state === "omw" ? "on the way, ≈ " + dur(x.rem) + " incl. drive" : "≈ " + dur(x.typical) + " + drive")) +
+          " · " + x.basis + (x.note ? " · ⚠ " + x.note : "")));
+        det.appendChild(d);
+      });
+      if (t.blocked_min) det.appendChild(el("div", null, "Events block " + dur(t.blocked_min) + "."));
+      var tg = el("button", "incl" + (capCounted(t) ? " on" : ""), capCounted(t) ? "✓ Counted" : "＋ Count them");
+      tg.onclick = function (e) {
+        e.stopPropagation();
+        if (capCounted(t)) { prefs.capOff[t.id] = 1; delete prefs.capOn[t.id]; } else { delete prefs.capOff[t.id]; prefs.capOn[t.id] = 1; }
+        savePrefs(); renderRoom();
+      };
+      if (!t.off) det.appendChild(tg);
+      row.onclick = function () { det.classList.toggle("hidden"); };
+      wrap.appendChild(row); wrap.appendChild(det); return wrap;
+    }
+    var sorted = r.techs.slice().sort(function (a, b) { return b.open_min - a.open_min; });
+    if (counted.length) { sh.appendChild(el("div", "ugrp", "By tech — tap for details")); sorted.filter(capCounted).forEach(function (t) { sh.appendChild(techRow(t)); }); }
+
+    if (!r.past && !r.over && (r.common || []).length) {
+      sh.appendChild(el("div", "ugrp", "What still fits"));
+      r.common.forEach(function (g) {
+        var need = g.min + r.drive_min, who = counted.filter(function (t) { return t.open_min >= need; }).sort(function (a, b) { return b.open_min - a.open_min; });
+        var row = el("div", "row"); row.style.cursor = "default";
+        var tm = el("div", "tm", "≈ " + dur(g.min)); tm.appendChild(el("small", null, dur(g.p25) + "–" + dur(g.p75))); row.appendChild(tm);
+        var bd = el("div", "bd"); bd.appendChild(el("b", null, g.label + (g.crew > 1 ? " · usually " + g.crew + " techs" : "")));
+        bd.appendChild(el("span", null, who.length ? "Fits: " + who.map(function (t) { return t.short || t.name; }).join(", ") : "Nobody has " + dur(need) + " open"));
+        row.appendChild(bd); row.appendChild(el("div", "am", g.n + " jobs")); sh.appendChild(row);
+      });
+    }
+    var idle = sorted.filter(function (t) { return !capCounted(t) && !t.off && !t.scheduled && t.truck; });
+    var other = sorted.filter(function (t) { return !capCounted(t) && !(!t.off && !t.scheduled && t.truck) && (t.scheduled || t.off); });
+    if (idle.length) { sh.appendChild(el("div", "ugrp", "Nothing scheduled — not counted (tap to add if they're working)")); idle.forEach(function (t) { sh.appendChild(techRow(t, "dim")); }); }
+    if (other.length) { sh.appendChild(el("div", "ugrp", "Not counted — off, riding along, or switched off")); other.forEach(function (t) { sh.appendChild(techRow(t, "dim")); }); }
+
+    var si = r.stats_info;
+    sh.appendChild(el("div", "capnote", "Rough guide. Each job not finished counts as the usual Start→Finish time for its kind of work — read from the job's tags, the Technician's Notes, other line items, job notes, then the description " +
+      "(from " + (si ? si.used.toLocaleString() + " finished jobs since " + si.from + ", learned " + si.at : "defaults — no history yet") +
+      "), plus " + dur(r.drive_min) + " typical drive. Outliers are dropped: buttons pressed together, jobs left running, and anything far outside the middle range. " +
+      "A job in progress counts only what's usually left. Apprentices and office aren't counted as their own truck."));
+    if ((r.warnings || []).length) sh.appendChild(el("div", "msg warn", "Some of the schedule couldn't load: " + r.warnings.join(" · ")));
+    var acts = el("div", "acts");
+    var rf = el("button", "btn", "Refresh"); rf.onclick = function () { openRoom(true); }; acts.appendChild(rf);
+    var cl = el("button", "btn", "Close"); cl.onclick = closeSheet; acts.appendChild(cl);
+    sh.appendChild(acts);
+    show($("shade"), true); show(sh, true);
+  }
+  $("roomBtn").onclick = function () { openRoom(false); };
 
   // ---------- render: grid ----------
   function lanes(items) {
@@ -1022,7 +1154,7 @@
 
   function openOutbox() {
     closeMenu();
-    var sh = $("sheet"); sh.innerHTML = ""; sh.appendChild(el("div", "grab")); S.sheetIsUn = false; S.sheetOut = true;
+    var sh = $("sheet"); sh.innerHTML = ""; sh.appendChild(el("div", "grab")); S.sheetRoom = false; S.sheetIsUn = false; S.sheetOut = true;
     sh.appendChild(el("h3", null, "Waiting to send"));
     sh.appendChild(el("div", "kind", "Saved on this phone with the time you pressed. They send themselves when signal returns."));
     var items = allItems();
@@ -1048,11 +1180,11 @@
   setInterval(function () { if (document.visibilityState === "visible" && allItems().some(function (it) { return !it.x.err; })) flush(); }, 60000);
 
   // ---------- detail sheet ----------
-  function closeSheet() { show($("shade"), false); show($("sheet"), false); S.sheetIsUn = false; S.sheetOut = false; S.linesFor = ""; S.linesBox = null; }
+  function closeSheet() { show($("shade"), false); show($("sheet"), false); S.sheetIsUn = false; S.sheetOut = false; S.sheetRoom = false; S.linesFor = ""; S.linesBox = null; }
   function kv(box, label, content) { var r = el("div", "kv"); r.appendChild(el("span", null, label)); var v = el("span"); if (typeof content === "string") v.textContent = content; else v.appendChild(content); r.appendChild(v); box.appendChild(r); }
   function link(href, text, blank) { var a = el("a", null, text); a.href = href; if (blank) { a.target = "_blank"; a.rel = "noopener"; } return a; }
   function openSheet(it, c, back) {
-    var sh = $("sheet"); sh.innerHTML = ""; sh.appendChild(el("div", "grab")); S.sheetIsUn = false; S.sheetOut = false;
+    var sh = $("sheet"); sh.innerHTML = ""; sh.appendChild(el("div", "grab")); S.sheetRoom = false; S.sheetIsUn = false; S.sheetOut = false;
     var tm = S.data ? techMap() : {}, s = stateOf(it);
     sh.appendChild(el("h3", null, it.kind === "event" ? it.title : it.customer));
     var kind = it.kind === "job" ? "Job #" + (it.number || "?") : it.kind === "estimate" ? "Estimate #" + (it.number || "?") : "Event";
