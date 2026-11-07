@@ -550,19 +550,30 @@
     if (prefs.capOn[t.id]) return true;
     return t.truck && t.scheduled;
   }
+  // Learning job lengths reads every job's line items, so the server does it in ~4-minute chunks; keep asking until it's done.
+  function capLearn(onDone) {
+    if (S.capLearning) return; S.capLearning = true;
+    (function step() {
+      api("cap_stats", {}, { timeout: 330000 }).then(function (x) {
+        if (x && x.ok && x.more) { S.capProgress = x.page && x.total ? "page " + x.page + " of " + x.total : ""; if (S.sheetRoom) renderLearnNote(); return setTimeout(step, x.busy ? 15000 : 500); }
+        S.capLearning = false; S.capProgress = ""; if (x && x.ok && !x.skipped && onDone) onDone();
+      });
+    })();
+  }
+  function renderLearnNote() { var n = $("capLearn"); if (n) n.textContent = "Learning how long jobs take from the last year of HCP jobs" + (S.capProgress ? " (" + S.capProgress + ")" : "") + " — the numbers below use defaults until it's done (10–20 min the first time)."; }
   function openRoom(fresh) {
     closeMenu();
     var sh = $("sheet"); S.sheetIsUn = false; S.sheetOut = false; S.sheetRoom = true;
     var want = S.date;
     if (!S.room || S.room.date !== want || fresh) {
       sh.innerHTML = ""; sh.appendChild(el("div", "grab")); sh.appendChild(el("h3", null, "Room left?"));
-      sh.appendChild(el("div", "kind", S.roomNever ? "First time: learning how long jobs take from the last year of HCP jobs — about a minute, one time only…" : "Working it out…"));
+      sh.appendChild(el("div", "kind", "Working it out…"));
       show($("shade"), true); show(sh, true);
-      api("capacity", { date: want, fresh: !!fresh }, { timeout: 300000 }).then(function (r) {
+      api("capacity", { date: want, fresh: !!fresh }, { timeout: 120000 }).then(function (r) {
         if (!S.sheetRoom || S.date !== want) return;
         if (!r.ok) { sh.appendChild(el("div", "msg err", "❌ " + (r.error || "Couldn't work it out."))); return; }
-        S.room = r; S.roomNever = false; renderRoom();
-        if (r.stats_stale && !r.learned && !S.capSyncing) { S.capSyncing = true; api("cap_stats", {}, { timeout: 300000 }); }
+        S.room = r; renderRoom();
+        if (r.stats_stale) capLearn(function () { if (S.sheetRoom && S.date === want) openRoom(true); });
       });
       return;
     }
@@ -581,6 +592,7 @@
       var big = el("div", "capbig", (Math.round(open / 30) / 2) + " hrs"); big.appendChild(el("small", null, " open across " + counted.length + (counted.length === 1 ? " tech" : " techs"))); sh.appendChild(big);
       sh.appendChild(el("div", "capfit" + (fits ? "" : " none"), fits ? "≈ " + fits + " more typical job" + (fits === 1 ? "" : "s") + " (" + dur(r.typical_min) + " + " + dur(r.drive_min) + " drive each)" : "No room for another typical job (" + dur(per) + " with drive)."));
     }
+    if (r.learning) { var ln = el("div", "msg warn"); ln.id = "capLearn"; sh.appendChild(ln); renderLearnNote(); }
     sh.appendChild(el("div", "kind", "Workday " + hm(r.day_start) + "–" + hm(r.day_end) + (r.is_today && !r.over ? " · counting from " + hm(r.cursor) : "") + " · as of " + (r.loaded_at || "")));
 
     function techRow(t, mode) {
@@ -632,7 +644,7 @@
     if (other.length) { sh.appendChild(el("div", "ugrp", "Not counted — off, riding along, or switched off")); other.forEach(function (t) { sh.appendChild(techRow(t, "dim")); }); }
 
     var si = r.stats_info;
-    sh.appendChild(el("div", "capnote", "Rough guide. Each job not finished counts as the usual Start→Finish time for its job type " +
+    sh.appendChild(el("div", "capnote", "Rough guide. Each job not finished counts as the usual Start→Finish time for its kind of work — read from the job's tags, the Technician's Notes, other line items, job notes, then the description " +
       "(from " + (si ? si.used.toLocaleString() + " finished jobs since " + si.from + ", learned " + si.at : "defaults — no history yet") +
       "), plus " + dur(r.drive_min) + " typical drive. Outliers are dropped: buttons pressed together, jobs left running, and anything far outside the middle range. " +
       "A job in progress counts only what's usually left. Apprentices and office aren't counted as their own truck."));
@@ -643,8 +655,7 @@
     sh.appendChild(acts);
     show($("shade"), true); show(sh, true);
   }
-  S.roomNever = !get("grRoomSeen");
-  $("roomBtn").onclick = function () { put("grRoomSeen", "1"); openRoom(false); };
+  $("roomBtn").onclick = function () { openRoom(false); };
 
   // ---------- render: grid ----------
   function lanes(items) {

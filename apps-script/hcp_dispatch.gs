@@ -26,15 +26,19 @@
  *  Later code changes: Deploy → Manage deployments → edit → Version: New version (URL stays the same).
  *
  * "Room left?" (Board button) — how much open time each tech has left in a day:
- *   Job lengths are learned from the last year of finished HCP jobs (Start → Finish), by job type, with outliers
+ *   Job lengths are learned from the last year of finished HCP jobs (Start → Finish), by kind of work, with outliers
  *   dropped (buttons pressed together, jobs left running overnight, then anything outside 1.5× the middle half).
+ *   The kind of work comes from, in order: job tags (work tags only), the Technician's Notes line item, the other
+ *   line items, job notes, the description, and only then the HCP job type (job fields were reset in Oct 2026).
+ *   Learning reads every job's line items, so it runs in ~4½-minute chunks: the Board keeps calling cap_stats until
+ *   it's done (10–20 min the first time); learnJobLengths() in the editor does the same by hand.
  *   Drive time is learned the same way (On my way → Start). The learned numbers are saved in script properties and
  *   re-learned in the background once they're a week old. Optional Script Properties:
  *     CAP_DAY        = workday, default "08:00-16:00"
  *     CAP_NOT_TRUCKS = comma-separated people who ride along and don't count as their own truck (apprentices, office).
  *                      A single word matches a first name ("Rudy"); two words match the full name ("Tim Lasco").
  *                      Default: Rudy, Connor, Tanner, Tim Lasco, TJ Lasco, Jacob, Kyle, Bob
- *   Run learnJobLengths() from the editor to see the numbers it learned.
+ *   Run learnJobLengths() from the editor to see the numbers it learned; relearnJobLengths() starts over.
  *
  * Actions (POST JSON, all need "token" = the tech's access code):
  *   init    {}                         → who is signed in, employee list, today
@@ -437,6 +441,7 @@ function dpDayItem_(o, kind, sl, i, mins, hhmm, onDay) {
     omw_m: stampMin(ts.on_my_way_at), start_m: stampMin(ts.started_at), done_m: stampMin(ts.completed_at),
     unit: (jf.business_unit && jf.business_unit.name) || '', type: (jf.job_type && jf.job_type.name) || '',
     tags: (o.tags || []).map(t => (t && t.name) || t).filter(Boolean).slice(0, 6),
+    notes: (o.notes || []).map(n => ({ content: String((n && n.content) || '').slice(0, 400) })).slice(0, 10),
     url: 'https://pro.housecallpro.com/app/' + (kind === 'job' ? 'jobs/' : 'estimates/') + o.id,
   };
 }
@@ -447,30 +452,61 @@ const CAP = {
   STATS_DAYS: 365,                 // learn job lengths from this many days of finished jobs
   STATS_MAX_AGE_MS: 7 * 86400000,  // re-learn in the background once a week
   STATS_PAGES: 150,                // x100 jobs, safety cap
+  RUN_BUDGET_MS: 270000,           // one learning run stops after this long and picks up next call (Apps Script caps a run at 6 min)
+  LINES_BATCH: 20,                 // line-item lookups per fetchAll
   MIN_JOB: 10, MAX_JOB: 600,       // a Start→Finish under 10 min (buttons pressed together) or over 10 h (left running) isn't a job length
   MIN_DRIVE: 2, MAX_DRIVE: 120,
-  MIN_GROUP: 8,                    // a job type needs this many clean jobs before its own number is trusted
+  MIN_GROUP: 8,                    // a job kind needs this many clean jobs before its own number is trusted
   DEFAULT_JOB: 90, DEFAULT_DRIVE: 25, ESTIMATE_MIN: 45,
   DAY: '08:00-16:00',
   NOT_TRUCKS: 'Rudy, Connor, Tanner, Tim Lasco, TJ Lasco, Jacob, Kyle, Bob',
   OFF_RX: /\b(off|pto|vacation|vaca|sick|leave|holiday|out of office|ooo)\b/i,   // an event like this takes the tech out
+  TECH_NOTES: "technician's notes",
+  JOB_FIELDS_SINCE: '2026-10-01',  // job fields were reset then; the HCP job type is only trusted on jobs scheduled after this
+  // Tags about the customer, the house or the office — never a kind of work (same list as the New Job script).
+  TAG_SKIP_RE: /^(requested|no send|send)\b|pipeline automation|new customer|website|possible-duplicate|waived billing|difficult customer|has cats|family\/friend|word of mouth|service whale|landlord|tenant|contractor|bill from shop|can reschedule|timing is flexible|can arrive early|call on job completion|customer has credit|military|teacher|works from home|bcwc|pictures needed|no pics|follow-up|priority|colorful remedies|tru north|hersheys mill|exton station|greystone|indian king|reserve at eagle|evian|public (water|sewage)|well system|septic|townhouse|condo|duplex|mobile home|split level|walkout|on slab|finished basement|kfs|kfp|kft|kfjf|kfjt|^tt$|^new$|^other$|^final$|^install$|^air$|^power$|^alarm$|parent|billing|bill to|child|sub.customer/i,
+  // Line items that say nothing about the kind of work.
+  GENERIC_LINE_RE: /^(service (call|fee)|trip (charge|fee)|dispatch|diagnostic|labor|labour|hourly|misc|materials?|parts?|tax|discount|deposit|warranty|credit card fee|fuel|travel|minimum)\b/i,
 };
 
-// Description keywords → a job category, used when a job has no HCP job type (or too few of that type to trust).
+// Words in the notes / line items / description → a kind of work. Checked in order; first match wins within one text.
 const CAP_CATS = [
-  ['Water heater', /water\s*heater|\bwh\b|tankless|\b\d{2}\s*gal/i],
-  ['Sewer / excavation', /sewer|excavat|\bdig\b|lateral|main line|camera/i],
-  ['Drain cleaning', /drain|clog|snake|backed up|backing up|jett|auger/i],
-  ['Toilet', /toilet|flapper|fill valve|wax ring|\bwc\b|commode/i],
-  ['Faucet / sink', /faucet|sink|\blav|vanity|disposal/i],
-  ['Shower / tub', /shower|\btub\b|cartridge|mixing valve/i],
-  ['Sump / ejector pump', /sump|ejector/i],
-  ['Gas line', /\bgas\b|propane/i],
-  ['Water treatment', /softener|water test|filter|treatment|\buv\b|\bwell\b|conditioning/i],
-  ['Leak / pipe repair', /leak|drip|burst|pipe|repipe|valve/i],
+  ['Water heater', /water\s*heater|\bwh\b|tankless|\b\d{2}\s*gal|t&p|anode|expansion tank/i],
+  ['Sewer / excavation', /sewer|excavat|\bdig\b|lateral|main line|mainline|camera|clean\s*out/i],
+  ['Drain cleaning', /drain|clog|snake|backed up|backing up|jett|auger|cable/i],
+  ['Sump / ejector pump', /sump|ejector|battery back/i],
+  ['Toilet', /toilet|flapper|fill valve|wax ring|\bwc\b|commode|flush/i],
+  ['Faucet / sink', /faucet|sink|\blav|vanity|disposal|p-?trap|pop-?up/i],
+  ['Shower / tub', /shower|\btub\b|cartridge|mixing valve|diverter/i],
+  ['Gas line', /\bgas\b|propane|\bng\b|\blp\b/i],
+  ['Water treatment', /softener|water test|filter|treatment|\buv\b|\bwell\b|conditioning|neutralizer|pressure tank/i],
+  ['Hose bib / outdoor', /hose\s*bib|spigot|sillcock|sill cock|outdoor faucet|frost/i],
+  ['Pressure / PRV / main valve', /\bprv\b|pressure reduc|main (shut|valve)|curb stop|backflow/i],
+  ['Leak / pipe repair', /leak|drip|burst|froze|pipe|repipe|valve|supply line|shut-?off/i],
+  ['Remodel / rough-in', /rough|remodel|renovation|new construction|addition|relocat/i],
 ];
 
-function capCat_(text) { const t = String(text || ''); for (const c of CAP_CATS) if (c[1].test(t)) return c[0]; return ''; }
+/**
+ * What kind of work a job was. Looks, in order, at: job tags (work tags only), the Technician's Notes line item, the
+ * other line items, job notes, the job description, and last of all the HCP job type (the job fields were reset in
+ * Oct 2026, so older jobs carry stale types). lines = [{name, description}] or null when they couldn't be fetched.
+ */
+function capKind_(job, lines) {
+  const tags = (job.tags || []).map(t => String((t && t.name) || t || '').trim()).filter(t => t && !CAP.TAG_SKIP_RE.test(t));
+  if (tags.length) return { label: tags.sort()[0], via: 'tag' };          // alphabetical so the same two tags always give the same kind
+  const texts = [];
+  if (lines) {
+    const tech = lines.filter(l => String(l.name || '').trim().toLowerCase() === CAP.TECH_NOTES);
+    tech.forEach(l => texts.push([l.description, l.name].join(' ')));
+    lines.filter(l => tech.indexOf(l) === -1 && !CAP.GENERIC_LINE_RE.test(String(l.name || ''))).forEach(l => texts.push([l.name, l.description].join(' ')));
+  }
+  (job.notes || []).forEach(n => texts.push(String((n && n.content) || '')));
+  texts.push(String(job.description || ''));
+  for (const t of texts) { const c = capCat_(t); if (c) return { label: c, via: 'words' }; }
+  const type = ((job.job_fields || {}).job_type || {}).name, when = String(((job.schedule || {}).scheduled_start) || job._when || '');
+  return type && when >= CAP.JOB_FIELDS_SINCE ? { label: type, via: 'job type' } : { label: '', via: '' };
+}
+function capCat_(text) { const t = String(text || ''); if (!t.trim()) return ''; for (const c of CAP_CATS) if (c[1].test(t)) return c[0]; return ''; }
 
 /** Median and middle half after dropping outliers (Tukey fences). arr = minutes. */
 function capSummary_(arr) {
@@ -483,73 +519,109 @@ function capSummary_(arr) {
   return { n: k.length, dropped: a.length - k.length, med: Math.round(q(k, 0.5)), p25: Math.round(q(k, 0.25)), p75: Math.round(q(k, 0.75)) };
 }
 
-/** Reads the last year of finished jobs and saves typical job lengths (by job type, keyword category and business unit) and drive time. */
-function capBuildStats_() {
-  const now = new Date(), from = new Date(now.getTime() - CAP.STATS_DAYS * 86400000);
-  const q = `/jobs?page_size=100&work_status[]=completed&expand[]=appointments&scheduled_start_min=${encodeURIComponent(dpIso_(from))}` +
-            `&scheduled_start_max=${encodeURIComponent(dpIso_(now))}&sort_by=created_at&sort_direction=desc`;
-  const first = hcp_('get', q + '&page=1');
-  const total = Math.min(first.total_pages || 1, CAP.STATS_PAGES), pages = [first];
-  for (let p = 2; p <= total; p += 5) {
-    const batch = []; for (let k = p; k < p + 5 && k <= total; k++) batch.push(q + '&page=' + k);
-    hcpAll_(batch).forEach(r => { if (r.body) pages.push(r.body); });
+/** Line items for many jobs at once: { jobId: [{name, description}] } (missing when the call failed). */
+function capLines_(ids) {
+  const out = {};
+  for (let i = 0; i < ids.length; i += CAP.LINES_BATCH) {
+    const chunk = ids.slice(i, i + CAP.LINES_BATCH);
+    hcpAll_(chunk.map(id => `/jobs/${encodeURIComponent(id)}/line_items`)).forEach((r, k) => {
+      if (r.body) out[chunk[k]] = (r.body.data || []).map(l => ({ name: l.name || '', description: l.description || '' }));
+    });
   }
-  const groups = {}, all = [], drives = [], crews = [];
-  let seen = 0, skipped = 0;
-  const add = (key, label, m, crew) => { if (!key) return; const g = groups[key] = groups[key] || { label: label, mins: [], crews: [] }; g.mins.push(m); g.crews.push(crew); };
-  pages.forEach(r => (r.jobs || []).forEach(j => {
-    seen++;
-    if (j.deleted_at || j.canceled_at) return;
-    const ts = j.work_timestamps || {}, st = dpDate_(ts.started_at), en = dpDate_(ts.completed_at);
-    const appts = (j.schedule || {}).appointments || j.appointments || [];
-    if (!st || !en || appts.length > 1) { skipped++; return; }                 // no button times, or a multi-day job
-    const m = (en - st) / 60000;
-    if (m < CAP.MIN_JOB || m > CAP.MAX_JOB) { skipped++; return; }
-    const jf = j.job_fields || {}, type = (jf.job_type && jf.job_type.name) || '', unit = (jf.business_unit && jf.business_unit.name) || '';
-    const crew = Math.max(1, (j.assigned_employees || []).length);
-    all.push(m); crews.push(crew);
-    if (type) add('t:' + type.toLowerCase(), type, m, crew);
-    const cat = capCat_(j.description); if (cat) add('k:' + cat.toLowerCase(), cat, m, crew);
-    if (unit) add('u:' + unit.toLowerCase(), unit, m, crew);
-    const omw = dpDate_(ts.on_my_way_at);
-    if (omw) { const d = (st - omw) / 60000; if (d >= CAP.MIN_DRIVE && d <= CAP.MAX_DRIVE) drives.push(d); }
-  }));
-  const out = { at: Date.now(), from: dpFmt_(from, 'MMM d, yyyy'), seen: seen, used: all.length, skipped: skipped, groups: {} };
-  const med = a => { const s = a.slice().sort((x, y) => x - y); return s.length ? s[Math.floor(s.length / 2)] : 1; };
-  Object.keys(groups).forEach(k => { const g = groups[k], sm = capSummary_(g.mins); if (sm && sm.n >= 3) out.groups[k] = Object.assign({ label: g.label, crew: med(g.crews) }, sm); });
-  out.all = Object.assign({ label: 'All jobs', crew: med(crews) }, capSummary_(all) || { n: 0, med: CAP.DEFAULT_JOB, p25: CAP.DEFAULT_JOB, p75: CAP.DEFAULT_JOB });
-  out.drive = capSummary_(drives) || { n: 0, med: CAP.DEFAULT_DRIVE, p25: CAP.DEFAULT_DRIVE, p75: CAP.DEFAULT_DRIVE };
-  dpPropPut_('CAP_STATS', JSON.stringify(out));
-  console.log(`cap_stats ✅ ${seen} finished jobs read, ${all.length} with clean Start/Finish times, ${Object.keys(out.groups).length} groups; typical job ${out.all.med} min, drive ${out.drive.med} min`);
   return out;
+}
+
+/**
+ * Learns job lengths from the last year of finished jobs, a page at a time, within RUN_BUDGET_MS per call; progress is
+ * saved so the next call carries on. Returns { done, page, total }. When done, the finished stats replace CAP_STATS.
+ */
+function capBuildStep_() {
+  const t0 = Date.now();
+  let w = null; try { w = JSON.parse(dpPropGet_('CAP_WORK') || 'null'); } catch (_) { w = null; }
+  if (!w) {
+    const now = new Date(), from = new Date(now.getTime() - CAP.STATS_DAYS * 86400000);
+    w = { page: 1, total: 0, from: dpFmt_(from, 'MMM d, yyyy'), seen: 0, skipped: 0, via: {}, mins: {}, labels: {}, crews: {}, all: [], allCrews: [], drives: [],
+          q: `/jobs?page_size=100&work_status[]=completed&expand[]=appointments&scheduled_start_min=${encodeURIComponent(dpIso_(from))}` +
+             `&scheduled_start_max=${encodeURIComponent(dpIso_(now))}&sort_by=created_at&sort_direction=desc` };
+  }
+  while (Date.now() - t0 < CAP.RUN_BUDGET_MS) {
+    const r = hcp_('get', w.q + '&page=' + w.page);
+    if (!w.total) w.total = Math.min(r.total_pages || 1, CAP.STATS_PAGES);
+    const keep = [];
+    (r.jobs || []).forEach(j => {
+      w.seen++;
+      if (j.deleted_at || j.canceled_at) return;
+      const ts = j.work_timestamps || {}, st = dpDate_(ts.started_at), en = dpDate_(ts.completed_at);
+      const appts = (j.schedule || {}).appointments || j.appointments || [];
+      if (!st || !en || appts.length > 1) { w.skipped++; return; }                 // no button times, or a multi-day job
+      const m = (en - st) / 60000;
+      if (m < CAP.MIN_JOB || m > CAP.MAX_JOB) { w.skipped++; return; }
+      keep.push({ j: j, m: m, st: st });
+    });
+    // Line items only for jobs a work tag doesn't already explain.
+    const need = keep.filter(x => !capKind_(x.j, null).label || capKind_(x.j, null).via !== 'tag').map(x => x.j.id);
+    const lines = need.length ? capLines_(need) : {};
+    keep.forEach(x => {
+      const j = x.j, crew = Math.max(1, (j.assigned_employees || []).length), kind = capKind_(j, lines[j.id] || null);
+      w.all.push(x.m); w.allCrews.push(crew);
+      if (kind.label) {
+        const k = kind.label.toLowerCase();
+        (w.mins[k] = w.mins[k] || []).push(x.m); (w.crews[k] = w.crews[k] || []).push(crew); w.labels[k] = kind.label;
+        w.via[kind.via] = (w.via[kind.via] || 0) + 1;
+      } else w.via.unknown = (w.via.unknown || 0) + 1;
+      const omw = dpDate_((j.work_timestamps || {}).on_my_way_at);
+      if (omw) { const d = (x.st - omw) / 60000; if (d >= CAP.MIN_DRIVE && d <= CAP.MAX_DRIVE) w.drives.push(d); }
+    });
+    if (!(r.jobs || []).length || w.page >= w.total) { w.page = w.total; break; }
+    w.page++;
+    dpPropPut_('CAP_WORK', JSON.stringify(w));
+  }
+  const done = w.page >= w.total && w.total > 0 && (w.seen > 0);
+  if (!done) { dpPropPut_('CAP_WORK', JSON.stringify(w)); console.log(`cap_stats … page ${w.page}/${w.total}, ${w.all.length} usable so far`); return { done: false, page: w.page, total: w.total }; }
+  const med = a => { const s = a.slice().sort((x, y) => x - y); return s.length ? s[Math.floor(s.length / 2)] : 1; };
+  const out = { at: Date.now(), from: w.from, seen: w.seen, used: w.all.length, skipped: w.skipped, via: w.via, groups: {} };
+  Object.keys(w.mins).forEach(k => { const sm = capSummary_(w.mins[k]); if (sm && sm.n >= 3) out.groups[k] = Object.assign({ label: w.labels[k], crew: med(w.crews[k]) }, sm); });
+  out.all = Object.assign({ label: 'All jobs', crew: med(w.allCrews) }, capSummary_(w.all) || { n: 0, med: CAP.DEFAULT_JOB, p25: CAP.DEFAULT_JOB, p75: CAP.DEFAULT_JOB });
+  out.drive = capSummary_(w.drives) || { n: 0, med: CAP.DEFAULT_DRIVE, p25: CAP.DEFAULT_DRIVE, p75: CAP.DEFAULT_DRIVE };
+  dpPropPut_('CAP_STATS', JSON.stringify(out));
+  dpPropPut_('CAP_WORK', '');
+  console.log(`cap_stats ✅ ${w.seen} finished jobs read, ${w.all.length} with clean Start/Finish times, ${Object.keys(out.groups).length} kinds (${JSON.stringify(w.via)}); typical job ${out.all.med} min, drive ${out.drive.med} min`);
+  return { done: true, page: w.page, total: w.total, used: out.used };
 }
 
 function capStats_() { const raw = dpPropGet_('CAP_STATS'); if (!raw) return null; try { return JSON.parse(raw); } catch (_) { return null; } }
 
+/** One learning step if the stats are missing or old (or force). The page calls this again while it answers {more:true}. */
 function capRefreshStats_(force) {
-  const s = capStats_();
-  if (!force && s && Date.now() - s.at < CAP.STATS_MAX_AGE_MS) return { ok: true, skipped: true };
+  const s = capStats_(), working = !!dpPropGet_('CAP_WORK');
+  if (!force && !working && s && Date.now() - s.at < CAP.STATS_MAX_AGE_MS) return { ok: true, skipped: true };
   const cache = CacheService.getScriptCache();
-  if (cache.get('cap_building')) return { ok: true, busy: true };
-  cache.put('cap_building', '1', 360);
-  try { const out = capBuildStats_(); return { ok: true, used: out.used }; } finally { cache.remove('cap_building'); }
+  if (cache.get('cap_building')) return { ok: true, busy: true, more: true };
+  cache.put('cap_building', '1', 330);
+  try { if (force && !working) dpPropPut_('CAP_WORK', ''); const r = capBuildStep_(); return { ok: true, more: !r.done, page: r.page, total: r.total, used: r.used }; }
+  finally { cache.remove('cap_building'); }
 }
 
-/** Run from the editor: re-learns job lengths and logs them. */
+/** Run from the editor: learns (or finishes learning) job lengths and logs them. Run again if it says it isn't done. */
 function learnJobLengths() {
-  const s = capBuildStats_();
+  const r = capBuildStep_();
+  if (!r.done) { console.log(`Not done yet — page ${r.page} of ${r.total}. Run learnJobLengths() again to continue.`); return; }
+  const s = capStats_();
   const rows = Object.keys(s.groups).map(k => s.groups[k]).filter(g => g.n >= CAP.MIN_GROUP).sort((a, b) => b.n - a.n);
-  console.log(`Learned from ${s.used} of ${s.seen} finished jobs since ${s.from}. Typical job ${s.all.med} min (middle half ${s.all.p25}–${s.all.p75}), drive ${s.drive.med} min.`);
+  console.log(`Learned from ${s.used} of ${s.seen} finished jobs since ${s.from}. Kind found by: ${JSON.stringify(s.via)}. Typical job ${s.all.med} min (middle half ${s.all.p25}–${s.all.p75}), drive ${s.drive.med} min.`);
   rows.forEach(g => console.log(`${g.label}: ${g.med} min typical (${g.p25}–${g.p75}), ${g.n} jobs, crew ${g.crew}`));
 }
+/** Run from the editor: throws away the learned numbers and starts over. */
+function relearnJobLengths() { dpPropPut_('CAP_WORK', ''); dpPropPut_('CAP_STATS', ''); learnJobLengths(); }
 
-/** Typical minutes for one item on the board: its job type → description keywords → business unit → all jobs. */
-function capTypical_(stats, it) {
+/** Typical minutes for one item on the board, from its kind of work (tags → tech notes → line items → notes → description). */
+function capTypical_(stats, it, lines) {
   if (it.kind === 'estimate') return { min: CAP.ESTIMATE_MIN, basis: 'estimate visit' };
   if (!stats) return { min: CAP.DEFAULT_JOB, basis: 'default (no history yet)' };
-  const g = k => { const x = stats.groups[k]; return x && x.n >= CAP.MIN_GROUP ? x : null; };
-  const pick = (it.type && g('t:' + it.type.toLowerCase())) || g('k:' + capCat_(it.title).toLowerCase()) || (it.unit && g('u:' + it.unit.toLowerCase()));
-  return pick ? { min: pick.med, basis: pick.label + ' (' + pick.n + ' jobs)' } : { min: stats.all.med, basis: 'typical job' };
+  const kind = capKind_({ tags: it.tags, description: it.title, notes: it.notes, _when: '9999', job_fields: { job_type: it.type ? { name: it.type } : null } }, lines);
+  const g = kind.label && stats.groups[kind.label.toLowerCase()];
+  if (g && g.n >= CAP.MIN_GROUP) return { min: g.med, basis: g.label + ' (' + g.n + ' jobs, by ' + kind.via + ')' };
+  return { min: stats.all.med, basis: kind.label ? kind.label + ' — too few to trust, using typical job' : 'typical job' };
 }
 
 function capNotTruck_(name) {
@@ -565,8 +637,8 @@ function capNotTruck_(name) {
  */
 function capCapacity_(date, fresh) {
   date = /^\d{4}-\d{2}-\d{2}$/.test(date || '') ? date : dpToday_();
-  let stats = capStats_(), learned = false;
-  if (!stats) { capRefreshStats_(true); stats = capStats_(); learned = true; }   // first time only: ~30–60 s
+  const stats = capStats_();
+  const learning = !stats || !!dpPropGet_('CAP_WORK');
   const day = dpDay_(date, fresh);
   const m = String(props_().getProperty('CAP_DAY') || CAP.DAY).match(/(\d{1,2}):?(\d{2})\D+(\d{1,2}):?(\d{2})/) || [0, 8, 0, 16, 0];
   const startM = Number(m[1]) * 60 + Number(m[2]), endM = Number(m[3]) * 60 + Number(m[4]);
@@ -575,6 +647,9 @@ function capCapacity_(date, fresh) {
   const cursor = isToday ? Math.min(endM, Math.max(startM, nowM)) : startM;
   const drive = stats ? stats.drive.med : CAP.DEFAULT_DRIVE;
   const overlap = (a, b) => Math.max(0, Math.min(b, endM) - Math.max(a, cursor));
+  // Line items of the day's unfinished jobs (so the Technician's Notes / parts can say what kind of job it is).
+  const openIds = {}; (day.items || []).forEach(it => { if (it.kind === 'job' && !it.done && !/complete/i.test(it.status || '') && !past) openIds[it.job_id] = 1; });
+  const lines = stats && !past ? capLines_(Object.keys(openIds)) : {};
 
   const techs = [];
   (day.techs || []).forEach(t => {
@@ -586,7 +661,7 @@ function capCapacity_(date, fresh) {
     events.forEach(ev => { if (!ev.all_day && (offEv.indexOf(ev) !== -1 || ev.emin - ev.smin <= 240)) blocked += overlap(ev.smin, ev.emin); });
     const rows = []; let rem = 0, left = 0, done = 0;
     work.forEach(it => {
-      const typ = capTypical_(stats, it);
+      const typ = capTypical_(stats, it, lines[it.job_id] || null);
       if (it.day_of && !it.all_day) { typ.min = Math.max(30, it.emin - it.smin); typ.basis = 'multi-day job — booked block'; }
       const finished = !!it.done || /complete/i.test(it.status || '');
       let r, state, note = '';
@@ -608,20 +683,16 @@ function capCapacity_(date, fresh) {
       finish_min: offAll ? null : Math.round(cursor + rem + blocked), items: rows });
   });
 
-  // Common job types with their typical length, so the office can see what fits where.
-  // HCP job types when they're used enough; description keywords otherwise.
-  const pool = stats ? Object.keys(stats.groups).map(k => Object.assign({ key: k }, stats.groups[k])).filter(g => g.n >= CAP.MIN_GROUP) : [];
-  const pref = pool.filter(g => g.key.indexOf('t:') === 0).length >= 3 ? 't:' : 'k:';
-  const common = stats ? pool.filter(g => g.key.indexOf(pref) === 0)
-      .sort((a, b) => b.n - a.n).filter((g, i, a) => a.findIndex(x => x.label.toLowerCase() === g.label.toLowerCase()) === i).slice(0, 8)
-      .map(g => ({ label: g.label, min: g.med, p25: g.p25, p75: g.p75, n: g.n, crew: g.crew })) : [];
+  // The most common kinds of work with their typical length, so the office can see what fits where.
+  const common = stats ? Object.keys(stats.groups).map(k => stats.groups[k]).filter(g => g.n >= CAP.MIN_GROUP)
+      .sort((a, b) => b.n - a.n).slice(0, 8).map(g => ({ label: g.label, min: g.med, p25: g.p25, p75: g.p75, n: g.n, crew: g.crew })) : [];
 
   return { date: date, label: day.label, today: day.today, is_today: isToday, past: past, now_min: nowM,
            day_start: startM, day_end: endM, cursor: cursor, over: isToday && nowM >= endM,
            drive_min: drive, typical_min: stats ? stats.all.med : CAP.DEFAULT_JOB, typical_range: stats ? [stats.all.p25, stats.all.p75] : null,
            common: common, techs: techs, warnings: day.warnings || [], loaded_at: day.loaded_at,
-           learned: learned, stats_info: stats ? { used: stats.used, seen: stats.seen, from: stats.from, at: dpFmt_(new Date(stats.at), 'MMM d') } : null,
-           stats_stale: !stats || Date.now() - stats.at > CAP.STATS_MAX_AGE_MS };
+           learning: learning, stats_info: stats ? { used: stats.used, seen: stats.seen, from: stats.from, at: dpFmt_(new Date(stats.at), 'MMM d'), via: stats.via || {} } : null,
+           stats_stale: learning || Date.now() - stats.at > CAP.STATS_MAX_AGE_MS };
 }
 
 /**

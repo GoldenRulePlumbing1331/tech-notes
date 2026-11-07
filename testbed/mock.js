@@ -41,7 +41,7 @@ const handlers = {
       case "unassigned": return { ok: true, today: TODAY, items: [], warnings: [], counts: { past: 0, upcoming: 0, unscheduled: 0 }, loaded_at: "12:30 PM" };
       case "events_sync": return { ok: true, skipped: true };
       case "capacity": return { ok: true, date: p.date || TODAY, label: "Fri, Oct 30", today: TODAY, is_today: true, past: false, now_min: 600, day_start: 480, day_end: 960, cursor: 600, over: false,
-        drive_min: 22, typical_min: 90, typical_range: [60, 150], loaded_at: "12:30 PM", warnings: [], learned: false, stats_stale: false,
+        drive_min: 22, typical_min: 90, typical_range: [60, 150], loaded_at: "12:30 PM", warnings: [], learning: false, stats_stale: false,
         stats_info: { used: 4120, seen: 5210, from: "Nov 6, 2025", at: "Nov 6" },
         common: [{ label: "Service Call", min: 85, p25: 60, p75: 120, n: 2100, crew: 1 }, { label: "Water Heater Replacement", min: 195, p25: 160, p75: 240, n: 310, crew: 2 }, { label: "Drain Cleaning", min: 80, p25: 55, p75: 110, n: 640, crew: 1 }],
         techs: [
