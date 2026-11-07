@@ -51,6 +51,10 @@ const handlers = {
             items: [{ number: "49371", kind: "job", customer: "DoeJohn", time: "10:00 AM–2:00 PM", state: "work", typical: 195, basis: "Water Heater Replacement (310 jobs)", rem: 150, note: "" }] },
           { id: "e3", name: "Dave Jones", short: "Dave J.", initials: "DJ", color: "#8e24aa", truck: true, scheduled: false, off: false, jobs: 0, left: 0, done: 0, rem_min: 0, blocked_min: 0, open_min: 360, finish_min: 600, items: [] }] };
       case "cap_stats": return { ok: true, skipped: true };
+      case "loose_ends": return { ok: true, date: p.date || TODAY, range: p.range || "day", from: TODAY, to: TODAY, today: TODAY, label: "Fri, Oct 30", checked: { finished: 9, running: 2, total: 14 }, loaded_at: "12:30 PM", warnings: [],
+        no_price: [{ job_id: "job_49360", number: "49360", why: "no price", detail: "2 line items, all $0", customer: "SmithJane", address: "5 Elm St, Exton", title: "Toilet running", date: TODAY, when: "Fri, Oct 30 · 8:00 AM", sort: 1, status: "complete unrated", amount: 0, techs: ["Mike Smith"], done: "Fri 9:40 AM", started: "", tags: [], url: "https://pro.housecallpro.com/app/jobs/job_49360" }],
+        stuck: [{ job_id: "job_49300", number: "49300", why: "in progress, no return visit", detail: "started Tue 10:02 AM · no later appointment and no other open segment", customer: "LeeBob", address: "9 Oak Ln, West Chester", title: "Sewer line camera", date: "2026-10-27", when: "Tue, Oct 27 · 10:00 AM", sort: 0, status: "in progress", amount: 850, techs: ["Kyle Hunt"], done: "", started: "Tue 10:02 AM", tags: [], url: "https://pro.housecallpro.com/app/jobs/job_49300" }],
+        no_notes: [] };
     }
     return { ok: false, error: "Unknown action." };
   },
