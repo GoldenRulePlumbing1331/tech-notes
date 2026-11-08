@@ -42,6 +42,17 @@
   .chip { display: inline-flex; align-items: center; gap: 6px; border-radius: 999px; padding: 6px 6px 6px 12px; font-size: 15px; font-weight: 600; background: var(--soft); border: 1px solid var(--line); color: var(--ink); }
   .chip button { border: 0; background: none; color: var(--muted); font-size: 18px; line-height: 1; padding: 0 6px; cursor: pointer; }
   .total { display: flex; justify-content: space-between; font-weight: 700; margin-top: 10px; padding-top: 10px; border-top: 1px solid var(--line); }
+  .phs { display: grid; grid-template-columns: repeat(auto-fill, minmax(84px, 1fr)); gap: 8px; margin-top: 4px; }
+  .ph { position: relative; aspect-ratio: 1; border-radius: 10px; overflow: hidden; background: var(--soft); border: 1px solid var(--line); }
+  .ph img { width: 100%; height: 100%; object-fit: cover; display: block; }
+  .ph button { position: absolute; top: 4px; right: 4px; width: 28px; height: 28px; border: 0; border-radius: 50%; background: rgba(0,0,0,.6); color: #fff; font-size: 18px; line-height: 1; cursor: pointer; }
+  /* in-page camera (same as Job Inputs): the browser never leaves the screen, so a low-memory phone can't drop the page */
+  .cam { position: fixed; inset: 0; z-index: 1000; background: #000; display: flex; flex-direction: column; }
+  .cam.hidden { display: none; }
+  .cam video { flex: 1; min-height: 0; width: 100%; object-fit: contain; background: #000; }
+  .cam .bar { display: flex; gap: 12px; justify-content: center; align-items: center; padding: 14px 14px calc(14px + env(safe-area-inset-bottom)); }
+  .cam .bar .btn { flex: 1; max-width: 220px; margin: 0; }
+  .cam .count { color: #fff; font-weight: 700; min-width: 60px; text-align: center; }
 </style>
 </head>
 <body>
@@ -66,6 +77,14 @@
 
 <div id="app" class="hidden">
 
+<!-- Last job created (the form below is already cleared for the next one) -->
+<div class="card hidden" id="doneCard" style="border-color:var(--ok-ink)">
+  <div class="status" id="doneMsg"></div>
+  <div class="status" id="phMsg"></div>
+  <button class="btn hidden" id="phRetry" type="button">Try the photos again</button>
+  <button class="btn" id="again" type="button">Start another job</button>
+</div>
+
 <!-- 1. Talk -->
 <div class="card">
   <div class="seg" role="group" aria-label="Customer type">
@@ -78,7 +97,7 @@
     <span id="micMainLabel">Tap to talk</span>
   </button>
   <div class="hint" id="modeHint"></div>
-  <textarea id="heard" placeholder="What you say shows up here. You can fix it before looking up."></textarea>
+  <textarea id="heard" autocomplete="off" placeholder="What you say shows up here. You can fix it before looking up."></textarea>
   <button class="btn" id="lookup">Look up</button>
   <div class="status" id="talkMsg"></div>
 </div>
@@ -136,7 +155,7 @@
   <!-- job -->
   <div class="sub">
     <label for="desc">Private notes</label>
-    <textarea id="desc" placeholder="What does the customer need?"></textarea>
+    <textarea id="desc" autocomplete="off" placeholder="What does the customer need?"></textarea>
     <button class="mic small" id="micDesc">
       <svg viewBox="0 0 24 24" fill="currentColor" width="22" height="22"><path d="M12 15a3 3 0 0 0 3-3V6a3 3 0 0 0-6 0v6a3 3 0 0 0 3 3zm5-3a5 5 0 0 1-10 0H5a7 7 0 0 0 6 6.92V21h2v-2.08A7 7 0 0 0 19 12h-2z"/></svg>
       <span id="micDescLabel">Add to description</span>
@@ -186,11 +205,31 @@
     <div class="status" id="liMsg"></div>
   </div>
 
+  <!-- photos: go on the job in HCP right after it's created -->
+  <div class="sub hidden" id="phSection">
+    <label>Photos</label>
+    <div class="phs" id="phList"></div>
+    <div class="row" style="margin-top:8px">
+      <button class="btn" id="phCam" type="button" style="margin:0">📷 Take photos</button>
+      <button class="btn" id="phPick" type="button" style="margin:0">🖼️ From gallery</button>
+    </div>
+    <input type="file" id="phFile" accept="image/*" multiple hidden>
+    <div class="hint" id="phHint">Added to the job in HCP as soon as it's created.</div>
+  </div>
+
   <button class="btn" id="submit">Create job</button>
   <div class="status" id="submitMsg"></div>
-  <button class="btn hidden" id="again">Start another job</button>
 </div>
 
+</div>
+
+<div class="cam hidden" id="cam">
+  <video id="camVid" playsinline autoplay muted></video>
+  <div class="bar">
+    <button class="btn" id="camDone" type="button">Done</button>
+    <span class="count" id="camCount"></span>
+    <button class="btn" id="camSnap" type="button">📸 Snap</button>
+  </div>
 </div>
 
 <footer><a href="#" id="forget">Not you? Change code</a></footer>
@@ -204,11 +243,12 @@
   var $ = GR.$, show = GR.show, say = GR.say, el = GR.el, stopAll = GR.stopAll;
   function recent(text) { GR.recent("New Job", text); }
 
-  var S = { mode: "auto", fields: null, cust: null, isNew: false, addr: "", me: "", today: "", usualUnit: {}, items: [], priceBook: true, tags: [], allTags: [] };
+  var S = { mode: "auto", fields: null, cust: null, isNew: false, addr: "", me: "", today: "", usualUnit: {}, items: [], priceBook: true, tags: [], allTags: [],
+            photos: [], photoOk: false, uploading: false, unsent: null };
   function money(c) { return "$" + ((Number(c) || 0) / 100).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 }); }
 
   // ---------- server ----------
-  var PAGE_VERSION = 6;   // bump with every change the server depends on (server: NJ.MIN_PAGE_VERSION)
+  var PAGE_VERSION = 7;  // bump with every change the server depends on (server: NJ.MIN_PAGE_VERSION)
   var api = GR.client("newJob", { name: "New Job", version: PAGE_VERSION, onOutdated: showOutdated, onAuthFail: function (msg) { B.showCode(msg); } });
 
   // "Assign to" always starts on Unassigned — pick a person only when you mean to.
@@ -237,6 +277,8 @@
       show($("liSection"), S.priceBook);
       fillSelect("jType", r.job_types, true); fillSelect("jUnit", r.business_units, true);
       if (S.today) $("jDate").min = S.today;
+      S.photoOk = r.photos === true;   // the server says it can put photos on jobs (older server copies don't)
+      show($("phSection"), S.photoOk);
     }
   });
 
@@ -256,6 +298,13 @@
   setMode("auto");
 
   // ---------- speech + drafts (what's dictated stays on the phone until the job is created) ----------
+  // A draft is only kept for DRAFT_HOURS: dictation that was never turned into a job (no signal, page closed) comes
+  // back, but yesterday's half-done job doesn't show up in today's form.
+  var DRAFT_AT = "grDraftAt:newJob", DRAFT_HOURS = 8;
+  if (Date.now() - (Number(GR.get(DRAFT_AT)) || 0) > DRAFT_HOURS * 3600000) { GR.drop("grDraft:newJob"); GR.drop("grDraft:newJobDesc"); GR.drop(DRAFT_AT); }
+  function stampDraft() { if ($("heard").value.trim() || $("desc").value.trim()) GR.put(DRAFT_AT, String(Date.now())); }
+  ["heard", "desc"].forEach(function (id) { $(id).addEventListener("input", stampDraft); });
+  document.addEventListener("visibilitychange", function () { if (document.hidden) stampDraft(); });
   var heardDraft = GR.draft($("heard"), "newJob"), descDraft = GR.draft($("desc"), "newJobDesc");
   if (heardDraft.restored) say("talkMsg", "Picked up what you dictated earlier. Tap Look up when you're ready.", "warn");
   if (!GR.speech) {
@@ -283,6 +332,7 @@
     busy = true; $("lookup").disabled = true;
     say("talkMsg", S.mode === "new" ? "Reading that…" : "Looking them up…", "busy");
     show($("matchCard"), false); show($("confirmCard"), false);
+    if (!S.uploading && !S.unsent) show($("doneCard"), false);
     api("parse", { text: text, mode: S.mode }).then(function (r) {
       busy = false; $("lookup").disabled = false;
       if (!r.ok) { say("talkMsg", "❌ " + r.error, "err"); return; }
@@ -325,7 +375,7 @@
 
   function fillJob(f) {
     setJobFields(f.job_type_id, f.business_unit_id);
-    if (f.job_description) $("desc").value = f.job_description;
+    $("desc").value = f.job_description || "";   // always this dictation's notes — never the last job's
     $("jDate").value = f.date || "";
     $("jTime").value = f.time || "";
     autoArrival();
@@ -383,7 +433,7 @@
   $("changeCust").onclick = function () { show($("confirmCard"), false); show($("matchCard"), true); $("matchCard").scrollIntoView({ behavior: "smooth" }); };
 
   // ---------- step 3: confirm ----------
-  function resetSubmit() { say("submitMsg", ""); $("submit").disabled = false; show($("submit"), true); show($("again"), false); S.reqId = ""; }
+  function resetSubmit() { say("submitMsg", ""); $("submit").disabled = false; show($("submit"), true); S.reqId = ""; }
 
   function addressForm(prefix, f) {
     var wrap = el("div", "grid");
@@ -704,9 +754,9 @@
       b.textContent = "Create job";
       if (r.ok) {
         var shown = (r.display_name_todo || r.billing_todo) ? r.message.split("\n").filter(function (l) { return !/^Finish in HCP/.test(l); }).join("\n") : r.message;
-        say("submitMsg", shown, "ok");
+        say("doneMsg", shown, "ok");
         if (r.display_name_todo || r.billing_todo) {   // HCP's API can't do these two: make the hand fixes quick
-          var m = $("submitMsg"), box = el("div", "todo");
+          var m = $("doneMsg"), box = el("div", "todo");
           box.appendChild(el("b", null, "Finish the new customer in HCP"));
           var ol = el("ol");
           if (r.display_name_todo) ol.appendChild(el("li", null, "Edit the customer → Display name → " + r.display_name_todo));
@@ -721,9 +771,12 @@
           op.style.display = "block"; op.style.textAlign = "center"; op.style.textDecoration = "none";
           box.appendChild(op); m.appendChild(box);
         }
-        show(b, false); show($("again"), true);
-        GR.drop("grDraft:newJob"); GR.drop("grDraft:newJobDesc");   // the dictation reached HCP — nothing left to keep
         recent(r.message.split("\n").slice(0, 2).join(" — "));
+        var photos = S.photos.slice(); S.photos = [];   // handed to the uploader before the form is cleared
+        resetForm();                                   // the job is in HCP: nothing from it stays in the form or on the phone
+        show($("doneCard"), true); say("phMsg", ""); show($("phRetry"), false);
+        window.scrollTo({ top: 0, behavior: "smooth" });
+        if (photos.length) uploadPhotos({ id: r.job_id, number: r.invoice_number }, photos);
         return;
       }
       b.disabled = false;
@@ -737,13 +790,120 @@
     });
   }
 
-  $("again").onclick = function () {
-    S.fields = null; S.cust = null; resetSubmit();
-    $("heard").value = ""; $("desc").value = ""; $("jDate").value = ""; $("jTime").value = "";
-    $("jArrival").value = "120"; S.arrivalPicked = false; setAssign(); $("searchBox").value = ""; setJobFields("", ""); setItems([]); setTags([]); $("liSearch").value = ""; GR.saveDrafts();
+  // ---------- clear everything for the next job ----------
+  function resetForm() {
+    stopAll(); S.fields = null; S.cust = null; S.isNew = false; S.addr = ""; resetSubmit();
+    heardDraft.clear(); descDraft.clear(); GR.drop(DRAFT_AT);
+    $("jDate").value = ""; $("jTime").value = ""; $("jArrival").value = "120"; S.arrivalPicked = false; setAssign();
+    $("searchBox").value = ""; $("matchList").innerHTML = ""; $("dupeList").innerHTML = ""; say("dupeMsg", "");
+    ["nFirst", "nLast", "nCompany", "nPhone", "nEmail"].forEach(function (id) { $(id).value = ""; $(id).classList.remove("missing"); }); updateDisplay();
+    $("newCustAddr").innerHTML = ""; $("addrChoices").innerHTML = ""; $("newAddrWrap").innerHTML = "";
+    ["cFirst", "cLast", "cDisplay", "cPhone", "cEmail"].forEach(function (id) { $(id).textContent = ""; });
+    setJobFields("", ""); setItems([]); setTags([]); $("liSearch").value = ""; say("liMsg", "");
+    clearPhotos();
     say("talkMsg", ""); show($("matchCard"), false); show($("confirmCard"), false);
+  }
+  $("again").onclick = function () {
+    if (!S.uploading && !S.unsent) show($("doneCard"), false);
+    resetForm();
     window.scrollTo({ top: 0, behavior: "smooth" });
+    $("heard").focus();
   };
+
+  // ---------- photos ----------
+  // Picked or taken on the confirm card, kept in memory (shrunk to 1600 px, about 200–400 KB each), and sent to the
+  // job one at a time once HCP has created it. A photo that doesn't go up stays here with a "try again" button.
+  var MAX_PHOTOS = 12, PH_PX = 1600;
+  function shrinkPhoto(file) {
+    return new Promise(function (resolve, reject) {
+      var url = URL.createObjectURL(file), img = new Image();
+      img.onload = function () {
+        var k = Math.min(1, PH_PX / Math.max(img.naturalWidth, img.naturalHeight)), c = document.createElement("canvas");
+        c.width = Math.max(1, Math.round(img.naturalWidth * k)); c.height = Math.max(1, Math.round(img.naturalHeight * k));
+        c.getContext("2d").drawImage(img, 0, 0, c.width, c.height); img.onload = img.onerror = null; URL.revokeObjectURL(url);
+        c.toBlob(function (b) { c.width = c.height = 0; b ? resolve(b) : reject(new Error("Couldn't prepare that photo.")); }, "image/jpeg", 0.8);
+      };
+      img.onerror = function () { URL.revokeObjectURL(url); reject(new Error("Couldn't read that photo (" + (file.type || file.name || "unknown type") + ").")); };
+      img.src = url;
+    });
+  }
+  function addPhoto(blob) {
+    if (S.photos.length >= MAX_PHOTOS) { say("submitMsg", "Up to " + MAX_PHOTOS + " photos per job — add more in HCP.", "warn"); return false; }
+    S.photos.push({ id: GR.rid(), blob: blob, url: URL.createObjectURL(blob) }); renderPhotos(); return true;
+  }
+  function clearPhotos() { S.photos.forEach(function (p) { try { URL.revokeObjectURL(p.url); } catch (e) {} }); S.photos = []; renderPhotos(); }
+  function renderPhotos() {
+    var box = $("phList"); box.innerHTML = "";
+    S.photos.forEach(function (p, i) {
+      var t = el("div", "ph"), img = el("img"); img.src = p.url; img.alt = "Photo " + (i + 1);
+      var x = el("button", null, "×"); x.type = "button"; x.title = "Remove this photo";
+      x.onclick = function () { try { URL.revokeObjectURL(p.url); } catch (e) {} S.photos.splice(S.photos.indexOf(p), 1); renderPhotos(); };
+      t.appendChild(img); t.appendChild(x); box.appendChild(t);
+    });
+    $("phHint").textContent = S.photos.length ? S.photos.length + " photo" + (S.photos.length === 1 ? "" : "s") + " — added to the job in HCP as soon as it's created. Tap × to drop one."
+                                              : "Added to the job in HCP as soon as it's created.";
+  }
+  $("phPick").onclick = function () { $("phFile").click(); };
+  $("phFile").onchange = function () {
+    var files = Array.prototype.slice.call(this.files || []); this.value = "";
+    var chain = Promise.resolve();
+    files.forEach(function (f) { chain = chain.then(function () { return shrinkPhoto(f).then(addPhoto, function (e) { say("submitMsg", "❌ " + e.message, "err"); }); }); });
+  };
+
+  // in-page camera: snap as many as you like, then Done
+  var camStream = null, camShots = 0;
+  function stopCam() {
+    if (camStream) { camStream.getTracks().forEach(function (t) { t.stop(); }); camStream = null; }
+    $("camVid").srcObject = null; show($("cam"), false);
+  }
+  $("phCam").onclick = function () {
+    if (!(navigator.mediaDevices && navigator.mediaDevices.getUserMedia)) { $("phFile").click(); return; }
+    navigator.mediaDevices.getUserMedia({ audio: false, video: { facingMode: { ideal: "environment" }, width: { ideal: 1920 }, height: { ideal: 1440 } } }).then(function (st) {
+      camStream = st; camShots = 0; $("camCount").textContent = ""; var v = $("camVid"); v.srcObject = st; show($("cam"), true);
+      var pl = v.play(); if (pl && pl.catch) pl.catch(function () {});
+    }).catch(function (e) {
+      say("submitMsg", "❌ The camera didn't open (" + (e && e.name === "NotAllowedError" ? "camera permission is off for this site — allow it in the browser's site settings" : (e && (e.name || e.message)) || "unknown") + "). Use “From gallery” instead.", "err");
+    });
+  };
+  $("camSnap").onclick = function () {
+    var v = $("camVid"); if (!v.videoWidth) return;
+    var k = Math.min(1, PH_PX / Math.max(v.videoWidth, v.videoHeight)), c = document.createElement("canvas");
+    c.width = Math.round(v.videoWidth * k); c.height = Math.round(v.videoHeight * k);
+    c.getContext("2d").drawImage(v, 0, 0, c.width, c.height);
+    c.toBlob(function (b) {
+      c.width = c.height = 0;
+      if (b && addPhoto(b)) { camShots++; $("camCount").textContent = camShots + " taken"; }
+      if (S.photos.length >= MAX_PHOTOS) stopCam();
+    }, "image/jpeg", 0.8);
+  };
+  $("camDone").onclick = stopCam;
+  document.addEventListener("visibilitychange", function () { if (document.hidden && camStream) stopCam(); });
+
+  function b64(blob) { return new Promise(function (res, rej) { var fr = new FileReader(); fr.onload = function () { res(String(fr.result).split(",")[1] || ""); }; fr.onerror = function () { rej(fr.error || new Error("Couldn't read the photo.")); }; fr.readAsDataURL(blob); }); }
+  function uploadPhotos(job, list) {
+    S.uploading = true; S.unsent = null; show($("phRetry"), false);
+    var total = list.length, sent = 0, failed = [], lastErr = "";
+    function next(i) {
+      if (i >= total) {
+        S.uploading = false;
+        if (!failed.length) { say("phMsg", "📷 " + sent + " photo" + (sent === 1 ? "" : "s") + " added to job " + job.number + ".", "ok"); return; }
+        S.unsent = { job: job, list: failed };
+        say("phMsg", "⚠️ " + failed.length + " of " + total + " photo" + (total === 1 ? "" : "s") + " didn't reach job " + job.number + " (" + lastErr + "). They're still on this page — keep it open and tap Try again.", "err");
+        show($("phRetry"), true); return;
+      }
+      var p = list[i];
+      say("phMsg", "📷 Adding photo " + (i + 1) + " of " + total + " to job " + job.number + "…", "busy");
+      b64(p.blob).then(function (data) {
+        return api("photo", { job_id: job.id, number: job.number, req_id: p.id, n: i + 1, mime: "image/jpeg", data: data }, { timeout: 90000 });
+      }).then(function (r) {
+        if (r && r.ok) { sent++; try { URL.revokeObjectURL(p.url); } catch (e) {} } else { failed.push(p); lastErr = (r && r.error) || "unknown error"; }
+        next(i + 1);
+      }, function (e) { failed.push(p); lastErr = (e && e.message) || "couldn't read the photo"; next(i + 1); });
+    }
+    next(0);
+  }
+  $("phRetry").onclick = function () { if (S.unsent && !S.uploading) uploadPhotos(S.unsent.job, S.unsent.list); };
+  window.addEventListener("beforeunload", function (e) { if (S.uploading || S.unsent) { e.preventDefault(); e.returnValue = ""; } });
 })();
 </script>
 </body>

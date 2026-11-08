@@ -43,11 +43,20 @@ function ok(name, cond, detail) { results.push((cond ? "PASS " : "FAIL ") + name
   ok("new-job: confirm card filled", await vis("#confirmCard") && (await page.inputValue("#desc")) === "Leaking hose bib" && (await page.inputValue("#jType")) === "t1");
   ok("new-job: price-book line item ticked", (await page.locator("#liList .li input[type=checkbox]").first().isChecked()) && /\$325\.00/.test(await txt("#liSum")));
   ok("new-job: tag chip shown", /Water Heater/.test(await txt("#tagChips")));
-  await page.click("#submit"); await page.waitForTimeout(600);
-  ok("new-job: job created", /Job 49999 created/.test(await txt("#submitMsg")), await txt("#submitMsg"));
+  ok("new-job: photo section shown", await vis("#phSection"));
+  await page.setInputFiles("#phFile", [{ name: "a.png", mimeType: "image/png", buffer: Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAQAAAAECAIAAAAmkwkpAAAAEElEQVR4nGP4z8AARwzEcQCukw/x0F8jngAAAABJRU5ErkJggg==", "base64") },
+                                       { name: "b.png", mimeType: "image/png", buffer: Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAQAAAAECAIAAAAmkwkpAAAAEElEQVR4nGP4z8AARwzEcQCukw/x0F8jngAAAABJRU5ErkJggg==", "base64") }]);
+  await page.waitForTimeout(500);
+  ok("new-job: two photo thumbnails", (await page.locator("#phList .ph").count()) === 2);
+  await page.click("#submit"); await page.waitForTimeout(1200);
+  ok("new-job: job created", /Job 49999 created/.test(await txt("#doneMsg")), await txt("#doneMsg"));
+  ok("new-job: photos sent to the job", /2 photos added to job 49999/.test(await txt("#phMsg")) && log.filter(l => l.key === "newJob" && /"action":"photo"/.test(l.body)).length === 2, await txt("#phMsg"));
+  ok("new-job: form cleared after create", !(await vis("#confirmCard")) && (await page.inputValue("#heard")) === "" && (await page.inputValue("#desc")) === "" && (await page.locator("#liList .li").count()) === 0 && (await page.locator("#phList .ph").count()) === 0);
+  await page.goto(U("new-job.html")); await page.waitForTimeout(600);
+  ok("new-job: nothing from the last job after reopening", (await page.inputValue("#heard")) === "" && !/Picked up/.test(await txt("#talkMsg")));
   const create = log.filter(l => l.key === "newJob" && /"action":"create"/.test(l.body)).pop();
   const body = JSON.parse(create.body);
-  ok("new-job: create payload has version + line items + customer", body.v === 6 && body.customer_id === "c1" && body.job.line_items.length === 1 && body.job.line_items[0].uuid === "s1" && body.req_id, JSON.stringify(body).slice(0, 160));
+  ok("new-job: create payload has version + line items + customer", body.v === 7 && body.customer_id === "c1" && body.job.line_items.length === 1 && body.job.line_items[0].uuid === "s1" && body.req_id, JSON.stringify(body).slice(0, 160));
   ok("new-job: draft cleared after create", (await page.evaluate(() => localStorage.getItem("grDraft:newJob"))) === null);
 
   // ---- Dispatch: parse → change card → apply; board list ----

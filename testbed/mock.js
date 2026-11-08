@@ -61,7 +61,7 @@ const handlers = {
   newJob(p) {
     if (p.token !== GOOD) return { ok: false, error: "That access code isn’t valid." };
     switch (p.action) {
-      case "init": return { ok: true, who: "Kyle Hunt", me: "e1", employees: EMPS, today: TODAY, job_types: [{ id: "t1", name: "Service" }], business_units: [{ id: "b1", name: "Plumbing" }], usual_unit: { t1: "b1" }, price_book: true, tags: [{ id: "g1", name: "Water Heater" }, { id: "g2", name: "Drain" }] };
+      case "init": return { ok: true, who: "Kyle Hunt", me: "e1", employees: EMPS, today: TODAY, job_types: [{ id: "t1", name: "Service" }], business_units: [{ id: "b1", name: "Plumbing" }], usual_unit: { t1: "b1" }, price_book: true, tags: [{ id: "g1", name: "Water Heater" }, { id: "g2", name: "Drain" }], photos: true };
       case "parse": return { ok: true, fields: { first_name: "John", last_name: "Doe", phone: "6105551212", street: "12 Main St", city: "West Chester", state: "PA", zip: "", job_description: "Leaking hose bib", date: TODAY, time: "13:00", job_type_id: "t1", business_unit_id: "b1" },
         matches: [{ id: "c1", display_name: "DoeJohn", first_name: "John", last_name: "Doe", phones: [{ text: "(610) 555-1212", label: "mobile" }], addresses: [{ id: "a1", text: "12 Main St, West Chester, PA 19380", street: "12 Main St", type: "service" }], email: "", score: 5 }],
         suggestions: [{ name: "hose bib", quantity: 1, candidates: [{ uuid: "s1", name: "Hose Bib Replacement", description: "", price: 32500, cost: 4000, taxable: false, strong: true }] }], tags: [{ id: "g1", name: "Water Heater" }] };
@@ -69,7 +69,8 @@ const handlers = {
       case "services": return { ok: true, candidates: [] };
       case "classify": return { ok: true, job_type_id: "t1", business_unit_id: "b1" };
       case "address": return { ok: true, found: true, zip: "19380", source: "census" };
-      case "create": return { ok: true, message: "✅ Job 49999 created for DoeJohn.\nFri Oct 30, 1:00 PM · Unassigned" };
+      case "create": return { ok: true, message: "✅ Job 49999 created for DoeJohn.\nFri Oct 30, 1:00 PM · Unassigned", job_id: "job_49999", invoice_number: "49999" };
+      case "photo": return p.job_id === "job_49999" && p.data ? { ok: true, name: "job49999_" + p.n + ".jpg" } : { ok: false, error: "bad photo" };
     }
     return { ok: false, error: "Unknown action." };
   },

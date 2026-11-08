@@ -34,6 +34,9 @@
  *   services {q}                               → price book services matching a typed search
  *   classify {text}                            → suggested Job Type + Business Unit for a job description
  *   create   {req_id, customer_id | customer, address_id | address, job{…, line_items}} → creates the job (+ line items)
+ *   photo    {job_id, number, req_id, n, mime, data(base64)} → attaches one photo to the job just created
+ *            (POST /jobs/{id}/attachments, multipart — same call the Board's photos use). The page sends them one at a
+ *            time after "create" succeeds; a retried req_id is answered from the cache, so a photo never goes up twice.
  */
 
 const NJ = {
@@ -86,6 +89,7 @@ function newJobAction_(p) {
       case 'services': return { ok: true, candidates: njPriceSearch_(p.q) };
       case 'classify': return Object.assign({ ok: true }, njClassify_(p.text));
       case 'create':   return njCreate_(p, who);
+      case 'photo':    return njPhoto_(p, who);
       default:         throw new Error('Unknown action.');
     }
   } catch (err) {
@@ -106,7 +110,7 @@ function njInit_(who) {
   const jf = njJobFields_();
   return { who: who, me: me ? me.id : '', employees: emps, today: njToday_(),
            job_types: jf.job_types, business_units: jf.business_units, usual_unit: jf.usual_unit,
-           price_book: njPriceBookOk_(), tags: njJobTags_().map(t => ({ id: t.id, name: t.name })) };
+           price_book: njPriceBookOk_(), tags: njJobTags_().map(t => ({ id: t.id, name: t.name })), photos: true };
 }
 
 /**
@@ -1119,6 +1123,40 @@ function njKeepUnassigned_(created) {
   } catch (_) {}
   console.log(`newJob ${created.invoice_number}: HCP assigned ${who} by itself → ${stuck ? 'could not clear' : 'cleared'} ${err}`);
   return { names: who, stuck: stuck };
+}
+
+/* ───────────── photos ───────────── */
+
+/** One photo → the job's attachments. Named job<#>_<date>_<tech>_<n>.jpg so they sort together in HCP. */
+function njPhoto_(p, who) {
+  const reqId = String(p.req_id || '').replace(/[^\w-]/g, '').slice(0, 64);
+  const cache = CacheService.getScriptCache();
+  if (reqId) { const prior = cache.get('nj_ph_' + reqId); if (prior) return JSON.parse(prior); }
+  const jobId = String(p.job_id || '').trim();
+  if (!/^[\w-]{3,80}$/.test(jobId)) throw new Error('No job to put the photo on.');
+  const mime = String(p.mime || 'image/jpeg').toLowerCase();
+  if (!/^image\/(jpeg|png|webp)$/.test(mime)) throw new Error('Photos only (JPG, PNG, WebP).');
+  const data = String(p.data || '');
+  if (!data) throw new Error('No photo came through.');
+  if (data.length * 0.75 > 10 * 1024 * 1024) throw new Error('That photo is over 10 MB.');
+  const tz = njTz_(), ext = /png/.test(mime) ? 'png' : /webp/.test(mime) ? 'webp' : 'jpg';
+  const num = String(p.number || '').replace(/[^\w-]/g, '').slice(0, 20);
+  const name = 'job' + num + '_' + Utilities.formatDate(new Date(), tz, 'yyyyMMdd_HHmm') + '_' + String(who || '').replace(/[^A-Za-z]/g, '').slice(0, 12) +
+    '_' + (Number(p.n) || 1) + '.' + ext;
+  const blob = Utilities.newBlob(Utilities.base64Decode(data), mime, name);
+  let code = 0, text = '';
+  for (let attempt = 0; attempt < 4; attempt++) {
+    const res = UrlFetchApp.fetch(NJ.BASE + `/jobs/${encodeURIComponent(jobId)}/attachments`, {
+      method: 'post', headers: { Authorization: 'Token ' + apiKey_(), Accept: 'application/json' }, payload: { file: blob }, muteHttpExceptions: true });
+    code = res.getResponseCode(); text = res.getContentText();
+    if (code === 429 || code >= 500) { Utilities.sleep((attempt + 1) * 2000); continue; }
+    break;
+  }
+  if (code < 200 || code >= 300) throw new Error(`HCP wouldn’t take the photo (${code}): ${text.slice(0, 160)}`);
+  console.log(`newJob photo ✅ job ${num} ${name} by ${who}`);
+  const out = { ok: true, name: name };
+  if (reqId) cache.put('nj_ph_' + reqId, JSON.stringify(out), 21600);
+  return out;
 }
 
 /* ───────────── access codes, HCP client, helpers ───────────── */
