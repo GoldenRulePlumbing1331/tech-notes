@@ -251,16 +251,39 @@
   @media (max-width: 480px) { .dd .lg, .dd .caret, #unBtn svg, #looseBtn svg, #roomBtn svg { display: none; } .dd .sm { display: inline; } .dd { gap: 4px; padding: 0 8px; flex: none; } .tools { gap: 5px; overflow-x: auto; scrollbar-width: none; } .tools::-webkit-scrollbar { display: none; } #techBtn { flex: none; } }
   .lerow .why { display: inline-block; font-size: 11px; font-weight: 750; padding: 1px 6px; border-radius: 5px; margin-left: 4px; vertical-align: 1px; background: var(--warn-bg); color: var(--warn-ink); }
   /* "Room left?" sheet */
-  .capbig { font-size: 30px; font-weight: 800; line-height: 1.1; margin: 6px 0 2px; }
-  .capbig small { font-size: 16px; font-weight: 650; color: var(--muted); }
-  .capfit { font-size: 16px; font-weight: 650; margin-bottom: 4px; }
+  .caphero { display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap; margin: 4px 0 2px; }
+  .caphero b { font-size: 40px; font-weight: 850; line-height: 1; letter-spacing: -.02em; }
+  .caphero span { font-size: 15px; color: var(--muted); font-weight: 600; }
+  .capfit { font-size: 17px; font-weight: 750; margin: 6px 0 2px; }
   .capfit.none { color: var(--warn-ink); }
-  .row .am.pos { color: var(--ok-ink); } .row .am.neg { color: var(--err-ink); } .row .am small { display: block; font-weight: 500; color: var(--muted); font-size: 12px; }
-  .row .av { width: 30px; height: 30px; font-size: 12px; flex: none; }
-  .row.dim { opacity: .55; }
-  .capdet { margin: 0 0 6px 40px; border-left: 3px solid var(--grid); padding: 2px 0 2px 10px; font-size: 13px; color: var(--muted); }
-  .capdet div { padding: 3px 0; } .capdet b { color: var(--ink); font-weight: 650; }
-  .capnote { font-size: 12.5px; color: var(--muted); margin-top: 12px; line-height: 1.4; }
+  .capsub { font-size: 13px; color: var(--muted); margin-bottom: 10px; }
+  .capgrid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin: 6px 0 4px; }
+  .capcard { border: 1px solid var(--line); border-radius: 12px; padding: 10px 11px 9px; background: var(--card); cursor: pointer; text-align: left; width: 100%; font: inherit; color: inherit; position: relative; }
+  .capcard:active { background: var(--soft); }
+  .capcard .nm { display: flex; align-items: center; gap: 7px; font-weight: 750; font-size: 14px; white-space: nowrap; overflow: hidden; }
+  .capcard .av { width: 22px; height: 22px; font-size: 10px; }
+  .capcard .big { font-size: 26px; font-weight: 850; line-height: 1.1; margin-top: 6px; letter-spacing: -.01em; }
+  .capcard .big small { font-size: 13px; font-weight: 650; color: var(--muted); margin-left: 4px; letter-spacing: 0; }
+  .capcard.open .big { color: var(--ok-ink); } .capcard.full .big { color: var(--muted); } .capcard.over .big { color: var(--err-ink); } .capcard.off .big { color: var(--muted); }
+  @media (prefers-color-scheme: dark) { .capcard.open .big { color: #4cc274; } .capcard.over .big { color: #ff8a8a; } }
+  .capcard .st { font-size: 12.5px; color: var(--muted); margin-top: 3px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .capbar { height: 7px; border-radius: 4px; background: var(--soft); overflow: hidden; margin-top: 8px; display: flex; }
+  .capbar i { display: block; height: 100%; }
+  .capbar .b1 { background: var(--brand); } .capbar .b2 { background: var(--done); } .capbar .b3 { background: var(--ok-ink); opacity: .55; }
+  @media (prefers-color-scheme: dark) { .capbar .b1 { background: #3b6aa8; } .capbar .b3 { background: #4cc274; } }
+  .capcard.dim { opacity: .6; } .capcard.on { box-shadow: 0 0 0 2px var(--brand) inset; }
+  .capcard .pin { position: absolute; top: 8px; right: 9px; font-size: 11px; font-weight: 800; padding: 1px 6px; border-radius: 5px; background: var(--warn-bg); color: var(--warn-ink); }
+  .capdet { margin: 2px 0 8px; border: 1px solid var(--line); border-radius: 12px; padding: 8px 12px; font-size: 13px; color: var(--muted); background: var(--card); grid-column: 1 / -1; }
+  .capdet div { padding: 4px 0; border-top: 1px solid var(--grid); } .capdet div:first-child { border-top: 0; } .capdet b { color: var(--ink); font-weight: 650; }
+  .capdet .incl { margin-top: 8px; }
+  .capfits { border: 1px solid var(--line); border-radius: 12px; overflow: hidden; margin-top: 4px; }
+  .capfits .fr { display: flex; gap: 10px; align-items: center; padding: 8px 12px; border-top: 1px solid var(--grid); font-size: 14px; }
+  .capfits .fr:first-child { border-top: 0; }
+  .capfits .fr .l { flex: 1; min-width: 0; } .capfits .fr .l b { display: block; font-size: 14px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .capfits .fr .l span { display: block; font-size: 12.5px; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .capfits .fr .t { flex: none; font-weight: 750; font-size: 14px; } .capfits .fr .t small { display: block; font-weight: 500; color: var(--muted); font-size: 11.5px; text-align: right; }
+  .capmore { display: block; width: 100%; text-align: center; font: inherit; font-size: 13px; font-weight: 650; color: var(--muted); background: none; border: 0; padding: 10px 0 4px; cursor: pointer; }
+  .capnote { font-size: 12px; color: var(--muted); margin-top: 12px; line-height: 1.4; }
   .incl { flex: none; border: 1px solid var(--line); background: var(--card); border-radius: 8px; padding: 5px 8px; font-size: 12px; font-weight: 700; cursor: pointer; margin-top: 2px; }
   .incl.on { background: var(--brand); color: #fff; border-color: var(--brand); }
   footer { text-align: center; font-size: 13px; color: var(--muted); padding: 10px 0 16px; }
@@ -609,19 +632,8 @@
     if (t.off) return false;
     if (prefs.capOff[t.id]) return false;
     if (prefs.capOn[t.id]) return true;
-    return t.truck && t.scheduled;
+    return !!t.lead && t.scheduled;
   }
-  // Learning job lengths reads every job's line items, so the server does it in ~4-minute chunks; keep asking until it's done.
-  function capLearn(onDone) {
-    if (S.capLearning) return; S.capLearning = true;
-    (function step() {
-      api("cap_stats", {}, { timeout: 330000 }).then(function (x) {
-        if (x && x.ok && x.more) { S.capProgress = x.page && x.total ? "page " + x.page + " of " + x.total : ""; if (S.sheetRoom) renderLearnNote(); return setTimeout(step, x.busy ? 15000 : 500); }
-        S.capLearning = false; S.capProgress = ""; if (x && x.ok && !x.skipped && onDone) onDone();
-      });
-    })();
-  }
-  function renderLearnNote() { var n = $("capLearn"); if (n) n.textContent = "Learning how long jobs take from the last year of HCP jobs" + (S.capProgress ? " (" + S.capProgress + ")" : "") + " — the numbers below use defaults until it's done (10–20 min the first time)."; }
   function openRoom(fresh) {
     closeMenu();
     var sh = $("sheet"); S.sheetIsUn = false; S.sheetOut = false; S.sheetLoose = false; S.sheetRoom = true;
@@ -642,73 +654,87 @@
   }
   function renderRoom() {
     var r = S.room, sh = $("sheet"); sh.innerHTML = ""; sh.appendChild(el("div", "grab"));
-    var when = r.is_today ? "today" : dayLabel(r.date);
-    sh.appendChild(el("h3", null, "Room left " + (r.is_today ? "today" : "on " + dayLabel(r.date))));
-    var per = (r.typical_min || 90) + (r.drive_min || 0);
+    sh.appendChild(el("h3", null, "Room left " + (r.is_today ? "today" : dayLabel(r.date))));
+    var per = (r.typical_min || 90) + (r.drive_min || 0), span = Math.max(1, r.day_end - r.cursor);
     var counted = r.techs.filter(capCounted), open = 0, fits = 0;
     counted.forEach(function (t) { if (t.open_min > 0) { open += t.open_min; fits += Math.floor(t.open_min / per); } });
     if (r.past) sh.appendChild(el("div", "kind", "That day is over."));
     else if (r.over) sh.appendChild(el("div", "kind", "The workday (" + hm(r.day_start) + "–" + hm(r.day_end) + ") is over — try tomorrow."));
     else {
-      var big = el("div", "capbig", (Math.round(open / 30) / 2) + " hrs"); big.appendChild(el("small", null, " open across " + counted.length + (counted.length === 1 ? " tech" : " techs"))); sh.appendChild(big);
-      sh.appendChild(el("div", "capfit" + (fits ? "" : " none"), fits ? "≈ " + fits + " more typical job" + (fits === 1 ? "" : "s") + " (" + dur(r.typical_min) + " + " + dur(r.drive_min) + " drive each)" : "No room for another typical job (" + dur(per) + " with drive)."));
+      var hero = el("div", "caphero"); hero.appendChild(el("b", null, (Math.round(open / 30) / 2) + " hrs")); hero.appendChild(el("span", null, "open across " + counted.length + " lead" + (counted.length === 1 ? "" : "s"))); sh.appendChild(hero);
+      sh.appendChild(el("div", "capfit" + (fits ? "" : " none"), fits ? "≈ " + fits + " more typical job" + (fits === 1 ? "" : "s") + " fit" : "No room for another typical job"));
+      sh.appendChild(el("div", "capsub", "A typical job is " + dur(r.typical_min) + " + " + dur(r.drive_min) + " drive · counting " + hm(r.cursor) + "–" + hm(r.day_end) + " · as of " + (r.loaded_at || "")));
     }
-    if (r.learning) { var ln = el("div", "msg warn"); ln.id = "capLearn"; sh.appendChild(ln); renderLearnNote(); }
-    sh.appendChild(el("div", "kind", "Workday " + hm(r.day_start) + "–" + hm(r.day_end) + (r.is_today && !r.over ? " · counting from " + hm(r.cursor) : "") + " · as of " + (r.loaded_at || "")));
+    if (r.learning) { var ln = el("div", "msg warn"); ln.id = "capLearn"; ln.style.margin = "0 0 8px"; sh.appendChild(ln); renderLearnNote(); }
 
-    function techRow(t, mode) {
-      var wrap = el("div"), row = el("button", "row" + (mode === "dim" ? " dim" : ""));
-      var av = el("div", "av", t.initials || t.name.charAt(0)); av.style.setProperty("--c", t.color || "#4a6fa5"); row.appendChild(av);
-      var bd = el("div", "bd"); bd.appendChild(el("b", null, t.name));
-      var sub = t.off ? (t.off_label || "Off") : !t.jobs ? "Nothing on the schedule" :
-        t.left + " of " + t.jobs + " left" + (t.finish_min != null && !r.past && t.left ? " · done ≈ " + hm(Math.min(t.finish_min, 1439)) : t.left ? "" : " · all done");
-      bd.appendChild(el("span", null, sub)); row.appendChild(bd);
-      var am = el("div", "am " + (t.open_min >= 0 ? "pos" : "neg"), t.off || r.past ? "—" : (t.open_min >= 0 ? "+" : "−") + dur(t.open_min));
-      if (!t.off && !r.past) am.appendChild(el("small", null, t.open_min >= 0 ? (Math.floor(t.open_min / per) ? Math.floor(t.open_min / per) + " job" + (Math.floor(t.open_min / per) === 1 ? "" : "s") : "open") : "over"));
-      row.appendChild(am);
-      var det = el("div", "capdet hidden");
-      if (!t.items.length) det.appendChild(el("div", null, "Open the whole workday if they're working."));
+    function card(t, dim) {
+      var full = !!t.full_day, cls = t.off ? "off" : full || (t.open_min <= 0 && t.open_min > -30) ? "full" : t.open_min < 0 ? "over" : "open";
+      var c = el("button", "capcard " + cls + (dim ? " dim" : "")); c.type = "button";
+      var nm = el("div", "nm"); var av = el("div", "av", t.initials || t.name.charAt(0)); av.style.setProperty("--c", t.color || "#4a6fa5"); nm.appendChild(av); nm.appendChild(document.createTextNode(t.short || t.name)); c.appendChild(nm);
+      var big = el("div", "big");
+      if (t.off) big.textContent = t.off_label || "Off";
+      else if (r.past) big.textContent = "—";
+      else if (full) { big.textContent = "Full"; big.appendChild(el("small", null, t.full_day.hours + "h job")); }
+      else if (t.open_min < -30) { big.textContent = "−" + dur(t.open_min); big.appendChild(el("small", null, "over")); }
+      else if (t.open_min <= 0) big.textContent = "Full";
+      else { big.textContent = "+" + dur(t.open_min); var n = Math.floor(t.open_min / per); big.appendChild(el("small", null, n ? n + " job" + (n === 1 ? "" : "s") : "")); }
+      c.appendChild(big);
+      var st = t.off ? "" : !t.jobs ? "nothing scheduled" : t.left ? t.left + " of " + t.jobs + " left" + (t.finish_min != null && !r.past ? " · done ≈ " + hm(Math.min(t.finish_min, 1439)) : "") : "all " + t.jobs + " done";
+      c.appendChild(el("div", "st", st));
+      if (!t.off && !r.past) {
+        var bar = el("div", "capbar"), used = Math.min(span, Math.max(0, t.booked_min || 0)), blk = Math.min(span - used, Math.max(0, t.blocked_min || 0));
+        var i1 = el("i", "b1"); i1.style.width = (used / span * 100) + "%"; bar.appendChild(i1);
+        var i2 = el("i", "b2"); i2.style.width = (blk / span * 100) + "%"; bar.appendChild(i2);
+        var i3 = el("i", "b3"); i3.style.width = (Math.max(0, span - used - blk) / span * 100) + "%"; bar.appendChild(i3);
+        c.appendChild(bar);
+      }
+      if (!t.lead && !t.off) c.appendChild(el("span", "pin", "helper"));
+      c.onclick = function () { S.capOpen = S.capOpen === t.id ? "" : t.id; renderRoom(); };
+      return c;
+    }
+    function detail(t) {
+      var det = el("div", "capdet");
+      if (!t.items.length) det.appendChild(el("div", null, "Nothing on the schedule — open the whole workday if they're working."));
       t.items.forEach(function (x) {
         var d = el("div"); d.appendChild(el("b", null, (x.kind === "estimate" ? "Est " : "#") + x.number + " " + x.customer));
-        d.appendChild(document.createTextNode(" · " + x.time + " · " + (x.state === "done" ? "done" : (x.state === "work" ? "working, ≈ " + dur(x.rem) + " left" : x.state === "omw" ? "on the way, ≈ " + dur(x.rem) + " incl. drive" : "≈ " + dur(x.typical) + " + drive")) +
-          " · " + x.basis + (x.note ? " · ⚠ " + x.note : "")));
+        d.appendChild(document.createTextNode(" · " + x.time + " · " + (x.state === "done" ? "done" : x.state === "work" ? "working, ≈ " + dur(x.rem) + " left" : x.state === "omw" ? "on the way, ≈ " + dur(x.rem) + " incl. drive" : "≈ " + dur(x.typical) + " + drive") + " · " + x.basis + (x.note ? " · ⚠ " + x.note : "")));
         det.appendChild(d);
       });
       if (t.blocked_min) det.appendChild(el("div", null, "Events block " + dur(t.blocked_min) + "."));
-      var tg = el("button", "incl" + (capCounted(t) ? " on" : ""), capCounted(t) ? "✓ Counted" : "＋ Count them");
-      tg.onclick = function (e) {
-        e.stopPropagation();
-        if (capCounted(t)) { prefs.capOff[t.id] = 1; delete prefs.capOn[t.id]; } else { delete prefs.capOff[t.id]; prefs.capOn[t.id] = 1; }
-        savePrefs(); renderRoom();
-      };
-      if (!t.off) det.appendChild(tg);
-      row.onclick = function () { det.classList.toggle("hidden"); };
-      wrap.appendChild(row); wrap.appendChild(det); return wrap;
+      if (!t.off) {
+        var tg = el("button", "incl" + (capCounted(t) ? " on" : ""), capCounted(t) ? "✓ Counted in the total" : "＋ Count in the total"); tg.type = "button";
+        tg.onclick = function (e) { e.stopPropagation(); if (capCounted(t)) { prefs.capOff[t.id] = 1; delete prefs.capOn[t.id]; } else { delete prefs.capOff[t.id]; prefs.capOn[t.id] = 1; } savePrefs(); renderRoom(); };
+        det.appendChild(tg);
+      }
+      return det;
     }
-    var sorted = r.techs.slice().sort(function (a, b) { return b.open_min - a.open_min; });
-    if (counted.length) { sh.appendChild(el("div", "ugrp", "By tech — tap for details")); sorted.filter(capCounted).forEach(function (t) { sh.appendChild(techRow(t)); }); }
+    function grid(list, dim) {
+      var g = el("div", "capgrid");
+      list.forEach(function (t) { var c = card(t, dim); if (S.capOpen === t.id) c.classList.add("on"); g.appendChild(c); if (S.capOpen === t.id) g.appendChild(detail(t)); });
+      return g;
+    }
+    var sorted = r.techs.slice().sort(function (a, b) { return (b.open_min || 0) - (a.open_min || 0); });
+    if (counted.length) { sh.appendChild(el("div", "ugrp", "Leads — tap one for the breakdown")); sh.appendChild(grid(sorted.filter(capCounted))); }
 
     if (!r.past && !r.over && (r.common || []).length) {
       sh.appendChild(el("div", "ugrp", "What still fits"));
-      r.common.forEach(function (g) {
+      var box = el("div", "capfits");
+      r.common.slice(0, S.capAllFits ? 8 : 4).forEach(function (g) {
         var need = g.min + r.drive_min, who = counted.filter(function (t) { return t.open_min >= need; }).sort(function (a, b) { return b.open_min - a.open_min; });
-        var row = el("div", "row"); row.style.cursor = "default";
-        var tm = el("div", "tm", "≈ " + dur(g.min)); tm.appendChild(el("small", null, dur(g.p25) + "–" + dur(g.p75))); row.appendChild(tm);
-        var bd = el("div", "bd"); bd.appendChild(el("b", null, g.label + (g.crew > 1 ? " · usually " + g.crew + " techs" : "")));
-        bd.appendChild(el("span", null, who.length ? "Fits: " + who.map(function (t) { return t.short || t.name; }).join(", ") : "Nobody has " + dur(need) + " open"));
-        row.appendChild(bd); row.appendChild(el("div", "am", g.n + " jobs")); sh.appendChild(row);
+        var row = el("div", "fr"), l = el("div", "l"); l.appendChild(el("b", null, g.label + (g.crew > 1 ? " · " + g.crew + " techs" : "")));
+        l.appendChild(el("span", null, who.length ? who.map(function (t) { return (t.short || t.name).split(" ")[0]; }).join(", ") : "nobody has " + dur(need) + " open"));
+        row.appendChild(l); var tt = el("div", "t", "≈ " + dur(g.min)); tt.appendChild(el("small", null, dur(g.p25) + "–" + dur(g.p75))); row.appendChild(tt); box.appendChild(row);
       });
+      sh.appendChild(box);
+      if (r.common.length > 4) { var mb = el("button", "capmore", S.capAllFits ? "Show fewer" : "Show " + (r.common.length - 4) + " more kinds"); mb.type = "button"; mb.onclick = function () { S.capAllFits = !S.capAllFits; renderRoom(); }; sh.appendChild(mb); }
     }
-    var idle = sorted.filter(function (t) { return !capCounted(t) && !t.off && !t.scheduled && t.truck; });
-    var other = sorted.filter(function (t) { return !capCounted(t) && !(!t.off && !t.scheduled && t.truck) && (t.scheduled || t.off); });
-    if (idle.length) { sh.appendChild(el("div", "ugrp", "Nothing scheduled — not counted (tap to add if they're working)")); idle.forEach(function (t) { sh.appendChild(techRow(t, "dim")); }); }
-    if (other.length) { sh.appendChild(el("div", "ugrp", "Not counted — off, riding along, or switched off")); other.forEach(function (t) { sh.appendChild(techRow(t, "dim")); }); }
-
+    var others = sorted.filter(function (t) { return !capCounted(t) && (t.lead || t.scheduled || t.off); });
+    if (others.length) {
+      var ob = el("button", "capmore", (S.capOthers ? "Hide" : "Show") + " " + others.length + " not counted (off, helpers, nothing scheduled)"); ob.type = "button"; ob.onclick = function () { S.capOthers = !S.capOthers; renderRoom(); }; sh.appendChild(ob);
+      if (S.capOthers) sh.appendChild(grid(others, true));
+    }
     var si = r.stats_info;
-    sh.appendChild(el("div", "capnote", "Rough guide. Each job not finished counts as the usual Start→Finish time for its kind of work — read from the job's tags, the Technician's Notes, other line items, job notes, then the description " +
-      "(from " + (si ? si.used.toLocaleString() + " finished jobs since " + si.from + ", learned " + si.at : "defaults — no history yet") +
-      "), plus " + dur(r.drive_min) + " typical drive. Outliers are dropped: buttons pressed together, jobs left running, and anything far outside the middle range. " +
-      "A job in progress counts only what's usually left. Apprentices and office aren't counted as their own truck."));
+    sh.appendChild(el("div", "capnote", "Rough guide. Only lead techs count. Each unfinished job counts as the usual Start→Finish time for its kind of work (from " + (si ? si.used.toLocaleString() + " finished jobs since " + si.from : "defaults") + ") plus " + dur(r.drive_min) + " drive; a job booked for 6+ hours fills the day. Jobs in progress count only what's usually left."));
     if ((r.warnings || []).length) sh.appendChild(el("div", "msg warn", "Some of the schedule couldn't load: " + r.warnings.join(" · ")));
     var acts = el("div", "acts");
     var rf = el("button", "btn", "Refresh"); rf.onclick = function () { openRoom(true); }; acts.appendChild(rf);

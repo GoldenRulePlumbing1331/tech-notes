@@ -35,9 +35,9 @@
  *   Drive time is learned the same way (On my way → Start). The learned numbers are saved in script properties and
  *   re-learned in the background once they're a week old. Optional Script Properties:
  *     CAP_DAY        = workday, default "08:00-16:00"
- *     CAP_NOT_TRUCKS = comma-separated people who ride along and don't count as their own truck (apprentices, office).
- *                      A single word matches a first name ("Rudy"); two words match the full name ("Tim Lasco").
- *                      Default: Rudy, Connor, Tanner, Tim Lasco, TJ Lasco, Jacob, Kyle, Bob
+ *     CAP_LEADS      = comma-separated lead techs — the trucks that can take more work. A single word matches a first
+ *                      name ("Dom"); two words match the full name. Default: Dom, Sam, Ed, Jay, Mark, Kevin, Matt, Pat, Donat
+ *   A tech on a job booked for 6+ hours counts as full for the day.
  *   Run learnJobLengths() from the editor to see the numbers it learned; relearnJobLengths() starts over.
  *
  * Actions (POST JSON, all need "token" = the tech's access code):
@@ -463,7 +463,8 @@ const CAP = {
   MIN_GROUP: 8,                    // a job kind needs this many clean jobs before its own number is trusted
   DEFAULT_JOB: 90, DEFAULT_DRIVE: 25, ESTIMATE_MIN: 45,
   DAY: '08:00-16:00',
-  NOT_TRUCKS: 'Rudy, Connor, Tanner, Tim Lasco, TJ Lasco, Jacob, Kyle, Bob',
+  LEADS: 'Dom, Sam, Ed, Jay, Mark, Kevin, Matt, Pat, Donat',   // lead techs = the trucks; everyone else rides along (CAP_LEADS property overrides)
+  FULL_DAY_MIN: 360,               // a job booked for 6+ hours fills that tech's day, whatever the typical length says
   OFF_RX: /\b(off|pto|vacation|vaca|sick|leave|holiday|out of office|ooo)\b/i,   // an event like this takes the tech out
   TECH_NOTES: "technician's notes",
   JOB_FIELDS_SINCE: '2026-10-01',  // job fields were reset then; the HCP job type is only trusted on jobs scheduled after this
@@ -628,9 +629,9 @@ function capTypical_(stats, it, lines) {
   return { min: stats.all.med, basis: kind.label ? kind.label + ' — too few to trust, using typical job' : 'typical job' };
 }
 
-function capNotTruck_(name) {
-  const raw = props_().getProperty('CAP_NOT_TRUCKS');
-  const list = String(raw == null ? CAP.NOT_TRUCKS : raw).split(/[,\n]/).map(s => s.trim().toLowerCase()).filter(Boolean);
+function capIsLead_(name) {
+  const raw = props_().getProperty('CAP_LEADS');
+  const list = String(raw == null || !String(raw).trim() ? CAP.LEADS : raw).split(/[,\n]/).map(s => s.trim().toLowerCase()).filter(Boolean);
   const n = String(name || '').toLowerCase().trim(), first = n.split(/\s+/)[0];
   return list.some(x => x.indexOf(' ') !== -1 ? x === n : x === first);
 }
@@ -663,9 +664,11 @@ function capCapacity_(date, fresh) {
     const offAll = offEv.some(ev => ev.all_day || overlap(ev.smin, ev.emin) >= (endM - cursor) - 30);
     let blocked = 0;
     events.forEach(ev => { if (!ev.all_day && (offEv.indexOf(ev) !== -1 || ev.emin - ev.smin <= 240)) blocked += overlap(ev.smin, ev.emin); });
-    const rows = []; let rem = 0, left = 0, done = 0;
+    const rows = []; let rem = 0, left = 0, done = 0, fullDay = null;
     work.forEach(it => {
       const typ = capTypical_(stats, it, lines[it.job_id] || null);
+      const booked = it.all_day ? 0 : it.emin - it.smin;
+      if (booked >= CAP.FULL_DAY_MIN && !(it.done || /complete/i.test(it.status || ''))) { fullDay = it; typ.min = Math.max(typ.min, booked); typ.basis = 'booked ' + Math.round(booked / 60 * 10) / 10 + ' h — full day'; }
       if (it.day_of && !it.all_day) { typ.min = Math.max(30, it.emin - it.smin); typ.basis = 'multi-day job — booked block'; }
       const finished = !!it.done || /complete/i.test(it.status || '');
       let r, state, note = '';
@@ -680,11 +683,14 @@ function capCapacity_(date, fresh) {
       rows.push({ number: it.number, kind: it.kind, customer: it.customer, title: it.title, time: it.time, state: state, typical: typ.min, basis: typ.basis, rem: Math.round(r), note: note });
     });
     const avail = offAll ? 0 : Math.max(0, endM - cursor);
-    const open = offAll ? 0 : avail - rem - blocked;
+    if (fullDay && !offAll) rem = Math.max(rem, avail - blocked);   // a full-day job uses whatever is left of the day
+    const open = offAll || fullDay ? 0 : avail - rem - blocked;
     techs.push({ id: t.id, name: t.name, short: t.short, initials: t.initials, color: t.color,
-      truck: !capNotTruck_(t.name), scheduled: work.length > 0, off: offAll, off_label: offAll ? (offEv[0] || {}).title || 'Off' : '',
+      truck: capIsLead_(t.name), lead: capIsLead_(t.name), scheduled: work.length > 0, off: offAll, off_label: offAll ? (offEv[0] || {}).title || 'Off' : '',
+      full_day: fullDay ? { number: fullDay.number, customer: fullDay.customer, hours: Math.round((fullDay.emin - fullDay.smin) / 6) / 10 } : null,
+      booked_min: Math.round(rem), avail_min: Math.round(avail),
       jobs: work.length, left: left, done: done, rem_min: Math.round(rem), blocked_min: Math.round(blocked), open_min: Math.round(open),
-      finish_min: offAll ? null : Math.round(cursor + rem + blocked), items: rows });
+      finish_min: offAll ? null : fullDay ? endM : Math.round(cursor + rem + blocked), items: rows });
   });
 
   // The most common kinds of work with their typical length, so the office can see what fits where.
