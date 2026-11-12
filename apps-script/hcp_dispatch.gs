@@ -712,7 +712,7 @@ const LE = {
   EXCUSE_RX: /no.?charge|\bn\/?c\b|warranty|call.?back|re-?call|billing on return|bill(ed|ing)? (on|at|after) return|no.?bill|do not bill|don'?t bill|not bill|courtesy|goodwill|\bfree\b|go.?back|return (trip|visit)|estimate only|quote only|no.?show|cancel|rescheduled|part of job|see job|billed (on|under|with)|invoiced (on|under|with)|paid (on|under|with)|included (in|with)|comp(ed|limentary)?\b|training|shop|internal/i,
   TECH_NOTES: "technician's notes",
   GENERIC_LINE_RE: /^(service (call|fee)|trip (charge|fee)|dispatch|diagnostic|labor|labour|hourly|misc|materials?|parts?|tax|discount|deposit|credit card fee|fuel|travel|minimum)\b/i,
-  BACK_DAYS: 0,
+  BACK_DAYS: 61,                   // in-progress jobs older than this aren't listed
 };
 
 function leWeek_(date, tz) {
@@ -770,10 +770,11 @@ function leLooseEnds_(date, range, fresh) {
       if (!(r.jobs || []).length || page >= (r.total_pages || 0)) break;
     }
   } catch (e) { warnings.push('Jobs: ' + e.message); }
-  // Every in-progress job, whenever it was scheduled — a job left running from last month is exactly the point.
+  // In-progress jobs from the last two months, whatever day they were scheduled — older ones are history, not loose ends.
+  const backFrom = new Date(now.getTime() - LE.BACK_DAYS * 86400000);
   try {
     for (let page = 1; page <= 3; page++) {
-      const r = hcp_('get', `/jobs?page_size=100&expand[]=appointments&work_status[]=in_progress&sort_by=created_at&sort_direction=desc&page=${page}`);
+      const r = hcp_('get', `/jobs?page_size=100&expand[]=appointments&work_status[]=in_progress&scheduled_start_min=${encodeURIComponent(dpIso_(backFrom))}&sort_by=created_at&sort_direction=desc&page=${page}`);
       (r.jobs || []).forEach(j => { if (!jobs.some(x => x.id === j.id) && !j.deleted_at && !j.canceled_at) jobs.push(j); });
       if (!(r.jobs || []).length || page >= (r.total_pages || 0)) break;
     }

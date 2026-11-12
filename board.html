@@ -248,7 +248,7 @@
   .ob .oa button { flex: 1; padding: 8px; border-radius: 9px; border: 1px solid var(--line); background: var(--card); color: var(--ink); font: inherit; font-size: 14px; font-weight: 650; cursor: pointer; }
   .small.alert { background: var(--warn-bg); color: var(--warn-ink); border-color: transparent; }
   .dd .sm { display: none; }
-  @media (max-width: 480px) { .dd .lg, .dd .caret, #unBtn svg, #looseBtn svg, #roomBtn svg { display: none; } .dd .sm { display: inline; } .dd { gap: 4px; padding: 0 8px; flex: none; } .tools { gap: 5px; overflow-x: auto; scrollbar-width: none; } .tools::-webkit-scrollbar { display: none; } #techBtn { flex: none; } }
+  @media (max-width: 480px) { .dd .lg, .dd .caret, #unBtn svg, #looseBtn svg, #roomBtn svg { display: none; } .dd .sm { display: inline; } .dd { gap: 4px; padding: 0 8px; flex: none; } .tools { gap: 5px; overflow-x: auto; scrollbar-width: none; } .tools::-webkit-scrollbar { display: none; } }
   .lerow .why { display: inline-block; font-size: 11px; font-weight: 750; padding: 1px 6px; border-radius: 5px; margin-left: 4px; vertical-align: 1px; background: var(--warn-bg); color: var(--warn-ink); }
   /* "Room left?" sheet */
   .caphero { display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap; margin: 4px 0 2px; }
@@ -315,12 +315,11 @@
       <button class="ib" id="refresh" aria-label="Refresh"><svg viewBox="0 0 24 24"><path d="M17.65 6.35A7.96 7.96 0 0 0 12 4a8 8 0 1 0 7.75 10h-2.08A6 6 0 1 1 12 6c1.66 0 3.14.69 4.22 1.78L13 11h7V4z"/></svg></button>
     </div>
     <div class="tools">
-      <button class="dd" id="techBtn" aria-haspopup="true" aria-expanded="false"><svg viewBox="0 0 24 24"><path d="M16 11a3 3 0 1 0 0-6 3 3 0 0 0 0 6zm-8 0a3 3 0 1 0 0-6 3 3 0 0 0 0 6zm0 2c-2.7 0-8 1.3-8 4v2h16v-2c0-2.7-5.3-4-8-4zm8 0c-.3 0-.7 0-1.1.1A4.2 4.2 0 0 1 17 17v2h7v-2c0-2.7-5.3-4-8-4z"/></svg><span>Techs</span><em id="techCount"></em><span class="caret">▼</span></button>
       <button class="dd" id="unBtn"><svg viewBox="0 0 24 24"><path d="M19 3h-4.2a3 3 0 0 0-5.6 0H5v18h14zm-7 0a1 1 0 1 1 0 2 1 1 0 0 1 0-2zm1 15h-2v-2h2zm0-4h-2V8h2z"/></svg><span class="lg">All unassigned</span><span class="sm">Unassigned</span><em class="badge zero" id="unCount">…</em></button>
       <button class="dd" id="roomBtn" title="How much open time is left — can we fit more jobs?"><svg viewBox="0 0 24 24"><path d="M12 2a10 10 0 100 20 10 10 0 000-20zm0 2a8 8 0 110 16 8 8 0 010-16zm-1 3h2v5.6l3.5 2.1-1 1.7L11 13.4z"/></svg><span class="lg">Room left?</span><span class="sm">Room left</span></button>
       <button class="dd" id="looseBtn" title="Finished with no price, stuck in progress, or missing tech notes"><svg viewBox="0 0 24 24"><path d="M12 2 1 21h22zm0 6 7.5 13h-15zm-1 4v4h2v-4zm0 5v2h2v-2z"/></svg><span class="lg">Loose ends</span><span class="sm">Loose ends</span><em class="badge zero" id="looseCount"></em></button>
     </div>
-    <div class="chips" id="chips"></div>
+    <div class="chips" id="chips"><button class="chip act" id="techBtn" aria-haspopup="true" aria-expanded="false"><svg viewBox="0 0 24 24" width="16" height="16" fill="currentColor" style="flex:none"><path d="M16 11a3 3 0 1 0 0-6 3 3 0 0 0 0 6zm-8 0a3 3 0 1 0 0-6 3 3 0 0 0 0 6zm0 2c-2.7 0-8 1.3-8 4v2h16v-2c0-2.7-5.3-4-8-4zm8 0c-.3 0-.7 0-1.1.1A4.2 4.2 0 0 1 17 17v2h7v-2c0-2.7-5.3-4-8-4z"/></svg><span>Techs</span><em id="techCount"></em><span class="caret" style="font-size:10px">▼</span></button></div>
     <div class="sub">
       <span class="sum" id="sum"></span>
       <button class="small" id="fit" title="Columns per screen">⇔ 2</button>
@@ -450,8 +449,9 @@
     $("dayRel").textContent = rel(S.date);
     $("dayPick").value = S.date;
     show($("todayBtn"), S.date !== S.today);
-    if (!d) { $("chips").innerHTML = ""; $("sum").textContent = ""; return; }
-    var cols = columns(), box = $("chips"); box.innerHTML = "";
+    if (!d) { Array.prototype.slice.call($("chips").querySelectorAll(".chip:not(#techBtn)")).forEach(function (x) { x.parentNode.removeChild(x); }); $("sum").textContent = ""; return; }
+    var cols = columns(), box = $("chips");
+    Array.prototype.slice.call(box.querySelectorAll(".chip:not(#techBtn)")).forEach(function (x) { box.removeChild(x); });
     var on = cols.filter(isOn).length;
     $("techCount").textContent = on + "/" + cols.length;
     var meKnown = !!S.me && cols.some(function (c) { return c.id === S.me; });
@@ -502,9 +502,9 @@
     m.style.top = (r.bottom - 4) + "px";
     m.style.maxHeight = Math.max(240, window.innerHeight - r.bottom - 12) + "px";
     $("mList").style.maxHeight = Math.max(140, window.innerHeight - r.bottom - 130) + "px";
-    show(m, true); show($("ddShade"), true); $("techBtn").setAttribute("aria-expanded", "true");
+    show(m, true); show($("ddShade"), true); $("techBtn").setAttribute("aria-expanded", "true"); popPush();
   }
-  function closeMenu() { show($("techMenu"), false); show($("ddShade"), false); $("techBtn").setAttribute("aria-expanded", "false"); }
+  function closeMenu() { if (!$("techMenu").classList.contains("hidden") && $("sheet").classList.contains("hidden")) popDone(); show($("techMenu"), false); show($("ddShade"), false); $("techBtn").setAttribute("aria-expanded", "false"); }
   $("techBtn").onclick = function () { if ($("techMenu").classList.contains("hidden")) openMenu(); else closeMenu(); };
   $("ddShade").onclick = closeMenu; $("mDone").onclick = closeMenu;
   $("mAll").onclick = function () { if (!S.data) return; prefs.hidden = {}; savePrefs(); renderMenu(); render(); };
@@ -562,7 +562,7 @@
     var rf = el("button", "btn", "Refresh"); rf.onclick = function () { rf.textContent = "Refreshing…"; loadUn(true); }; acts.appendChild(rf);
     var cl = el("button", "btn", "Close"); cl.onclick = closeSheet; acts.appendChild(cl);
     sh.appendChild(acts);
-    show($("shade"), true); show(sh, true);
+    show($("shade"), true); show(sh, true); popPush();
   }
   $("unBtn").onclick = openUnassigned;
 
@@ -584,7 +584,7 @@
     var sh = $("sheet"); S.sheetIsUn = false; S.sheetOut = false; S.sheetRoom = false; S.sheetLoose = true;
     if (S.loose && S.loose.date === S.date && S.loose.range === prefs.leRange && !fresh) { renderLoose(); return; }
     sh.innerHTML = ""; sh.appendChild(el("div", "grab")); sh.appendChild(el("h3", null, "Loose ends")); sh.appendChild(el("div", "kind", "Checking " + (prefs.leRange === "week" ? "the week" : dayLabel(S.date)) + "…"));
-    show($("shade"), true); show(sh, true);
+    show($("shade"), true); show(sh, true); popPush();
     loadLoose(fresh);
   }
   function lerow(it) {
@@ -615,13 +615,13 @@
       items.forEach(function (it) { sh.appendChild(lerow(it)); });
     }
     group("Finished, no price", r.no_price, "Total is $0 and nothing on the job says why (no charge, warranty, callback, billing on return…). Tags, notes and line items were checked.");
-    group("In progress, no return visit", r.stuck, "Started but not finished, with no later appointment and no other open segment on the same job number. Includes older jobs, not just this " + (r.range === "week" ? "week" : "day") + ".");
+    group("In progress, no return visit", r.stuck, "Started but not finished, with no later appointment and no other open segment on the same job number. Looks back two months, not just this " + (r.range === "week" ? "week" : "day") + ".");
     group("Finished, no tech notes", r.no_notes, "No Technician's Notes line and the work isn't all standard price-book services, so the invoice doesn't say what was done.");
     if ((r.warnings || []).length) sh.appendChild(el("div", "msg warn", "Some of it couldn't load: " + r.warnings.join(" · ")));
     var acts = el("div", "acts");
     var rf = el("button", "btn", "Refresh"); rf.onclick = function () { openLoose(true); }; acts.appendChild(rf);
     var cl = el("button", "btn", "Close"); cl.onclick = closeSheet; acts.appendChild(cl);
-    sh.appendChild(acts); show($("shade"), true); show(sh, true);
+    sh.appendChild(acts); show($("shade"), true); show(sh, true); popPush();
   }
   $("looseBtn").onclick = function () { openLoose(false); };
 
@@ -641,7 +641,7 @@
     if (!S.room || S.room.date !== want || fresh) {
       sh.innerHTML = ""; sh.appendChild(el("div", "grab")); sh.appendChild(el("h3", null, "Room left?"));
       sh.appendChild(el("div", "kind", "Working it out…"));
-      show($("shade"), true); show(sh, true);
+      show($("shade"), true); show(sh, true); popPush();
       api("capacity", { date: want, fresh: !!fresh }, { timeout: 120000 }).then(function (r) {
         if (!S.sheetRoom || S.date !== want) return;
         if (!r.ok) { sh.appendChild(el("div", "msg err", "❌ " + (r.error || "Couldn't work it out."))); return; }
@@ -740,7 +740,7 @@
     var rf = el("button", "btn", "Refresh"); rf.onclick = function () { openRoom(true); }; acts.appendChild(rf);
     var cl = el("button", "btn", "Close"); cl.onclick = closeSheet; acts.appendChild(cl);
     sh.appendChild(acts);
-    show($("shade"), true); show(sh, true);
+    show($("shade"), true); show(sh, true); popPush();
   }
   $("roomBtn").onclick = function () { openRoom(false); };
 
@@ -1260,14 +1260,22 @@
     var acts = el("div", "acts");
     var all = el("button", "btn pri", "Send all now"); all.onclick = function () { allItems().forEach(function (it) { if (it.x.err) patchItem(it.kind, it.x.id, { err: "" }); }); flush(); };
     var cl = el("button", "btn", "Close"); cl.onclick = closeSheet; acts.appendChild(all); acts.appendChild(cl);
-    sh.appendChild(acts); show($("shade"), true); show(sh, true);
+    sh.appendChild(acts); show($("shade"), true); show(sh, true); popPush();
   }
   $("outBtn").onclick = openOutbox;
   window.addEventListener("online", flushSoon);
   setInterval(function () { if (document.visibilityState === "visible" && allItems().some(function (it) { return !it.x.err; })) flush(); }, 60000);
 
   // ---------- detail sheet ----------
-  function closeSheet() { show($("shade"), false); show($("sheet"), false); S.sheetIsUn = false; S.sheetOut = false; S.sheetRoom = false; S.sheetLoose = false; S.linesFor = ""; S.linesBox = null; }
+  // Phone back button: opening a sheet or the Techs list pushes a history entry, so Back closes it instead of leaving the page.
+  var POP = { open: false, closing: false };
+  function popPush() { if (POP.open) return; POP.open = true; try { history.pushState({ gr: "pop" }, ""); } catch (e) {} }
+  function popDone() { if (!POP.open || POP.closing) return; POP.open = false; POP.closing = true; try { history.back(); } catch (e) {} setTimeout(function () { POP.closing = false; }, 300); }
+  window.addEventListener("popstate", function () {
+    if (POP.closing) { POP.closing = false; return; }
+    if (POP.open) { POP.open = false; closeSheet(); closeMenu(); }
+  });
+  function closeSheet() { popDone(); show($("shade"), false); show($("sheet"), false); S.sheetIsUn = false; S.sheetOut = false; S.sheetRoom = false; S.sheetLoose = false; S.linesFor = ""; S.linesBox = null; }
   function kv(box, label, content) { var r = el("div", "kv"); r.appendChild(el("span", null, label)); var v = el("span"); if (typeof content === "string") v.textContent = content; else v.appendChild(content); r.appendChild(v); box.appendChild(r); }
   function link(href, text, blank) { var a = el("a", null, text); a.href = href; if (blank) { a.target = "_blank"; a.rel = "noopener"; } return a; }
   function openSheet(it, c, back) {
@@ -1301,7 +1309,7 @@
     if (back) { var bk = el("button", "btn", "‹ Back to list"); bk.onclick = back; acts.appendChild(bk); }
     var cl = el("button", "btn" + (back ? "" : " full"), "Close"); cl.onclick = closeSheet; acts.appendChild(cl);
     sh.appendChild(acts);
-    show($("shade"), true); show(sh, true); sh.scrollTop = 0;
+    show($("shade"), true); show(sh, true); popPush(); sh.scrollTop = 0;
   }
   $("shade").onclick = closeSheet;
   document.addEventListener("keydown", function (e) { if (e.key === "Escape") { closeSheet(); closeMenu(); } });
@@ -1343,14 +1351,14 @@
       }
     });
   }
-  function go(ymd) { if (!ymd) return; S.date = ymd; closeSheet(); closeMenu(); renderTop(); renderLooseBtn(); load(false); try { history.replaceState(null, "", "?date=" + ymd); } catch (e) {} }
+  function go(ymd) { if (!ymd) return; S.date = ymd; closeSheet(); closeMenu(); renderTop(); renderLooseBtn(); load(false); setTimeout(function () { try { history.replaceState(null, "", "?date=" + ymd); } catch (e) {} }, 350); }
   $("prev").onclick = function () { go(addDays(S.date, -1)); };
   $("next").onclick = function () { go(addDays(S.date, 1)); };
   $("todayBtn").onclick = function () { go(S.today || localDay()); };
   $("dayPick").onchange = function () { go(this.value); };
   $("refresh").onclick = function () { load(true); };
   $("vMine").onclick = function () { prefs.mine = true; savePrefs(); closeMenu(); render(); };
-  $("vAll").onclick = function () { prefs.mine = false; savePrefs(); render(); };
+  $("vAll").onclick = function () { prefs.mine = false; prefs.hidden = {}; savePrefs(); render(); };
   $("vGrid").onclick = function () { prefs.view = "grid"; savePrefs(); render(); };
   $("vList").onclick = function () { prefs.view = "list"; savePrefs(); render(); };
   $("fit").onclick = function () { prefs.fit = prefs.fit >= 4 ? 2 : prefs.fit + 1; savePrefs(); sizeBoard(); render(); };
