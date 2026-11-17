@@ -25,6 +25,12 @@
   .drop.over { border-color: var(--brand); background: var(--card); }
   .drop b { display: block; font-size: 17px; margin-bottom: 4px; }
   .drop input { display: none; }
+  /* in-page camera: the photo is taken without leaving the browser, so Android can't kill the page while the camera app is open */
+  .cam { position: fixed; inset: 0; z-index: 1000; background: #000; display: flex; flex-direction: column; }
+  .cam.hidden { display: none; }
+  .cam video { flex: 1; min-height: 0; width: 100%; object-fit: contain; background: #000; }
+  .cam .bar { display: flex; gap: 12px; justify-content: center; padding: 14px 14px calc(14px + env(safe-area-inset-bottom)); }
+  .cam .bar .btn { flex: 1; max-width: 220px; }
   .chips { display: flex; flex-wrap: wrap; gap: 8px; margin: 10px 0 2px; }
   .chip { border-radius: 999px; padding: 6px 12px; font-size: 14px; font-weight: 650; background: var(--soft); color: var(--ink); }
   .chip.add { background: var(--ok-bg); color: var(--ok-ink); } .chip.net { background: var(--net-bg); color: var(--net-ink); }
@@ -74,6 +80,7 @@
 <div id="app" class="hidden">
   <div class="card">
     <label>Material receipts → HCP Job Inputs</label>
+    <button class="btn go" id="camBtn" type="button" style="width:100%;margin-bottom:10px">📷 Take a photo of a receipt</button>
     <div class="drop" id="drop">
       <b>Drop the Weinstein CSV or a vendor receipt here, or tap to choose</b>
       <span class="hint">Weinstein: web store → Order History → <i>Order History Detail</i> → Export CSV. Amazon: the Business <i>Orders</i> report CSV, or any order's PDF. Other vendors: the receipt as a PDF, a photo, or a Word / Excel file. Sales tax and freight on receipts are added into the cost. Lines already posted are skipped. A job number in the PO field goes to that job; everything else on a vendor receipt (Inventory, Office, Truck, tools…) goes to that month's Inventory Management job.</span>
@@ -93,6 +100,14 @@
     <div class="status" id="applyMsg"></div>
     <div class="res hidden" id="results"></div>
     <div id="groups"></div>
+  </div>
+</div>
+
+<div class="cam hidden" id="cam">
+  <video id="camVid" playsinline autoplay muted></video>
+  <div class="bar">
+    <button class="btn" id="camCancel" type="button">Cancel</button>
+    <button class="btn go" id="camSnap" type="button">📸 Snap</button>
   </div>
 </div>
 
@@ -272,6 +287,63 @@
   }
   function lineKey(l) { return l.order + "|" + l.part.toUpperCase() + "|" + l.qty + "|" + l.ext; }
 
+  // ---------- photos: shrink before sending ----------
+  // A 12 MP phone photo is 4–8 MB, and as base64 in memory it's bigger still. 2200 px on the long side is plenty
+  // for Claude to read a receipt and keeps the upload small on a weak signal / low-memory phone.
+  var MAX_PX = 2200;
+  function canvasToFile(c, name) {
+    return new Promise(function (resolve) {
+      c.toBlob(function (b) { c.width = c.height = 0; resolve(b ? new File([b], name, { type: "image/jpeg" }) : null); }, "image/jpeg", 0.85);
+    });
+  }
+  function shrinkImage(file) {
+    if (!/^image\/(jpeg|png|webp)$/i.test(file.type || "") || file.size < 1500000) return Promise.resolve(file);   // HEIC etc. go up as-is
+    return new Promise(function (resolve) {
+      var url = URL.createObjectURL(file), img = new Image();
+      img.onload = function () {
+        img.onload = img.onerror = null;   // (clearing img.src here would fire onerror and send the big original)
+        var s = Math.min(1, MAX_PX / Math.max(img.naturalWidth, img.naturalHeight)), c = document.createElement("canvas");
+        c.width = Math.round(img.naturalWidth * s); c.height = Math.round(img.naturalHeight * s);
+        c.getContext("2d").drawImage(img, 0, 0, c.width, c.height); URL.revokeObjectURL(url);
+        canvasToFile(c, (file.name || "receipt").replace(/\.\w+$/, "") + ".jpg").then(function (f) { resolve(f && f.size < file.size ? f : file); });
+      };
+      img.onerror = function () { img.onload = img.onerror = null; URL.revokeObjectURL(url); resolve(file); };
+      img.src = url;
+    });
+  }
+
+  // ---------- in-page camera ----------
+  // Tapping "choose → Camera" hands off to the phone's camera app; on a low-memory Android phone the browser gets
+  // killed in the background and the photo is lost ("Unable to complete previous operation due to low memory").
+  // This camera runs inside the page, so the browser never leaves the screen.
+  var camStream = null;
+  function stopCam() {
+    if (camStream) { camStream.getTracks().forEach(function (t) { t.stop(); }); camStream = null; }
+    $("camVid").srcObject = null; show($("cam"), false);
+  }
+  $("camBtn").onclick = function () {
+    if (!(navigator.mediaDevices && navigator.mediaDevices.getUserMedia)) { $("file").click(); return; }   // no in-page camera → old picker
+    say("fileMsg", "Opening the camera…", "busy");
+    navigator.mediaDevices.getUserMedia({ audio: false, video: { facingMode: { ideal: "environment" }, width: { ideal: 1920 }, height: { ideal: 1440 } } }).then(function (s) {
+      camStream = s; var v = $("camVid"); v.srcObject = s; show($("cam"), true); say("fileMsg", "");
+      var p = v.play(); if (p && p.catch) p.catch(function () {});
+    }).catch(function (e) {
+      say("fileMsg", "❌ The camera didn't open (" + (e && e.name === "NotAllowedError" ? "camera permission is off for this site — allow it in the browser's site settings" : (e && (e.name || e.message)) || "unknown") + "). You can still tap the box below and pick a photo from the gallery.", "err");
+    });
+  };
+  $("camCancel").onclick = stopCam;
+  $("camSnap").onclick = function () {
+    var v = $("camVid"); if (!v.videoWidth) return;
+    var s = Math.min(1, MAX_PX / Math.max(v.videoWidth, v.videoHeight)), c = document.createElement("canvas");
+    c.width = Math.round(v.videoWidth * s); c.height = Math.round(v.videoHeight * s);
+    c.getContext("2d").drawImage(v, 0, 0, c.width, c.height);
+    stopCam();
+    canvasToFile(c, "receipt-" + new Date().toISOString().slice(0, 19).replace(/[:T]/g, "-") + ".jpg").then(function (f) {
+      if (f) load(f); else say("fileMsg", "❌ Couldn't save that photo — try again.", "err");
+    });
+  };
+  document.addEventListener("visibilitychange", function () { if (document.hidden && camStream) stopCam(); });   // don't leave the camera running
+
   // ---------- file in → preview ----------
   var dz = $("drop");
   dz.onclick = function () { $("file").click(); };
@@ -301,11 +373,11 @@
   }
   // a vendor receipt (PDF / photo): the server has Claude read it into the same line shape as the Weinstein CSV
   function loadReceipt(file) {
-    if (file.size > 8 * 1024 * 1024) return Promise.reject(new Error("That file is over 8 MB — take a smaller photo or export the receipt as a PDF."));
     if (/\.(doc|xls)$/i.test(file.name || "")) return Promise.reject(new Error("That's an old-style Office file (.doc / .xls). Open it and Save As .docx / .xlsx or PDF, then upload that."));
-    say("fileMsg", "🧾 Reading the receipt " + file.name + " — about 15 seconds…", "busy");
-    return readBase64(file).then(function (b64) {
-      return api("receipt", { name: file.name, mime: file.type || "", data: b64 }, 120000);
+    return shrinkImage(file).then(function (f) {
+      if (f.size > 8 * 1024 * 1024) throw new Error("That file is over 8 MB — take a smaller photo or export the receipt as a PDF.");
+      say("fileMsg", "🧾 Reading the receipt " + f.name + " — about 15 seconds…", "busy");
+      return readBase64(f).then(function (b64) { return api("receipt", { name: f.name, mime: f.type || "", data: b64 }, 120000); });
     }).then(function (r) {
       if (!r.ok) throw new Error(r.error || "Couldn't read that receipt.");
       var lines = (r.lines || []).map(function (l) { l.row = l.row || 0; return l; });
