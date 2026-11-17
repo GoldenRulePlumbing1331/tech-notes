@@ -7,7 +7,7 @@
  *   • GR.listen(): tap-to-talk (one phrase at a time, restarted while the button is on — Chrome on Android repeats
  *     words in continuous mode). Chrome's voice typing needs a connection; offline it says to use the keyboard mic.
  *   • GR.draft(): keeps what was dictated/typed on the phone until it's used, so nothing is lost without signal.
- *   • registers the service worker (sw.js) so every page opens offline after its first visit.
+ *   • registers the service worker (sw.js) so every page opens offline after its first visit, and at once from the saved copy.
  * Load order on a page: config.js → gr-common.js → the page's own script. */
 window.GR = (function () {
   var EP = window.GR_ENDPOINTS || {};
@@ -25,6 +25,7 @@ window.GR = (function () {
   function show(node, on) { if (node) node.classList.toggle("hidden", !on); }
   function say(id, text, kind) { var m = $(id); if (!m) return; m.textContent = text || ""; m.className = "status" + (text ? " " + (kind || "ok") : ""); }
   function el(tag, cls, text) { var e = document.createElement(tag); if (cls) e.className = cls; if (text != null) e.textContent = text; return e; }
+  function localDay() { var d = new Date(); return d.getFullYear() + "-" + ("0" + (d.getMonth() + 1)).slice(-2) + "-" + ("0" + d.getDate()).slice(-2); }   // the phone's own date
   function rid() { return Date.now().toString(36) + Math.random().toString(36).slice(2, 8); }
   function recent(tool, text) {
     var r = getJ("grRecent", []); if (!Array.isArray(r)) r = [];
@@ -105,32 +106,50 @@ window.GR = (function () {
   /**
    * o: { key, name, init (false = no server check), version, ready(r, meta), onOutdated(msg), onForget() }
    *    ready() gets the init reply; with no signal it gets the reply this phone saved last time (meta.cached) or {}.
+   *    On a repeat visit ready() runs at once with the saved reply (meta.cached) and may run a second time
+   *    (meta.refresh) when the server's answer arrives — so it must be safe to call twice and keep what the tech picked.
    * Returns { showCode(msg), showApp(), restart() }.
    */
   function boot(o) {
     var CACHE_K = "grInit:" + o.key;
     function showCode(msg) { show($("codeCard"), true); show($("app"), false); say("codeMsg", msg, "err"); }
     function showApp() { show($("codeCard"), false); show($("app"), true); say("codeMsg", ""); }
+    var run = 0;   // a reply to an earlier check (the code was changed or forgotten meanwhile) is ignored
+    function keep(c, quiet) { if (!quiet) setCode(c); }   // a typed code is saved once it's accepted; a saved one is already there
     function start(c, quiet) {
+      var mine = ++run;
       if (o.init === false) { setCode(c); showApp(); o.ready({ ok: true }, { offline: false, cached: false }); return; }
-      say("codeMsg", "Checking…", "busy");
+      // Fast open: a phone that has opened this tool before with this code shows the app straight away from the lists
+      // it saved last time, and the server check runs behind it. ready() is called again (meta.refresh) only when the
+      // server's answer differs from the saved one, or when there turns out to be no signal.
+      var saved = quiet ? getJ(CACHE_K, null) : null;
+      var early = !!(saved && saved.r && saved.c === c), was = early ? JSON.stringify(saved.r) : "";
+      if (early) { showApp(); o.ready(saved.r, { offline: false, cached: true }); }
+      else say("codeMsg", "Checking…", "busy");
       api(o.key, "init", {}, { token: c, version: o.version, name: o.name }).then(function (r) {
-        if (r.ok) { setCode(c); put(CACHE_K, JSON.stringify({ at: Date.now(), r: r })); showApp(); o.ready(r, { offline: false, cached: false }); return; }
-        if (r.net) {   // no signal: keep the code, open the app with what the phone saved last time
-          var cached = getJ(CACHE_K, null);
-          setCode(c); showApp();
-          offline(true, cached ? "📶 No signal — showing what this phone saved last time. Anything that needs the server waits until you're back in range." : NET_TEXT);
-          o.ready(cached ? cached.r : {}, { offline: true, cached: !!cached });
+        if (mine !== run) return;
+        if (r.ok) {
+          keep(c, quiet); put(CACHE_K, JSON.stringify({ at: Date.now(), c: c, r: r }));
+          if (!early) { showApp(); o.ready(r, { offline: false, cached: false }); }
+          else if (JSON.stringify(r) !== was) o.ready(r, { offline: false, cached: false, refresh: true });
           return;
         }
-        if (r.outdated) { setCode(c); show($("codeCard"), false); show($("app"), false); if (o.onOutdated) o.onOutdated(r.error); return; }
-        forgetCode(); showCode(quiet ? "" : r.error);
+        if (r.net) {   // no signal: keep the code, open the app with what the phone saved last time
+          var cached = early ? saved : getJ(CACHE_K, null);
+          keep(c, quiet); showApp();
+          offline(true, cached ? "📶 No signal — showing what this phone saved last time. Anything that needs the server waits until you're back in range." : NET_TEXT);
+          o.ready(cached ? cached.r : {}, { offline: true, cached: !!cached, refresh: early });
+          return;
+        }
+        if (r.outdated) { keep(c, quiet); show($("codeCard"), false); show($("app"), false); if (o.onOutdated) o.onOutdated(r.error); return; }
+        if (early && !AUTH_RE.test(r.error || "")) return;   // the server hiccupped, the code is fine: stay on the saved lists
+        forgetCode(); drop(CACHE_K); showCode(quiet ? "" : r.error);
       });
     }
     $("codeGo").onclick = function () { var c = $("code").value.trim(); if (c) start(c, false); };
     $("code").onkeydown = function (e) { if (e.key === "Enter") $("codeGo").click(); };
     var f = $("forget");
-    if (f) f.onclick = function (e) { e.preventDefault(); forgetCode(); drop(CACHE_K); $("code").value = ""; if (o.onForget) o.onForget(); showCode(""); };
+    if (f) f.onclick = function (e) { e.preventDefault(); run++; forgetCode(); drop(CACHE_K); $("code").value = ""; if (o.onForget) o.onForget(); showCode(""); };
     var c = code();
     if (c) start(c, true); else showCode("");
     return { showCode: showCode, showApp: showApp, restart: function () { var c2 = code(); if (c2) start(c2, true); } };
@@ -222,9 +241,23 @@ window.GR = (function () {
   /* ---------- service worker: every page opens with no signal after its first visit ---------- */
   if ("serviceWorker" in navigator && (location.protocol === "https:" || /^(localhost|127\.0\.0\.1)$/.test(location.hostname))) {
     try { navigator.serviceWorker.register("sw.js").catch(function () {}); } catch (e) {}
+    // Pages open from the saved copy and sw.js fetches the latest behind them. When it finds a newer version it says
+    // so: a page that has only just opened and hasn't been touched reloads itself once to pick it up; any other page
+    // is left alone and gets the update the next time it's opened.
+    var openedAt = Date.now(), touched = false;
+    ["pointerdown", "keydown", "input"].forEach(function (ev) { window.addEventListener(ev, function () { touched = true; }, true); });
+    try {
+      navigator.serviceWorker.addEventListener("message", function (ev) {
+        if (!ev.data || ev.data.type !== "gr-updated" || touched || active || Date.now() - openedAt > 8000) return;
+        var last = 0; try { last = Number(sessionStorage.getItem("grReloaded") || 0); } catch (e) {}
+        if (Date.now() - last < 60000) return;
+        try { sessionStorage.setItem("grReloaded", String(Date.now())); } catch (e) { return; }
+        location.reload();
+      });
+    } catch (e) {}
   }
 
-  return { $: $, get: get, put: put, drop: drop, getJ: getJ, show: show, say: say, el: el, rid: rid, recent: recent, queued: queued,
+  return { $: $, get: get, put: put, drop: drop, getJ: getJ, show: show, say: say, el: el, rid: rid, localDay: localDay, recent: recent, queued: queued,
            endpoint: endpoint, code: code, setCode: setCode, forgetCode: forgetCode, offline: offline, isOffline: function () { return isOffline; },
            post: post, api: api, client: client, boot: boot, draft: draft, saveDrafts: saveDrafts,
            speech: !!SR, listen: listen, stopAll: stopAll, micFor: micFor };

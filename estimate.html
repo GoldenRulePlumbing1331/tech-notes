@@ -162,14 +162,15 @@
 
   // ---------- access code → init (with no signal: the lists this phone saved last time) ----------
   function fillSelect(id, list) {
-    var sel = $(id); while (sel.options.length > 1) sel.remove(sel.options.length - 1);
+    var sel = $(id), had = sel.value; while (sel.options.length > 1) sel.remove(sel.options.length - 1);
     (list || []).forEach(function (x) { var o = el("option", null, x.name); o.value = x.id; sel.appendChild(o); });
+    sel.value = had; if (sel.value !== had) sel.value = "";   // refilled when the server's lists arrive: keep what was picked
   }
   var B = GR.boot({
     key: "estimate", name: "Estimate",
-    ready: function (r) {
-      S.me = r.me || ""; S.today = r.today || ""; S.usualUnit = r.usual_unit || {}; S.pb = r.price_book !== false;
-      fillSelect("jEmp", r.employees); $("jEmp").value = S.me;
+    ready: function (r, meta) {   // runs at once from the lists this phone saved, then again if the server's differ
+      S.me = r.me || ""; S.today = (meta.cached ? GR.localDay() : r.today) || ""; S.usualUnit = r.usual_unit || {}; S.pb = r.price_book !== false;
+      fillSelect("jEmp", r.employees); if (!meta.refresh) $("jEmp").value = S.me;
       fillSelect("jType", r.job_types); fillSelect("jUnit", r.business_units);
       if (S.today) $("vDate").min = S.today;
     }

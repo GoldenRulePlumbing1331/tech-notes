@@ -13,7 +13,7 @@ function endpointKeys(configJsPath) {
 }
 
 const EMPS = [{ id: "e1", name: "Kyle Hunt" }, { id: "e2", name: "Mike Smith" }, { id: "e3", name: "Dave Jones" }];
-const TODAY = "2026-10-30";
+const TODAY = new Intl.DateTimeFormat("en-CA", { timeZone: "America/New_York" }).format(new Date());   // the pages compare this with the phone's own date
 const GOOD = "12345678";
 
 function job(n) {
@@ -128,7 +128,8 @@ const handlers = {
   },
 };
 
-/** Installs the route on a Playwright page. `state.online` false → every Apps Script call fails like no signal. */
+/** Installs the route on a Playwright page. `state.online` false → every Apps Script call fails like no signal;
+ *  `state.delay` (ms) → every call answers that late. */
 async function install(page, configJsPath, state, log) {
   const byUrl = endpointKeys(configJsPath);
   await page.route("https://script.google.com/**", async route => {
@@ -141,6 +142,7 @@ async function install(page, configJsPath, state, log) {
     try { p = JSON.parse(req.postData() || "{}"); } catch (e) {}
     const h = handlers[key];
     if (!h) return route.fulfill({ status: 404, body: "no such endpoint" });
+    if (state.delay) await new Promise(r => setTimeout(r, state.delay));   // a slow server, to check what shows before it answers
     const out = h(p);
     if (key === "notes") return route.fulfill({ status: 200, contentType: "text/plain", body: out.text });
     return route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify(out) });

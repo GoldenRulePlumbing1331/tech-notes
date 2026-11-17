@@ -118,7 +118,8 @@
     key: "clock", name: "Job Clock",
     ready: function (r, meta) {
       S.who = r.who || "";
-      S.jobs = (!meta.offline || r.today === localDay()) ? (r.jobs || []) : [];
+      S.jobs = ((!meta.offline && !meta.cached) || r.today === localDay()) ? (r.jobs || []) : [];   // saved jobs only if they're today's
+      S.loading = !!meta.cached && !meta.offline && !S.jobs.length;   // nothing saved for today yet: the server's list is on its way
       renderToday(meta.offline ? "📶 No signal — " + (S.jobs.length ? "showing today's jobs from the last time this page loaded. " : "") + "You can still press the buttons; they send when you're back in range." : "");
       renderBox(); flushSoon();
     }
@@ -131,7 +132,7 @@
   function renderToday(note) {
     var box = $("today"); box.innerHTML = "";
     if (note !== null) say("jobMsg", note, note ? "wait" : "ok");
-    if (!S.jobs.length) { box.appendChild(el("div", "hint", S.who ? "No jobs on your schedule today — type the job number above." : "")); return; }
+    if (!S.jobs.length) { box.appendChild(el("div", "hint", S.loading ? "Loading today's jobs… or type the job number above." : S.who ? "No jobs on your schedule today — type the job number above." : "")); return; }
     box.appendChild(el("div", "hint", "Today"));
     S.jobs.forEach(function (j) {
       var b = el("button", "job" + (S.job && S.job.number === j.number ? " on" : "")); b.type = "button";
