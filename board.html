@@ -234,6 +234,12 @@
   .addp .chk { display: flex; gap: 14px; align-items: center; font-size: 14px; margin-top: 8px; }
   .addp .chk label { display: flex; align-items: center; gap: 5px; color: var(--ink); font-weight: 600; }
   .addp .frow { margin-top: 10px; }
+  /* photos already on the job in HCP */
+  .jph { display: flex; gap: 8px; overflow-x: auto; padding: 2px 0 6px; -webkit-overflow-scrolling: touch; }
+  .jph a { flex: 0 0 auto; width: 84px; height: 84px; border-radius: 10px; border: 1px solid var(--line); background: var(--card); overflow: hidden; display: flex; align-items: center; justify-content: center; text-decoration: none; color: var(--muted); font-size: 12px; font-weight: 700; text-align: center; padding: 0; }
+  .jph a img { width: 100%; height: 100%; object-fit: cover; display: block; }
+  .jph a.file { padding: 6px; word-break: break-word; line-height: 1.2; }
+  .jphnote { font-size: 13px; color: var(--muted); padding: 2px 0 6px; }
   .ftools textarea { width: 100%; font: inherit; font-size: 16px; color: var(--ink); background: var(--card); border: 1px solid var(--line); border-radius: 10px; padding: 10px 12px; min-height: 76px; resize: vertical; margin-top: 12px; }
   .frow { display: flex; gap: 8px; margin-top: 8px; }
   .frow .btn { flex: 1; padding: 11px; }
@@ -1100,9 +1106,44 @@
       });
     };
     fr.appendChild(nb); fr.appendChild(pb); box.appendChild(fr); box.appendChild(fi);
+    jobPhotos(box, it);
     lineTools(box, it);
     fmsgEl = el("div", "fmsg hidden"); box.appendChild(fmsgEl);
     sh.appendChild(box);
+  }
+
+  // ---------- photos already on the job in HCP (read-only; needs signal) ----------
+  S.jph = {};   // job number -> { at, items } for this visit, so reopening a job doesn't refetch
+  function jobPhotos(box, it) {
+    if (it.kind === "event" || !(it.job_id || it.number)) return;
+    var head = el("div", "ft", "Photos on this job"), wrap = el("div", "jphnote", "Loading photos…");
+    box.appendChild(head); box.appendChild(wrap);
+    function gone() { box.removeChild(head); box.removeChild(wrap); }
+    function draw(items) {
+      if (!document.body.contains(wrap)) return;
+      head.textContent = "Photos on this job" + (items.length ? " (" + items.length + ")" : "");
+      if (!items.length) { wrap.className = "jphnote"; wrap.textContent = "None in HCP yet."; return; }
+      wrap.className = "jph"; wrap.textContent = "";
+      items.forEach(function (a, i) {
+        var l = el("a", a.image ? null : "file"); l.href = a.url; l.target = "_blank"; l.rel = "noopener";
+        l.setAttribute("aria-label", a.name || ("Photo " + (i + 1)));
+        if (a.image) {
+          var im = el("img"); im.loading = "lazy"; im.decoding = "async"; im.alt = a.name || ("Photo " + (i + 1));
+          im.onerror = function () { im.onerror = null; l.removeChild(im); l.className = "file"; l.textContent = a.name || "Open photo"; };
+          im.src = a.url; l.appendChild(im);
+        } else l.textContent = a.name || "Open file";
+        wrap.appendChild(l);
+      });
+    }
+    var key = String(it.number || it.job_id), hit = S.jph[key];
+    if (hit && Date.now() - hit.at < 120000) { draw(hit.items); return; }
+    if (navigator.onLine === false) { wrap.textContent = "Photos load when you're back in range."; return; }
+    clockPost({ action: "photos", job_id: it.job_id || "", number: it.number || "" }).then(function (r) {
+      if (!document.body.contains(wrap)) return;
+      if (r && r.ok && Array.isArray(r.items)) { S.jph[key] = { at: Date.now(), items: r.items }; draw(r.items); }
+      else if (r && /Unknown action/.test(r.error || "")) gone();   // Job Clock script not redeployed yet: no strip, no error
+      else wrap.textContent = "Couldn't load this job's photos.";
+    }).catch(function () { if (document.body.contains(wrap)) wrap.textContent = "Photos load when you're back in range."; });
   }
 
   // ---------- line items: price book search on the phone, queued like everything else ----------

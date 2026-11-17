@@ -111,6 +111,7 @@ const handlers = {
       case "photo": return { ok: true, message: "✅ Photo added." };
       case "catalog": return { ok: true, items: [{ uuid: "s1", name: "Hose Bib Replacement", category: "Outdoor", description: "", price: 32500, cost: 4000 }, { uuid: "s2", name: "Shutoff Valve - 1/2in", category: "Valves", description: "", price: 18500, cost: 2000 }] };
       case "lines": return { ok: true, job_id: p.job_id, number: p.number, lines: [], total: 0 };
+      case "photos": return { ok: true, job_id: p.job_id, number: p.number, expanded: true, items: [{ id: "a1", name: "before.jpg", url: "data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///ywAAAAAAQABAAACAUwAOw==", type: "image/jpeg", image: true }, { id: "a2", name: "permit.pdf", url: "https://example.com/permit.pdf", type: "application/pdf", image: false }] };
       case "search": return { ok: true, items: [] };
     }
     return { ok: false, error: "Unknown action." };

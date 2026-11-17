@@ -110,6 +110,7 @@ function ok(name, cond, detail) { results.push((cond ? "PASS " : "FAIL ") + name
   await page.fill("#sheet textarea", "Gate code 1234"); await page.click("#sheet .frow .btn"); await page.waitForTimeout(1200);
   const noteCall = log.filter(l => l.key === "clock" && /"action":"note"/.test(l.body)).pop();
   ok("board: private note sent through the clock script", !!noteCall && /Gate code 1234/.test(noteCall.body));
+  ok("board: photos already on the job show in the sheet", (await page.locator("#sheet .jph a").count()) === 2 && (await page.locator("#sheet .jph a img").count()) === 1 && (await page.locator("#sheet .jph a.file").count()) === 1);
 
   // ---- OFFLINE: drafts survive, outboxes queue, home shows the badge, then flush when signal returns ----
   state.online = false;
