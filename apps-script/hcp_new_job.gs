@@ -25,6 +25,9 @@
  *     property BUSINESS_UNITS = comma-separated names limits the Business Unit list to those (in that order).
  *  4. Deploy → New deployment → Web app. Execute as: Me. Who has access: Anyone. Copy the /exec URL
  *     into config.js as "newJob".
+ *  5. Triggers (clock icon) → Add Trigger → function njWarm · Time-driven · Hour timer · Every hour. It keeps the
+ *     lists every dictation needs (price book, techs, job types/business units, tags) fresh in the background, so
+ *     no tech's Look up has to wait while they're rebuilt.
  *  Later code changes: Deploy → Manage deployments → edit → Version: New version (URL stays the same).
  *
  * Actions (POST JSON, all need "token" = the tech's access code):
@@ -240,9 +243,9 @@ function njClaude_(system, user, maxTokens) {
   }
 }
 
-function njEmployees_() {
+function njEmployees_(fresh) {
   const cache = CacheService.getScriptCache();
-  const hit = cache.get('nj_emps');
+  const hit = !fresh && cache.get('nj_emps');
   if (hit) return JSON.parse(hit);
   const out = [];
   for (let page = 1; page <= 10; page++) {
@@ -1157,6 +1160,30 @@ function njPhoto_(p, who) {
   const out = { ok: true, name: name };
   if (reqId) cache.put('nj_ph_' + reqId, JSON.stringify(out), 21600);
   return out;
+}
+
+/* ───────────── keeping the lists warm (hourly trigger) ───────────── */
+
+/**
+ * Run every hour by a time-driven trigger (setup step 5). Without it, the first Look up after a list's saved copy ran
+ * out had to wait while the script rebuilt it from HCP: the price book and tech list every 6 hours, the Job Type /
+ * Business Unit scan of 1,000 jobs once a day, the tag scan (~15 s) once a week. This does that work in the background:
+ *   · price book + techs: fetched fresh every run (a couple of calls), so new price book items show within the hour;
+ *   · Job Types / Business Units: rescanned when the saved copy is over 12 hours old;
+ *   · job tags: rescanned when the saved copy is over 3 days old.
+ * A step that fails leaves the copy already saved in place and is tried again next hour. Safe to run by hand.
+ */
+function njWarm() {
+  const t0 = Date.now(), done = [];
+  const step = (name, fn) => { try { done.push(name + ' ' + fn()); } catch (e) { done.push(name + ' ❌ ' + e.message); } };
+  step('techs', () => njEmployees_(true).length);
+  step('price book', () => njCatalog_(true).length);
+  let fieldsOld = true;
+  try { fieldsOld = Date.now() - JSON.parse(props_().getProperty('NJ_FIELDS_CACHE')).at > 12 * 3600 * 1000; } catch (_) {}
+  step('job types' + (fieldsOld ? ' (rescanned)' : ''), () => njJobFields_(fieldsOld).job_types.length);
+  const tagsOld = !njPropGet_('NJ_TAGS_CACHE', 3 * 86400000);
+  step('tags' + (tagsOld ? ' (rescanned)' : ''), () => njJobTags_(tagsOld).length);
+  console.log('njWarm: ' + done.join(' · ') + ' — ' + Math.round((Date.now() - t0) / 100) / 10 + ' s');
 }
 
 /* ───────────── access codes, HCP client, helpers ───────────── */
