@@ -90,6 +90,7 @@ function clockAction_(p) {
       case 'stamp': return ckStamp_(p, who);
       case 'note':  return ckNote_(p, who);
       case 'photo': return ckPhoto_(p, who);
+      case 'photos': return ckPhotos_(p);
       case 'catalog':  return { ok: true, items: ckCatalog_(!!p.fresh), loaded_at: Utilities.formatDate(new Date(), ckTz_(), 'EEE h:mm a') };
       case 'lines':    return ckLines_(p);
       case 'search':   return ckSmartSearch_(p);
@@ -358,6 +359,55 @@ function verifyNotesAndPhotos() {
     const res = UrlFetchApp.fetch(CK.BASE + `/jobs/${job.id}/attachments`, { method: 'post', headers: { Authorization: 'Token ' + apiKey_() }, payload: { file: png }, muteHttpExceptions: true });
     console.log(res.getResponseCode() < 300 ? `✅ Photos: POST /jobs/{id}/attachments works (${res.getResponseCode()}). Check the job in HCP for board-access-test.png.` : `❌ Photos: HCP said ${res.getResponseCode()} — ${res.getContentText().slice(0, 200)}`);
   } catch (e) { console.log('❌ Photos: ' + e.message); }
+}
+
+/* ───────────── photos already on the job (read-only, shown in the Board's job sheet) ───────────── */
+
+/** A job's attachments from HCP: GET /jobs/{id}?expand=attachments → [{ id, name, url, type, image }]. Reads only. */
+function ckJobAttachments_(jobId) {
+  const id = encodeURIComponent(jobId);
+  let j = hcp_('get', '/jobs/' + id + '?expand[]=attachments');
+  if (!Array.isArray(j.attachments)) { try { const k = hcp_('get', '/jobs/' + id + '?expand=attachments'); if (Array.isArray(k.attachments)) j = k; } catch (_) {} }
+  const list = Array.isArray(j.attachments) ? j.attachments : null;
+  return { job: j, expanded: !!list, items: (list || []).filter(a => a && a.url).map(a => {
+    const name = String(a.file_name || ''), type = String(a.file_type || '');
+    return { id: String(a.id || ''), name: name, url: String(a.url), type: type, image: /image|jpe?g|png|webp|gif|heic/i.test(type) || /\.(jpe?g|png|webp|gif|heic)(\?|$)/i.test(name || a.url) };
+  }) };
+}
+function ckPhotos_(p) {
+  const jobId = String(p.job_id || '').trim() || ckJobByNumber_(p.number).id;
+  const r = ckJobAttachments_(jobId);
+  return { ok: true, job_id: jobId, number: String(r.job.invoice_number || p.number || ''), items: r.items, expanded: r.expanded };
+}
+
+/**
+ * Run from the editor BEFORE relying on the Board's "Photos on this job" strip. Read-only: it changes nothing in HCP.
+ * Reads the newest "Test Customer" job (or TEST_JOB_NUMBER) with its attachments and says what HCP sent back,
+ * then tries to open the first file's link the way a phone would (no HCP sign-in).
+ */
+function verifyJobPhotos() {
+  const TEST_JOB_NUMBER = '';   // ← optional: a job number you know has photos on it
+  let job = null;
+  if (TEST_JOB_NUMBER) job = ckJobByNumber_(TEST_JOB_NUMBER);
+  else {
+    for (let page = 1; page <= 10 && !job; page++) {
+      const r = hcp_('get', `/jobs?page=${page}&page_size=100&sort_by=created_at&sort_direction=desc`);
+      job = (r.jobs || []).filter(j => { const c = j.customer || {}; return String(c.first_name || '').trim().toLowerCase() === 'test' && String(c.last_name || '').trim().toLowerCase() === 'customer'; })[0] || null;
+      if (page >= (r.total_pages || 0)) break;
+    }
+    if (!job) { console.log('❌ No "Test Customer" job in the 1,000 newest jobs. Type a job number into TEST_JOB_NUMBER.'); return; }
+  }
+  let r;
+  try { r = ckJobAttachments_(job.id); } catch (e) { console.log('❌ Reading the job with attachments failed: ' + e.message); return; }
+  if (!r.expanded) { console.log(`❌ Job ${job.invoice_number}: HCP did not include an attachments list. Keys it sent: ${Object.keys(r.job).join(', ')}`); return; }
+  console.log(`✅ Job ${job.invoice_number}: HCP returned ${r.items.length} file(s) with links.`);
+  r.items.slice(0, 5).forEach(a => console.log(`   • ${a.name || '(no name)'} · ${a.type || '(no type)'} · ${a.image ? 'image' : 'file'} · ${a.url.split('?')[0].slice(0, 80)}`));
+  if (!r.items.length) { console.log('   Nothing on this job to open — add a photo to it in HCP (or set TEST_JOB_NUMBER) and run again.'); return; }
+  try {
+    const res = UrlFetchApp.fetch(r.items[0].url, { muteHttpExceptions: true, followRedirects: true });
+    const ct = String((res.getHeaders() || {})['Content-Type'] || '');
+    console.log(res.getResponseCode() === 200 ? `✅ The link opens without an HCP sign-in (${ct}, ${Math.round(res.getBlob().getBytes().length / 1024)} KB) — phones can show it.` : `❌ The link answered ${res.getResponseCode()} without a sign-in — phones can't show it directly.`);
+  } catch (e) { console.log('❌ Opening the link failed: ' + e.message); }
 }
 
 /* ───────────── line items from the Board ───────────── */
