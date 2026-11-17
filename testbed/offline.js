@@ -72,6 +72,50 @@ async function appState(page) {
     }
     await ctx.close();
   }
+  // --- Part C: service worker serves the saved copy at once, and picks up a changed file ---
+  {
+    const fs = require("fs"), os = require("os");
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "gr-sw-"));
+    for (const f of fs.readdirSync(ROOT)) if (fs.statSync(path.join(ROOT, f)).isFile()) fs.copyFileSync(path.join(ROOT, f), path.join(tmp, f));
+    const srv2 = spawn("node", [path.join(__dirname, "serve.js"), tmp, String(PORT + 7)], { stdio: "ignore" });
+    await new Promise(r => setTimeout(r, 600));
+    const base = `http://localhost:${PORT + 7}/`;
+    const ctx = await browser.newContext({ viewport: { width: 412, height: 915 }, serviceWorkers: "allow", timezoneId: "America/New_York" });
+    const page = await ctx.newPage();
+    await mock.install(page, path.join(ROOT, "config.js"), { online: true });
+    await page.goto(base + "home.html");
+    await page.evaluate(code => localStorage.setItem("grTechCode", code), mock.GOOD);
+    await page.evaluate(() => navigator.serviceWorker.ready); await page.waitForTimeout(1200);
+    await page.goto(base + "new-job.html"); await page.waitForTimeout(800);
+    // a new version ships: the page opens from the saved copy, then reloads itself once onto the new one
+    fs.writeFileSync(path.join(tmp, "new-job.html"), fs.readFileSync(path.join(tmp, "new-job.html"), "utf8").replace("<title>New Job</title>", "<title>New Job v2</title>"));
+    fs.appendFileSync(path.join(tmp, "gr-common.js"), "\nwindow.GR_V2 = true;\n");
+    await page.goto(base + "new-job.html");
+    const first = await page.title();
+    await page.waitForTimeout(3000);
+    const v2 = await page.evaluate(() => !!window.GR_V2);
+    out.push(`C update: opened as "${first}", then "${await page.title()}" with new gr-common.js=${v2} ${first === "New Job" && (await page.title()) === "New Job v2" && v2 ? "OK" : "FAILS"}`);
+    // a page the tech is already typing in is left alone; the update is there on the next open
+    fs.writeFileSync(path.join(tmp, "estimate.html"), fs.readFileSync(path.join(tmp, "estimate.html"), "utf8").replace(/<title>[^<]*<\/title>/, "<title>Estimate v2</title>"));
+    await page.waitForTimeout(31000);   // past the worker's "same update" window
+    await page.goto(base + "estimate.html");
+    const before = await page.title();
+    await page.fill("#heard", "typing already"); await page.waitForTimeout(3000);
+    const during = await page.title(), kept = await page.inputValue("#heard");
+    await page.goto(base + "estimate.html"); await page.waitForTimeout(500);
+    out.push(`C update while typing: "${before}" → stays "${during}" (text "${kept}") → next open "${await page.title()}" ${during === before && kept === "typing already" && (await page.title()) === "Estimate v2" ? "OK" : "FAILS"}`);
+    await page.goto(base + "dispatch.html?job=1"); await page.waitForTimeout(600); await page.goto(base + "dispatch.html?job=2"); await page.waitForTimeout(600);
+    const n = await page.evaluate(async () => { const c = await caches.open((await caches.keys())[0]); return (await c.keys()).filter(r => /dispatch\.html/.test(r.url)).length; });
+    out.push(`C one saved copy per page whatever the ?query: ${n} ${n === 1 ? "OK" : "FAILS"}`);
+    // the page's files held back 4 s by the network: the saved copy must show without waiting for them
+    await ctx.route(base + "**", async route => { await new Promise(r => setTimeout(r, 4000)); route.continue().catch(() => {}); });
+    const t0 = Date.now();
+    await page.goto(base + "new-job.html", { waitUntil: "load" });
+    const ms = Date.now() - t0;
+    out.push(`C slow network: new-job.html loaded in ${ms} ms ${ms < 1500 ? "OK (saved copy, no wait)" : "FAILS (waited on the network)"}`);
+    await ctx.unroute(base + "**");
+    await ctx.close(); srv2.kill(); fs.rmSync(tmp, { recursive: true, force: true });
+  }
   console.log(out.join("\n"));
   await browser.close(); srv.kill();
 })();

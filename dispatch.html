@@ -151,13 +151,17 @@
   var B = GR.boot({
     key: "dispatch", name: "Dispatch",
     ready: function (r, meta) {
-      S.me = r.me || ""; S.today = r.today || ""; S.emps = r.employees || []; S.canDispatch = r.can_dispatch !== false;
-      var sel = $("bEmp"); sel.innerHTML = ""; sel.appendChild(el("option", null, "Everyone")).value = "";
+      // Runs at once from what this phone saved (the board starts loading straight away), then again (meta.refresh)
+      // if the server's answer differs — that second pass keeps the date and tech already picked and doesn't reload.
+      var first = !meta.refresh, sel = $("bEmp"), had = sel.value;
+      S.me = r.me || ""; S.today = (meta.cached ? GR.localDay() : r.today) || ""; S.emps = r.employees || []; S.canDispatch = r.can_dispatch !== false;
+      sel.innerHTML = ""; sel.appendChild(el("option", null, "Everyone")).value = "";
       S.emps.forEach(function (e) { var o = el("option", null, e.name); o.value = e.id; sel.appendChild(o); });
-      if (S.today) { $("bDate").value = S.today; $("cDate").min = S.today; }
+      sel.value = had; if (sel.value !== had) sel.value = "";
+      if (S.today) { if (first) $("bDate").value = S.today; $("cDate").min = S.today; }
       if (!S.canDispatch) say("talkMsg", "Your code can view the board but not move jobs.", "warn");
       if (meta.offline) $("boardList").textContent = "No signal — the board loads when you're back in range.";
-      else loadBoard();
+      else if (first) loadBoard();
       // Opened from the Board page ("Move it"): dispatch.html?job=49370 → that job, ready to change.
       var wantJob = (/[?&]job=([0-9A-Za-z-]+)/.exec(location.search) || [])[1];
       if (wantJob && !S.jobOpened && !meta.offline) { S.jobOpened = true; $("jobNum").value = wantJob; $("jobGo").click(); }

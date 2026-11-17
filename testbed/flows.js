@@ -141,6 +141,42 @@ function ok(name, cond, detail) { results.push((cond ? "PASS " : "FAIL ") + name
   ok("online again: queued press sent", (await page.evaluate(() => JSON.parse(localStorage.getItem("grClockOutbox") || "[]").length)) === 0 && /sent to the office/.test(await txt("#msg")), await txt("#msg"));
   ok("online again: no-signal strip gone", !(await vis("#grNet")));
 
+  // ---- Fast open: a repeat visit shows the app from the saved lists while the server check runs behind it ----
+  state.delay = 2000;
+  await page.goto(U("new-job.html")); await page.waitForTimeout(500);
+  ok("fast open new-job: app + saved lists before the server answers", await vis("#app") && !(await vis("#codeCard")) && (await page.locator("#jEmp option").count()) === 4 && (await page.locator("#jType option").count()) === 2);
+  await page.evaluate(() => { const k = "grInit:newJob", s = JSON.parse(localStorage.getItem(k)); s.r.employees = s.r.employees.slice(0, 2); localStorage.setItem(k, JSON.stringify(s)); });
+  await page.goto(U("new-job.html")); await page.waitForTimeout(500);
+  const early = await page.locator("#jEmp option").count();
+  const picked = await page.evaluate(day => { const e = document.getElementById("jEmp"); e.selectedIndex = 2; document.getElementById("jDate").value = day; return e.value; }, mock.TODAY);   // (the confirm card is still hidden)
+  await page.waitForTimeout(2300);
+  ok("fast open new-job: server's lists replace the saved ones, picks kept", early === 3 && (await page.locator("#jEmp option").count()) === 4 && (await page.inputValue("#jEmp")) === picked && picked !== "" && (await page.inputValue("#jDate")) === mock.TODAY, early + " → " + (await page.locator("#jEmp option").count()));
+  let mark = log.length;
+  await page.goto(U("dispatch.html")); await page.waitForTimeout(600);
+  ok("fast open dispatch: board asked for without waiting on init", log.slice(mark).some(l => /"action":"board"/.test(l.body)) && await vis("#app"));
+  await page.waitForTimeout(2200);
+  ok("fast open dispatch: board loaded once", log.slice(mark).filter(l => /"action":"board"/.test(l.body)).length === 1 && (await page.locator("#boardList .job, #boardList button, #boardList div").count()) > 0);
+  for (const pg of ["home.html", "estimate.html", "order.html", "clock.html", "job-inputs.html"]) {
+    await page.goto(U(pg)); await page.waitForTimeout(400);
+    ok("fast open " + pg + ": app before the server answers", await vis("#app") && !(await vis("#codeCard")));
+  }
+  await page.goto(U("clock.html")); await page.waitForTimeout(400);
+  ok("fast open clock: today's saved jobs shown at once", /49370/.test(await txt("#today")));
+  // a code the office has revoked: the app shows from the saved lists, then the server's answer puts the code card back
+  await page.evaluate(() => { localStorage.setItem("grTechCode", "11111111"); const k = "grInit:estimate", s = JSON.parse(localStorage.getItem(k)); s.c = "11111111"; localStorage.setItem(k, JSON.stringify(s)); });
+  await page.goto(U("estimate.html")); await page.waitForTimeout(400);
+  const shownEarly = await vis("#app");
+  await page.waitForTimeout(2300);
+  ok("fast open: a revoked code still ends on the code card", shownEarly && await vis("#codeCard") && !(await vis("#app")) && (await page.evaluate(() => localStorage.getItem("grTechCode"))) === null && (await page.evaluate(() => localStorage.getItem("grInit:estimate"))) === null, [shownEarly, await vis("#codeCard"), await vis("#app"), await page.evaluate(() => localStorage.getItem("grTechCode"))].join(" "));
+  // a different code than the one the lists were saved under: no fast open, normal check
+  await page.evaluate(code => localStorage.setItem("grTechCode", code), mock.GOOD);
+  await page.evaluate(() => { const k = "grInit:order", s = JSON.parse(localStorage.getItem(k)); s.c = "22222222"; localStorage.setItem(k, JSON.stringify(s)); });
+  await page.goto(U("order.html")); await page.waitForTimeout(400);
+  const waited = !(await vis("#app"));
+  await page.waitForTimeout(2300);
+  ok("fast open: lists saved under another code aren't used", waited && await vis("#app"));
+  state.delay = 0;
+
   // ---- Change code ----
   await page.goto(U("dispatch.html")); await page.waitForTimeout(600);
   await page.click("#forget"); await page.waitForTimeout(200);

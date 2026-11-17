@@ -262,14 +262,15 @@
 
   // ---------- access code → init (with no signal: the lists this phone saved last time) ----------
   function fillSelect(id, list, keepFirst) {
-    var sel = $(id); while (sel.options.length > (keepFirst ? 1 : 0)) sel.remove(sel.options.length - 1);
+    var sel = $(id), had = sel.value; while (sel.options.length > (keepFirst ? 1 : 0)) sel.remove(sel.options.length - 1);
     (list || []).forEach(function (x) { var o = el("option", null, x.name); o.value = x.id; sel.appendChild(o); });
+    sel.value = had; if (sel.value !== had) sel.value = "";   // refilled when the server's lists arrive: keep what was picked
   }
   var B = GR.boot({
     key: "newJob", name: "New Job", version: PAGE_VERSION, onOutdated: showOutdated,
-    ready: function (r) {
-      S.me = r.me || ""; S.today = r.today || "";
-      fillSelect("jEmp", r.employees, true); setAssign();
+    ready: function (r, meta) {   // runs at once from the lists this phone saved, then again if the server's differ
+      S.me = r.me || ""; S.today = (meta.cached ? GR.localDay() : r.today) || "";
+      fillSelect("jEmp", r.employees, true); if (!meta.refresh) setAssign();
       S.usualUnit = r.usual_unit || {};
       S.priceBook = r.price_book !== false;
       S.allTags = r.tags || [];
