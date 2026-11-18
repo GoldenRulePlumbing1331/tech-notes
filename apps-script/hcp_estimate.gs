@@ -35,6 +35,17 @@
  *   estimates {customer_id}            → the customer's open estimates (to add options to instead of making a new one)
  *   create   {req_id, customer_id | customer, address_id | address, estimate} → creates the estimate
  *            {req_id, estimate_id, estimate}                                  → adds the options to that existing estimate
+ *
+ * ───────────── CUSTOMER HISTORY (history.html) ─────────────
+ * The Customer History page (it took the Estimate tile's place on the home page, Nov 2026) runs in this same
+ * project, so it uses the HCP key, access codes and web-app URL that are already set up — nothing new to configure.
+ * It only reads from HCP. The page sends tool: "history" with every call (see "Customer History" further down):
+ *   init     {}                         → who is signed in (no lists, so it answers fast)
+ *   search   {q}                        → customers matching a name, phone number, email or address
+ *   customer {customer_id}              → the customer, their jobs (newest first) and estimates
+ *   job      {job_id}                   → one job's line items, notes and photos
+ *   option   {estimate_id, option_id}   → one estimate option's line items
+ * Run verifyHistory() in the editor for a read-only check against real HCP.
  */
 
 const ES = {
@@ -71,6 +82,7 @@ function doGet() { return ContentService.createTextOutput('HCP Estimate web app 
 function estimateAction_(p) {
   try {
     const who = whoIs_(p.token);
+    if (p.tool === 'history') return historyAction_(p, who);
     switch (p.action) {
       case 'init':    return Object.assign({ ok: true }, esInit_(who));
       case 'parse':   return Object.assign({ ok: true }, esParse_(p.text, p.mode));
@@ -82,7 +94,7 @@ function estimateAction_(p) {
       default:        throw new Error('Unknown action.');
     }
   } catch (err) {
-    console.log('estimate ' + p.action + ' ❌ ' + err.message);
+    console.log((p.tool === 'history' ? 'history ' : 'estimate ') + p.action + ' ❌ ' + err.message);
     return { ok: false, error: err.message };
   }
 }
@@ -651,7 +663,248 @@ function formatSentences_(text) {
   return String(text || '').replace(/\s*\n+\s*/g, ' ').replace(/([.!?])\s+(?=\S)/g, '$1\n').split('\n').map(s => s.trim()).filter(Boolean).join('\n');
 }
 
+/* ───────────── Customer History (history.html) — read-only ───────────── */
+
+const CH = {
+  MAX_MATCHES: 10,
+  PAGE_SIZE: 100,
+  JOB_PAGES: 3,        // newest 300 jobs per customer; the page says so when there are more
+  PREFETCH: 6,         // line items (what was done) are read up front for this many recent jobs; the rest load on tap
+  NOTES_RE: /technician'?s notes|work performed/i,   // the $0 line the Job Notes tool writes
+};
+
+function historyAction_(p, who) {
+  switch (p.action) {
+    case 'init':     return { ok: true, who: who, today: esToday_() };
+    case 'search':   return { ok: true, matches: chSearch_(p.q) };
+    case 'customer': return Object.assign({ ok: true }, chCustomer_(p.customer_id));
+    case 'job':      return Object.assign({ ok: true }, chJob_(p.job_id));
+    case 'option':   return Object.assign({ ok: true }, chOption_(p.estimate_id, p.option_id));
+    default:         throw new Error('Unknown action.');
+  }
+}
+
+/** Several GETs at once. A path that fails is retried on its own (rate limit); still failing → null in its place. */
+function chGetAll_(paths) {
+  if (!paths.length) return [];
+  const headers = { Authorization: 'Token ' + apiKey_(), Accept: 'application/json' };
+  let res;
+  try { res = UrlFetchApp.fetchAll(paths.map(p => ({ url: ES.BASE + p, method: 'get', headers: headers, muteHttpExceptions: true }))); }
+  catch (e) { res = paths.map(() => null); }
+  return paths.map((p, i) => {
+    const r = res[i], code = r ? r.getResponseCode() : 0;
+    if (code >= 200 && code < 300) { try { return JSON.parse(r.getContentText() || '{}'); } catch (_) { return null; } }
+    if (code === 404) return null;
+    try { return hcp_('get', p); } catch (e) { console.warn('history read failed: ' + e.message); return null; }
+  });
+}
+
+function chDate_(s) { if (!s) return null; const d = new Date(s); return isNaN(d.getTime()) ? null : d; }
+function chTags_(t) { return (Array.isArray(t) ? t : []).map(x => String(typeof x === 'string' ? x : (x && x.name) || '').trim()).filter(Boolean).slice(0, 12); }
+function chNotes_(n) {
+  const list = Array.isArray(n) ? n : (n ? [n] : []);
+  return list.map(x => String(typeof x === 'string' ? x : (x && x.content) || '').trim()).filter(Boolean);
+}
+
+/** Name, phone number, email or address → customers, best match first. */
+function chSearch_(q) {
+  q = String(q || '').replace(/\s+/g, ' ').trim().slice(0, 120);
+  if (q.length < 2) throw new Error('Type or say a name, phone number, or address.');
+  const digits = q.replace(/\D/g, ''), letters = q.replace(/[^a-z]/gi, '').length;
+  const f = {}, queries = [];
+  const add = s => { s = String(s || '').trim(); if (s.length > 1 && queries.indexOf(s) === -1) queries.push(s); };
+  let together = 1;                                   // how many of the queries run on the first pass
+  if (digits.length >= 7 && !letters) { f.phone = esDigits_(digits); add(f.phone); }
+  else if (/@/.test(q)) { f.email = q.toLowerCase().replace(/\s/g, ''); add(f.email); }
+  else if (/^\d+\s+\S/.test(q)) {
+    f.street = q.split(',')[0].trim();
+    add(f.street);
+    add(f.street.split(' ').slice(0, 2).join(' '));   // house number + first street word: gets past "Rd" vs "Road" and a town said after it
+    together = 2;
+  } else {
+    const w = q.split(' ');
+    if (w.length > 1) { f.first_name = w[0]; f.last_name = w.slice(1).join(' '); } else f.last_name = q;
+    add(q);
+    if (w.length > 1) { add(w[w.length - 1]); add(w[0]); }   // only when the full text finds nobody
+  }
+  const byId = {};
+  let answered = 0;
+  const path = s => `/customers?q=${encodeURIComponent(s)}&page=1&page_size=20&sort_by=created_at&sort_direction=desc`;
+  const take = r => { if (!r) return; answered++; (r.customers || []).forEach(c => { if (c && c.id) byId[c.id] = c; }); };
+  chGetAll_(queries.slice(0, together).map(path)).forEach(take);
+  if (!Object.keys(byId).length && queries.length > together) chGetAll_(queries.slice(together).map(path)).forEach(take);
+  if (!answered) throw new Error('HCP didn’t answer the search. Try again in a moment.');
+  return Object.keys(byId).map(id => { const c = esCustomer_(byId[id]); c.tags = chTags_(byId[id].tags); c.score = chScore_(c, f, q); return c; })
+    .sort((a, b) => b.score - a.score).slice(0, CH.MAX_MATCHES);
+}
+
+function chScore_(c, f, q) {
+  let s = esScore_(c, f);
+  const low = v => String(v || '').toLowerCase();
+  const ql = low(q), name = low([c.first_name, c.last_name, c.company, c.display_name].join(' '));
+  ql.split(' ').filter(w => w.length > 1).forEach(w => { if (name.indexOf(w) !== -1) s += 1; });   // either order: "Doe John" finds John Doe
+  if (c.addresses.some(a => low(a.text).indexOf(ql) !== -1)) s += 3;
+  return s;
+}
+
+/** The customer, every job (newest first, up to CH.JOB_PAGES × 100) and their estimates. */
+function chCustomer_(customerId) {
+  const cid = String(customerId || '').trim();
+  if (!cid) throw new Error('Pick a customer first.');
+  const enc = encodeURIComponent(cid), tz = esTz_();
+  const jobsPath = n => `/jobs?customer_id=${enc}&page=${n}&page_size=${CH.PAGE_SIZE}&sort_by=created_at&sort_direction=desc`;
+  const first = chGetAll_(['/customers/' + enc, jobsPath(1), `/estimates?customer_id=${enc}&page=1&page_size=50&sort_by=created_at&sort_direction=desc`]);
+  const cust = first[0], jp = first[1], ep = first[2];
+  if (!cust || !cust.id) throw new Error('HCP couldn’t find that customer. Search again.');
+  if (!jp) throw new Error('HCP didn’t send this customer’s jobs. Try again in a moment.');
+  const warnings = [];
+  let raw = jp.jobs || [];
+  const pages = Math.min(Number(jp.total_pages) || 1, CH.JOB_PAGES);
+  if (pages > 1) {
+    const rest = [];
+    for (let n = 2; n <= pages; n++) rest.push(jobsPath(n));
+    chGetAll_(rest).forEach(r => { if (r && r.jobs) raw = raw.concat(r.jobs); else warnings.push('Some older jobs didn’t load — pull the customer up again to retry.'); });
+  }
+  const seen = {};
+  const uniq = raw.filter(j => j && j.id && !seen[j.id] && (seen[j.id] = true));
+  const mine = uniq.filter(j => !j.customer || !j.customer.id || j.customer.id === cid);   // never show another customer's job, whatever HCP sends
+  const unfiltered = mine.length < uniq.length;
+  if (unfiltered) warnings.push('HCP sent jobs from other customers too. They were left out, so this list may be missing older jobs.');
+  const rows = mine.map(j => chJobRow_(j, tz)).sort((a, b) => b.ms - a.ms);
+  const totalJobs = unfiltered ? rows.length : Math.max(Number(jp.total_items) || 0, rows.length);
+
+  // What was done on the most recent visits, up front. Older jobs load when the tech taps them.
+  const pre = rows.filter(r => r.state === 'done' || r.state === 'working').slice(0, CH.PREFETCH);
+  chGetAll_(pre.map(r => '/jobs/' + encodeURIComponent(r.id) + '/line_items')).forEach((res, i) => {
+    if (!res) return;
+    const L = chLines_(res);
+    pre[i].lines = L.lines; pre[i].work = L.work;
+  });
+
+  if (!ep) warnings.push('Estimates didn’t load — pull the customer up again to retry.');
+  const estimates = ((ep && ep.estimates) || []).filter(e => e && e.id && (!e.customer || !e.customer.id || e.customer.id === cid))
+    .map(e => chEstimateRow_(e, tz)).sort((a, b) => b.ms - a.ms);
+
+  const now = Date.now(), sum = (list, k) => list.reduce((s, r) => s + (Number(r[k]) || 0), 0);
+  const done = rows.filter(r => r.state === 'done'), live = rows.filter(r => r.state !== 'canceled');
+  const last = done.filter(r => r.ms && r.ms <= now)[0] || done[0] || null;
+  const next = rows.filter(r => r.state === 'scheduled' && r.dated && r.ms >= now - 12 * 3600000).sort((a, b) => a.ms - b.ms)[0] || null;
+  const oldest = rows.filter(r => r.ms).slice(-1)[0] || null;
+  return {
+    customer: chCustomerInfo_(cust, tz),
+    summary: { jobs: live.length, done: done.length, canceled: rows.length - live.length, billed: sum(done, 'total'), due: sum(done, 'due'),
+               last: last ? last.when : '', last_ms: last ? last.ms : 0, next: next ? next.when : '',
+               first_year: oldest ? Utilities.formatDate(new Date(oldest.ms), tz, 'yyyy') : '',
+               open_estimates: estimates.filter(e => e.state === 'open').length },
+    jobs: rows, estimates: estimates, total_jobs: totalJobs, truncated: totalJobs > rows.length, warnings: warnings,
+    loaded_at: Utilities.formatDate(new Date(), tz, 'MMM d, h:mm a'),
+  };
+}
+
+function chCustomerInfo_(c, tz) {
+  const out = esCustomer_(c);
+  out.tags = chTags_(c.tags);
+  out.notes = chNotes_(c.notes).join('\n').slice(0, 1500);
+  out.lead_source = String(c.lead_source || '');
+  const made = chDate_(c.created_at);
+  out.since = made ? Utilities.formatDate(made, tz, 'MMM yyyy') : '';
+  out.url = 'https://pro.housecallpro.com/app/customers/' + c.id;
+  return out;
+}
+
+/** One line of the job list. Money is HCP cents. The date is the scheduled day, else when it was finished, else when it was created. */
+function chJobRow_(j, tz) {
+  const sch = j.schedule || {}, ts = j.work_timestamps || {}, a = j.address || {};
+  const st = String(j.work_status || '').toLowerCase();
+  const state = /cancel/.test(st) ? 'canceled' : /complete/.test(st) ? 'done' : /progress/.test(st) ? 'working' : /need|unsched/.test(st) ? 'unscheduled' : 'scheduled';
+  const at = chDate_(sch.scheduled_start) || chDate_(ts.completed_at) || chDate_(ts.started_at);
+  const d = at || chDate_(j.created_at);
+  return {
+    id: j.id, number: String(j.invoice_number || ''), title: String(j.description || '').trim().slice(0, 200),
+    ms: d ? d.getTime() : 0, dated: !!at, when: d ? Utilities.formatDate(d, tz, 'EEE MMM d, yyyy') : '',
+    state: state, address_id: String(a.id || ''), address: [a.street, a.city].filter(Boolean).join(', '),
+    techs: (j.assigned_employees || []).map(e => [e.first_name, e.last_name].filter(Boolean).join(' ').trim()).filter(Boolean),
+    total: Number(j.total_amount) || 0, due: Number(j.outstanding_balance) || 0,
+    tags: chTags_(j.tags), notes: chNotes_(j.notes).map(s => s.slice(0, 800)).slice(0, 6),
+    url: 'https://pro.housecallpro.com/app/jobs/' + j.id,
+  };
+}
+
+function chEstimateRow_(e, tz) {
+  const d = chDate_(e.created_at) || chDate_((e.schedule || {}).scheduled_start), a = e.address || {};
+  const opts = (e.options || []).map(o => ({ id: String(o.id || ''), name: String(o.name || '').trim(), number: String(o.option_number || ''),
+    total: Number(o.total_amount) || 0, approval: String(o.approval_status || '').toLowerCase() }));
+  const ap = opts.map(o => o.approval);
+  const state = /cancel/i.test(String(e.work_status || '')) ? 'canceled'
+    : ap.some(x => /approved/.test(x)) ? 'approved'
+    : opts.length && ap.every(x => /declined/.test(x)) ? 'declined'
+    : opts.length && ap.every(x => /expired/.test(x)) ? 'expired' : 'open';
+  return { id: e.id, number: String(e.estimate_number || ''), ms: d ? d.getTime() : 0, when: d ? Utilities.formatDate(d, tz, 'EEE MMM d, yyyy') : '',
+    state: state, address_id: String(a.id || ''), address: [a.street, a.city].filter(Boolean).join(', '),
+    techs: (e.assigned_employees || []).map(x => [x.first_name, x.last_name].filter(Boolean).join(' ').trim()).filter(Boolean),
+    options: opts, url: 'https://pro.housecallpro.com/app/estimates/' + e.id };
+}
+
+/** HCP line items → what the page shows. The Technician's Notes line is pulled out as "what was done". */
+function chLines_(r) {
+  const list = (r && (r.data || r.line_items)) || [];
+  const lines = [], work = [];
+  list.forEach(li => {
+    const name = String(li.name || '').trim(), desc = String(li.description || '').trim();
+    if (CH.NOTES_RE.test(name)) { if (desc) work.push(desc); return; }
+    const qty = Number(li.quantity) || 1, price = Number(li.unit_price) || 0, kind = String(li.kind || '');
+    lines.push({ name: name || '(no name)', description: desc.slice(0, 1500), qty: qty, price: price, amount: Math.round(price * qty), discount: /discount/i.test(kind) });
+  });
+  return { lines: lines, work: work.join('\n\n').slice(0, 4000) };
+}
+
+/** One job opened up: line items, what was done, notes, and the photos already on it in HCP. */
+function chJob_(jobId) {
+  const raw = String(jobId || '').trim();
+  if (!raw) throw new Error('No job picked.');
+  const id = encodeURIComponent(raw);
+  const r = chGetAll_(['/jobs/' + id + '?expand[]=attachments', '/jobs/' + id + '/line_items']);
+  let j = r[0];
+  if (!j || !j.id) throw new Error('HCP couldn’t open that job.');
+  if (!Array.isArray(j.attachments)) { try { const k = hcp_('get', '/jobs/' + id + '?expand=attachments'); if (Array.isArray(k.attachments)) j = k; } catch (_) {} }
+  const L = chLines_(r[1]);
+  const photos = (Array.isArray(j.attachments) ? j.attachments : []).filter(a => a && a.url).map(a => {
+    const name = String(a.file_name || ''), type = String(a.file_type || '');
+    return { id: String(a.id || ''), name: name, url: String(a.url), image: /image|jpe?g|png|webp|gif|heic/i.test(type) || /\.(jpe?g|png|webp|gif|heic)(\?|$)/i.test(name || a.url) };
+  });
+  return { job_id: j.id, number: String(j.invoice_number || ''), lines: L.lines, work: L.work, lines_ok: !!r[1],
+           notes: chNotes_(j.notes).map(s => s.slice(0, 800)).slice(0, 6), photos: photos, photos_ok: Array.isArray(j.attachments) };
+}
+
+/** One estimate option's line items. */
+function chOption_(estimateId, optionId) {
+  const e = String(estimateId || '').trim(), o = String(optionId || '').trim();
+  if (!e || !o) throw new Error('No estimate option picked.');
+  const r = hcp_('get', `/estimates/${encodeURIComponent(e)}/options/${encodeURIComponent(o)}/line_items?page=1&page_size=100`);
+  return { option_id: o, lines: chLines_(r).lines };
+}
+
 /* ───────────── setup & checks (run from the editor) ───────────── */
+
+/** Read-only check of everything the Customer History page reads, on a real customer. Change the name to test someone else. */
+function verifyHistory() {
+  const name = 'Test Customer';
+  const m = chSearch_(name);
+  console.log(`Search "${name}" → ${m.length} match(es): ` + m.map(c => `${c.display_name} (${c.addresses.length} address${c.addresses.length === 1 ? '' : 'es'})`).join(' | '));
+  if (!m.length) { console.log('⚠️ Nobody found. Put a real customer name in verifyHistory() and run it again.'); return; }
+  const h = chCustomer_(m[0].id), s = h.summary, usd = c => '$' + (c / 100).toFixed(2);
+  console.log(`✅ ${h.customer.display_name}: ${h.jobs.length} of ${h.total_jobs} job(s), ${h.estimates.length} estimate(s). Customer since ${h.customer.since || '?'}.`);
+  console.log(h.warnings.length ? '⚠️ ' + h.warnings.join(' | ') : '✅ Jobs and estimates came back filtered to this customer.');
+  console.log(`   Finished: ${s.done} · canceled: ${s.canceled} · billed ${usd(s.billed)} · still owed ${usd(s.due)} · last visit ${s.last || '—'} · next ${s.next || '—'}`);
+  h.jobs.slice(0, 5).forEach(j => console.log(`   #${j.number} ${j.when} [${j.state}] ${usd(j.total)}${j.due ? ' (owes ' + usd(j.due) + ')' : ''} — ${j.title} — ${j.techs.join(', ') || 'no tech'}${j.work ? ' — notes: ' + j.work.slice(0, 80) : ''}`));
+  if (h.jobs.length) {
+    const d = chJob_(h.jobs[0].id);
+    console.log(`✅ Job #${d.number} opened: ${d.lines.length} line item(s)${d.lines_ok ? '' : ' (❌ line items not readable)'}, ${d.notes.length} note(s), ${d.photos.length} photo(s)${d.photos_ok ? '' : ' (⚠️ HCP sent no attachments list)'}.`);
+  }
+  const eo = h.estimates.filter(e => e.options.length)[0];
+  if (eo) console.log(`✅ Estimate #${eo.number} [${eo.state}] option "${eo.options[0].name}": ${chOption_(eo.id, eo.options[0].id).lines.length} line item(s).`);
+  else console.log('   No estimates with options on this customer to open.');
+}
 
 function generateTechCodes() {
   const codes = techCodes_();

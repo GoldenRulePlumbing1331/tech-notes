@@ -104,14 +104,15 @@ window.GR = (function () {
 
   /* ---------- access-code card → init → app ---------- */
   /**
-   * o: { key, name, init (false = no server check), version, ready(r, meta), onOutdated(msg), onForget() }
+   * o: { key, name, init (false = no server check), version, ready(r, meta), onOutdated(msg), onForget(),
+   *      data (extra fields sent with init), cache (name for this page's saved init, when two pages share one script) }
    *    ready() gets the init reply; with no signal it gets the reply this phone saved last time (meta.cached) or {}.
    *    On a repeat visit ready() runs at once with the saved reply (meta.cached) and may run a second time
    *    (meta.refresh) when the server's answer arrives — so it must be safe to call twice and keep what the tech picked.
    * Returns { showCode(msg), showApp(), restart() }.
    */
   function boot(o) {
-    var CACHE_K = "grInit:" + o.key;
+    var CACHE_K = "grInit:" + (o.cache || o.key);
     function showCode(msg) { show($("codeCard"), true); show($("app"), false); say("codeMsg", msg, "err"); }
     function showApp() { show($("codeCard"), false); show($("app"), true); say("codeMsg", ""); }
     var run = 0;   // a reply to an earlier check (the code was changed or forgotten meanwhile) is ignored
@@ -126,7 +127,8 @@ window.GR = (function () {
       var early = !!(saved && saved.r && saved.c === c), was = early ? JSON.stringify(saved.r) : "";
       if (early) { showApp(); o.ready(saved.r, { offline: false, cached: true }); }
       else say("codeMsg", "Checking…", "busy");
-      api(o.key, "init", {}, { token: c, version: o.version, name: o.name }).then(function (r) {
+      var extra = {}; Object.keys(o.data || {}).forEach(function (k) { extra[k] = o.data[k]; });
+      api(o.key, "init", extra, { token: c, version: o.version, name: o.name }).then(function (r) {
         if (mine !== run) return;
         if (r.ok) {
           keep(c, quiet); put(CACHE_K, JSON.stringify({ at: Date.now(), c: c, r: r }));

@@ -28,7 +28,8 @@ function ok(name, cond, detail) { results.push((cond ? "PASS " : "FAIL ") + name
   ok("home: wrong code rejected", /valid/.test(await txt("#codeMsg")), await txt("#codeMsg"));
   await page.fill("#code", mock.GOOD); await page.click("#codeGo"); await page.waitForTimeout(500);
   ok("home: right code opens the tiles", await vis("#app") && /Hi, Kyle/.test(await txt("#who")));
-  for (const pg of ["new-job.html", "dispatch.html", "estimate.html", "order.html", "clock.html", "job-inputs.html", "board.html", "index.html"]) {
+  ok("home: Customer History tile in the Estimate tile's place", (await page.locator('#tiles a[href="history.html"]').count()) === 1 && (await page.locator('#tiles a[href="estimate.html"]').count()) === 0 && !/Not connected/.test(await txt('#tiles a[href="history.html"]')));
+  for (const pg of ["new-job.html", "dispatch.html", "estimate.html", "history.html", "order.html", "clock.html", "job-inputs.html", "board.html", "index.html"]) {
     await page.goto(U(pg)); await page.waitForTimeout(700);
     ok(pg + ": opens with the shared code", await vis("#app") && !(await vis("#codeCard")));
   }
@@ -78,6 +79,43 @@ function ok(name, cond, detail) { results.push((cond ? "PASS " : "FAIL ") + name
   await page.fill("#naZip", "19380");
   await page.click("#submit"); await page.waitForTimeout(500);
   ok("estimate: created", /Draft estimate/.test(await txt("#submitMsg")), await txt("#submitMsg"));
+
+  // ---- Customer History: search → pick → jobs, what was done, details on tap, estimates, saved for no signal ----
+  await page.goto(U("history.html")); await page.waitForTimeout(600);
+  const hInit = JSON.parse(log.filter(l => l.key === "estimate" && /"action":"init"/.test(l.body)).pop().body);
+  ok("history: signs in through the Estimate script as its own tool", hInit.tool === "history" && (await page.evaluate(() => !!localStorage.getItem("grInit:history"))));
+  await page.fill("#q", "nobody here"); await page.click("#go"); await page.waitForTimeout(400);
+  ok("history: no match says so", /Nobody found/.test(await txt("#findMsg")) && !(await vis("#cust")));
+  await page.fill("#q", "Doe"); await page.click("#go"); await page.waitForTimeout(400);
+  ok("history: several matches → pick list", (await page.locator("#matchList .match").count()) === 2 && !(await vis("#cust")));
+  await page.click("#matchList .match >> nth=0"); await page.waitForTimeout(500);
+  ok("history: customer card with phone, address, notes", await vis("#cust") && !(await vis("#find")) && /DoeJohn/.test(await txt("#custCard .cname")) && (await page.locator('#custCard a[href="tel:6105551212"]').count()) === 1 && /Dog in the yard/.test(await txt("#custCard .cnote")) && (await page.locator("#custCard a.crow[href*='maps']").count()) === 2);
+  ok("history: at-a-glance numbers", /33/.test(await txt("#stats .stat >> nth=0")) && /7,900\.00/.test(await txt("#stats")) && /350\.00/.test(await txt("#stats .stat.owe")) && /Next visit/.test(await txt("#warnMsg")));
+  ok("history: jobs newest first, 25 at a time", /Jobs \(35\)/.test(await txt("#jobsTitle")) && (await page.locator("#jobList .jb").count()) === 25 && /Annual water heater flush/.test(await txt("#jobList .jb >> nth=0")) && /10 older/.test(await txt("#moreJobs")));
+  ok("history: what was done shows on recent jobs without a tap", /frost-free hose bib/.test(await txt("#job-job_49370 .jw")) && /350\.00 owed/.test(await txt("#job-job_49370")));
+  await page.click("#job-job_49370 .jh"); await page.waitForTimeout(400);
+  ok("history: tap a job → line items, notes, photos, HCP link", /Hose Bib Replacement/.test(await txt("#job-job_49370 .jd")) && (await page.locator("#job-job_49370 .jph a").count()) === 2 && (await page.locator('#job-job_49370 .jd a.hcp[href$="job_49370"]').count()) === 1);
+  await page.click("#addrChips .chip >> nth=2"); await page.waitForTimeout(200);
+  ok("history: address chips narrow the list", /Jobs \(1 of 35\)/.test(await txt("#jobsTitle")) && /Sump pump install/.test(await txt("#jobList")));
+  await page.click("#job-job_46500 .jh"); await page.waitForTimeout(400);
+  ok("history: an older job loads its details on tap", /Zoeller/.test(await txt("#job-job_46500 .jd")) && /Installed a new 1\/2 HP sump pump/.test(await txt("#job-job_46500 .jd")));
+  await page.click("#addrChips .chip >> nth=0"); await page.fill("#filter", "water heater"); await page.waitForTimeout(400);
+  ok("history: filter box finds jobs by what they were", /Jobs \(2 of 35\)/.test(await txt("#jobsTitle")));
+  await page.fill("#filter", ""); await page.waitForTimeout(300);
+  await page.click("#moreJobs"); await page.waitForTimeout(200);
+  ok("history: show more", (await page.locator("#jobList .jb").count()) === 35 && !(await vis("#moreJobs")));
+  await page.click("#estList .opt button >> nth=0"); await page.waitForTimeout(400);
+  ok("history: estimate with options; tap an option for its lines", /Estimates \(1\)/.test(await txt("#estTitle")) && /2,100\.00/.test(await txt("#estList .opt >> nth=0")) && /50 gal water heater/.test(await txt("#estList .opt .lines")));
+  const hWrites = log.filter(l => l.key === "estimate" && /"tool":"history"/.test(l.body)).map(l => JSON.parse(l.body).action);
+  ok("history: only read calls were made", hWrites.every(a => ["init", "search", "customer", "job", "option"].indexOf(a) !== -1), hWrites.join(","));
+  await page.goBack(); await page.waitForTimeout(300);
+  ok("history: phone back button returns to the search, lookup listed", await vis("#find") && !(await vis("#cust")) && /history\.html/.test(page.url()) && /DoeJohn/.test(await txt("#recentList")));
+  state.online = false;
+  await page.click("#recentList .match >> nth=0"); await page.waitForTimeout(500);
+  ok("history: no signal → the saved copy still opens", await vis("#cust") && /No signal/.test(await txt("#custMsg")) && /Replace hose bib/.test(await txt("#jobList")));
+  state.online = true;
+  await page.goto(U("history.html?q=6105551212")); await page.waitForTimeout(900);
+  ok("history: a single match opens straight away (also from ?q=)", await vis("#cust") && /DoeJohn/.test(await txt("#custCard .cname")));
 
   // ---- Order (WIP): parse shows review, Place stays disabled ----
   await page.goto(U("order.html")); await page.waitForTimeout(600);

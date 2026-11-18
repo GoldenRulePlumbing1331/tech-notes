@@ -448,3 +448,35 @@ comparison of every page before/after (identical apart from the moving "now" lin
 **To ship:** commit the whole folder to the `tech-notes` repo (new files: `gr.css`, `gr-common.js`, `icon-192.png`,
 `icon-512.png`, `icon-maskable-512.png`). No Apps Script changes and nothing to redeploy. Phones pick up the new pages the
 first time each page is opened with signal; the service worker updates itself.
+
+## Customer History — took the Estimate tile's place (2026-11-18)
+
+`history.html` (tile "Customer History" on the home page, where "Estimate" was). Type or say a name, phone number
+or address → pick the customer → everything HCP has on them, read-only:
+
+- **Who they are**: display name, real name / company, phones (tap to call), email, every address (tap for Maps),
+  tags, the customer notes from HCP, customer since, lead source.
+- **At a glance**: jobs finished, how long since the last visit, billed on finished jobs, and what's still owed
+  (red when there's a balance). A scheduled future visit is called out.
+- **Jobs, newest first** (25 at a time): date, status, job name, job #, techs, total, "owed", tags. The six most
+  recent finished jobs show **what was done** (the Technician's Notes line) without a tap; tap any job for its line
+  items, notes, the photos already on it in HCP, and an Open-in-HCP link. Address chips appear when the customer has
+  jobs at more than one address; a filter box (over 6 jobs) finds jobs by words — "water heater", "sump", "2024".
+- **Estimates**: date, status (open / approved / declined / expired), each option with its total; tap an option for
+  its line items.
+- The last 6 customers looked up are kept on the phone ("Looked up on this phone") and open with no signal, marked
+  with when they were saved. The phone's back button goes back to the search. `history.html?q=6105551212` opens
+  straight to a search (one match opens the customer).
+
+**Backend**: no new Apps Script project. The page reads through **HCP Estimate** (`hcp_estimate.gs`, same HCP key,
+access codes and `/exec` URL — `config.js` is unchanged) and sends `tool: "history"` with every call; actions
+`init` (light), `search`, `customer`, `job`, `option`. All GETs — it can't create or change anything. Reads used:
+`/customers?q=`, `/customers/{id}`, `/jobs?customer_id=` (newest 300), `/estimates?customer_id=`,
+`/jobs/{id}/line_items`, `/jobs/{id}?expand[]=attachments`, `/estimates/{id}/options/{id}/line_items`. Jobs whose
+customer id doesn't match are dropped, so another customer's job can never show. Deploy = new version of the
+existing HCP Estimate deployment, then run **verifyHistory()** in the editor (read-only, uses "Test Customer").
+
+The Estimate page (`estimate.html`) and its actions are untouched and still open by direct link; only the home
+tile changed. To put it back, restore its entry in `TOOLS` in `home.html`.
+
+Checked with: 21 backend checks against a fake HCP and 17 page checks in `testbed/flows.js` (84 in all, 0 failures).

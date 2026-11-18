@@ -8,7 +8,7 @@
  * Nothing from script.google.com is ever cached — those are the live calls.
  * Bump CACHE when a file is removed or renamed; ordinary edits don't need it. */
 var CACHE = "gr-tools-v4";
-var ASSETS = ["./", "home.html", "index.html", "new-job.html", "dispatch.html", "estimate.html", "order.html", "clock.html", "job-inputs.html", "board.html",
+var ASSETS = ["./", "home.html", "index.html", "new-job.html", "dispatch.html", "estimate.html", "history.html", "order.html", "clock.html", "job-inputs.html", "board.html",
               "config.js", "gr-common.js", "gr.css", "manifest.webmanifest", "icon.svg", "icon-192.png"];
 
 // One file changed → fetch them all again so a page never runs with a mix of old and new files, then tell open pages.
