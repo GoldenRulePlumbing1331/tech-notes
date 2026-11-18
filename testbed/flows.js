@@ -117,6 +117,11 @@ function ok(name, cond, detail) { results.push((cond ? "PASS " : "FAIL ") + name
   await page.goto(U("history.html?q=6105551212")); await page.waitForTimeout(900);
   ok("history: a single match opens straight away (also from ?q=)", await vis("#cust") && /DoeJohn/.test(await txt("#custCard .cname")));
 
+  await page.goto(U("history.html?q=Doe&pick=DoeJane")); await page.waitForTimeout(900);
+  ok("history: from a Board job with a shared phone, the job's own customer is asked for", JSON.parse(log.filter(l => /"action":"customer"/.test(l.body)).pop().body).customer_id === "c2");
+  await page.goto(U("history.html?q=Doe&pick=SomeoneElse")); await page.waitForTimeout(900);
+  ok("history: no clear pick → the list, nothing opened", (await page.locator("#matchList .match").count()) === 2 && !(await vis("#cust")));
+
   // ---- Order (WIP): parse shows review, Place stays disabled ----
   await page.goto(U("order.html")); await page.waitForTimeout(600);
   await page.fill("#heard", "Job 49370 pickup two 3/4 PEX elbows"); await page.click("#build"); await page.waitForTimeout(600);
@@ -145,6 +150,7 @@ function ok(name, cond, detail) { results.push((cond ? "PASS " : "FAIL ") + name
   ok("board: columns + job block", (await page.locator("#grid .head").count()) >= 2 && (await page.locator("#grid .blk.job").count()) === 1);
   await page.click("#grid .blk.job"); await page.waitForTimeout(300);
   ok("board: job sheet with field tools", await vis("#sheet") && (await page.locator("#sheet .fb").count()) === 3);
+  ok("board: job sheet links to the customer's history", (await page.locator('#sheet .acts a[href="history.html?q=6105551212&pick=CustomerTest"]').count()) === 1 && /Customer history/.test(await txt("#sheet .acts")));
   await page.fill("#sheet textarea", "Gate code 1234"); await page.click("#sheet .frow .btn"); await page.waitForTimeout(1200);
   const noteCall = log.filter(l => l.key === "clock" && /"action":"note"/.test(l.body)).pop();
   ok("board: private note sent through the clock script", !!noteCall && /Gate code 1234/.test(noteCall.body));
