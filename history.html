@@ -201,6 +201,9 @@
     while (list.length) { try { localStorage.setItem(SAVED, JSON.stringify(list)); return; } catch (e) { list.pop(); } }
   }
 
+  var busy = false, PICK = "";   // set before boot: a phone that has opened this page before runs ready() straight away
+  function norm(n) { return String(n || "").toLowerCase().replace(/[^a-z0-9]/g, ""); }
+
   // ---------- access code ----------
   var B = GR.boot({
     key: "estimate", cache: "history", name: "Customer History", data: { tool: "history" },
@@ -208,7 +211,7 @@
       renderRecent();
       if (meta && meta.refresh) return;
       var qs = new URLSearchParams(location.search), q = (qs.get("q") || "").trim();
-      if (q && !S.cust) { $("q").value = q; search(); }
+      if (q && !S.cust) { PICK = norm(qs.get("pick") || ""); $("q").value = q; search(); }
     }
   });
 
@@ -226,7 +229,6 @@
   $("go").onclick = function () { GR.stopAll(search); };
   $("q").onkeydown = function (e) { if (e.key === "Enter") { e.preventDefault(); $("q").blur(); GR.stopAll(search); } };
 
-  var busy = false;
   function search() {
     var q = $("q").value.trim();
     if (busy) return;
@@ -240,6 +242,12 @@
       if (!S.matches.length) { say("findMsg", "Nobody found for “" + q + "”. Try the phone number, or just the last name or house number.", "warn"); return; }
       say("findMsg", "");
       if (S.matches.length === 1) { openCustomer(S.matches[0].id, S.matches[0].display_name); return; }
+      // Came from a job on the Board: when the phone is on several accounts, open the one the job belongs to.
+      var want = PICK; PICK = "";
+      if (want) {
+        var same = S.matches.filter(function (c) { return [c.display_name, (c.last_name || "") + (c.first_name || ""), (c.first_name || "") + (c.last_name || ""), c.company].some(function (n) { return n && norm(n) === want; }); });
+        if (same.length === 1) { renderMatches(); openCustomer(same[0].id, same[0].display_name); return; }
+      }
       renderMatches();
     });
   }

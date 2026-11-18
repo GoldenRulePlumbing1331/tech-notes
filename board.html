@@ -1346,6 +1346,9 @@
     var acts = el("div", "acts");
     if (it.url) { var o = link(it.url, "Open in HCP", true); o.className = "btn"; acts.appendChild(o); }
     if (it.kind === "job" && it.number) { var mv = link("dispatch.html?job=" + encodeURIComponent(it.number), "Move / reassign"); mv.className = "btn pri"; acts.appendChild(mv); }
+    // Customer History: looks the customer up by phone (else name, else address); "pick" settles it when a phone is shared by several accounts.
+    var hq = String(it.phone || "").replace(/\D/g, ""); if (hq.length < 7) hq = it.full_name || it.company || it.address || "";
+    if (it.kind !== "event" && hq) { var hl = link("history.html?q=" + encodeURIComponent(hq) + "&pick=" + encodeURIComponent(it.customer || ""), "Customer history"); hl.className = "btn full"; acts.appendChild(hl); }
     if (it.date && it.date !== S.date) { var gd = el("button", "btn full", "Show " + dayLabel(it.date) + " on the board"); gd.onclick = function () { go(it.date); }; acts.appendChild(gd); }
     if (back) { var bk = el("button", "btn", "‹ Back to list"); bk.onclick = back; acts.appendChild(bk); }
     var cl = el("button", "btn" + (back ? "" : " full"), "Close"); cl.onclick = closeSheet; acts.appendChild(cl);
