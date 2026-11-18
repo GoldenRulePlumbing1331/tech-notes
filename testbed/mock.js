@@ -22,6 +22,51 @@ function job(n) {
     when: "Fri Oct 30, 9:00 AM–11:00 AM", employee_ids: ["e1"], employees: ["Kyle Hunt"], appointments: [], multi_day: false, tz: "America/New_York" };
 }
 
+/* Customer History (history.html): tool "history" on the Estimate endpoint. Money is cents, like the real script. */
+const H_CUST = { id: "c1", display_name: "DoeJohn", first_name: "John", last_name: "Doe", company: "", email: "john@example.com",
+  phones: [{ label: "Mobile", number: "6105551212", text: "(610) 555-1212" }],
+  addresses: [{ id: "a1", type: "service", street: "12 Main St", city: "West Chester", state: "PA", zip: "19380", text: "12 Main St, West Chester, PA 19380" },
+              { id: "a2", type: "service", street: "40 Lake Rd", city: "Exton", state: "PA", zip: "19341", text: "40 Lake Rd, Exton, PA 19341" }] };
+function hJob(n, daysAgo, state, title, extra) {
+  const ms = Date.now() - daysAgo * 86400000;
+  return Object.assign({ id: "job_" + n, number: String(n), title, ms, dated: true, when: new Date(ms).toLocaleDateString("en-US", { weekday: "short", month: "short", day: "numeric", year: "numeric", timeZone: "America/New_York" }),
+    state, address_id: "a1", address: "12 Main St, West Chester", techs: ["Kyle Hunt"], total: 35000, due: 0, tags: [], notes: [], url: "https://pro.housecallpro.com/app/jobs/job_" + n }, extra || {});
+}
+function history(p) {
+  switch (p.action) {
+    case "init": return { ok: true, who: "Kyle Hunt", today: TODAY };
+    case "search": {
+      const q = String(p.q || "").toLowerCase();
+      if (/nobody/.test(q)) return { ok: true, matches: [] };
+      const two = Object.assign({}, H_CUST, { id: "c2", display_name: "DoeJane", first_name: "Jane", addresses: [H_CUST.addresses[1]], score: 3 });
+      return { ok: true, matches: /doe$/.test(q) ? [Object.assign({ score: 4 }, H_CUST), two] : [Object.assign({ score: 5 }, H_CUST)] };
+    }
+    case "customer": {
+      if (p.customer_id !== "c1") return { ok: false, error: "HCP couldn’t find that customer. Search again." };
+      const jobs = [
+        hJob(49900, -3, "scheduled", "Annual water heater flush", { total: 18500, due: 18500 }),
+        hJob(49370, 20, "done", "Replace hose bib", { total: 35000, due: 35000, tags: ["Outdoor"], work: "Replaced the frost-free hose bib on the back wall. Tested, no leaks.", lines: [{ name: "Hose Bib Replacement", description: "12in frost-free", qty: 1, price: 32500, amount: 32500, discount: false }, { name: "Shutoff Valve - 1/2in", description: "", qty: 1, price: 2500, amount: 2500, discount: false }] }),
+        hJob(48110, 200, "done", "50 Gallon, Natural, Atmospheric (BW)", { total: 210000, tags: ["Water Heater"], techs: ["Mike Smith", "Dave Jones"], work: "Swapped the leaking 50 gal gas water heater. New expansion tank." }),
+        hJob(47002, 420, "canceled", "Kitchen Sink Clog", { total: 0 }),
+        hJob(46500, 800, "done", "Sump pump install", { total: 95000, address_id: "a2", address: "40 Lake Rd, Exton", tags: ["Sump"], notes: ["Gate code 4411"] }),
+      ];
+      for (let i = 0; i < 30; i++) jobs.push(hJob(40000 - i, 900 + i * 30, "done", "Service call " + (i + 1), { total: 15000 }));
+      return { ok: true, customer: Object.assign({ tags: ["Repeat"], notes: "Dog in the yard. Use the side door.", lead_source: "Google", since: "Mar 2019", url: "https://pro.housecallpro.com/app/customers/c1" }, H_CUST),
+        summary: { jobs: 34, done: 33, canceled: 1, billed: 790000, due: 35000, last: jobs[1].when, last_ms: jobs[1].ms, next: jobs[0].when, first_year: "2019", open_estimates: 1 },
+        jobs, estimates: [{ id: "est_1", number: "2224", ms: Date.now() - 30 * 86400000, when: "Tue Oct 20, 2026", state: "open", address_id: "a1", address: "12 Main St, West Chester", techs: ["Kyle Hunt"],
+          options: [{ id: "o1", name: "Option 1", number: "2224-1", total: 210000, approval: "awaiting response" }, { id: "o2", name: "Tankless", number: "2224-2", total: 480000, approval: "awaiting response" }], url: "https://pro.housecallpro.com/app/estimates/est_1" }],
+        total_jobs: 35, truncated: false, warnings: [], loaded_at: "Nov 18, 11:20 AM" };
+    }
+    case "job": return { ok: true, job_id: p.job_id, number: p.job_id.replace("job_", ""), lines_ok: true,
+      lines: p.job_id === "job_49370" ? [{ name: "Hose Bib Replacement", description: "12in frost-free", qty: 1, price: 32500, amount: 32500, discount: false }, { name: "Shutoff Valve - 1/2in", description: "", qty: 2, price: 1250, amount: 2500, discount: false }]
+        : [{ name: "Sump Pump Installation", description: "1/2 HP Zoeller, new check valve", qty: 1, price: 95000, amount: 95000, discount: false }],
+      work: p.job_id === "job_46500" ? "Installed a new 1/2 HP sump pump and check valve in the basement pit." : "", notes: ["Gate code 4411"], photos_ok: true,
+      photos: [{ id: "p1", name: "before.jpg", url: "data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///ywAAAAAAQABAAACAUwAOw==", image: true }, { id: "p2", name: "permit.pdf", url: "https://example.com/permit.pdf", image: false }] };
+    case "option": return { ok: true, option_id: p.option_id, lines: [{ name: "50 gal water heater", description: "Replace the 50 gallon gas water heater.", qty: 1, price: 210000, amount: 210000, discount: false }] };
+  }
+  return { ok: false, error: "Unknown action." };
+}
+
 const handlers = {
   notes(p) { return { text: p.token === GOOD ? "✅ Job " + p.job + " updated: Technician's Notes set." : "❌ That access code isn’t valid." }; },
   dispatch(p) {
@@ -78,6 +123,7 @@ const handlers = {
   },
   estimate(p) {
     if (p.token !== GOOD) return { ok: false, error: "That access code isn’t valid." };
+    if (p.tool === "history") return history(p);   // the Customer History page reads through the Estimate script
     switch (p.action) {
       case "init": return { ok: true, who: "Kyle Hunt", me: "e1", employees: EMPS, today: TODAY, job_types: [{ id: "t1", name: "Service" }], business_units: [{ id: "b1", name: "Plumbing" }], usual_unit: { t1: "b1" }, price_book: true };
       case "parse": return { ok: true, fields: { first_name: "John", last_name: "Doe", street: "12 Main St", city: "West Chester", state: "PA" }, estimate: { message: "", options: [{ name: "Option 1", line_items: [{ name: "50 gal water heater", description: "Replace the 50 gallon gas water heater.", quantity: 1, unit_price: 210000, unit_cost: 90000, candidates: [] }] }] }, matches: [] };

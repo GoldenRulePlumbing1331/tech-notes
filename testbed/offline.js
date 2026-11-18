@@ -8,7 +8,7 @@ const path = require("path");
 const mock = require("./mock");
 
 const ROOT = process.argv[2], OUT = process.argv[3], PORT = 8766;
-const PAGES = ["home.html", "index.html", "new-job.html", "dispatch.html", "estimate.html", "order.html", "clock.html", "board.html", "job-inputs.html"];
+const PAGES = ["home.html", "index.html", "new-job.html", "dispatch.html", "estimate.html", "history.html", "order.html", "clock.html", "board.html", "job-inputs.html"];
 
 async function appState(page) {
   return page.evaluate(() => {

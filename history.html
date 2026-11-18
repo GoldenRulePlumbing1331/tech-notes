@@ -1,0 +1,521 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#14365c">
+<meta name="robots" content="noindex">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="Golden Rule">
+<link rel="manifest" href="manifest.webmanifest">
+<title>Customer History</title>
+<link rel="icon" href="icon.svg" type="image/svg+xml">
+<link rel="apple-touch-icon" href="icon-192.png">
+<link rel="stylesheet" href="gr.css">
+<style>
+  /* search */
+  .srow { display: flex; gap: 8px; }
+  .srow input { flex: 1; min-width: 0; font-size: 18px; }
+  .micb { flex: none; width: 52px; border: 0; border-radius: 10px; background: var(--brand); color: #fff; display: grid; place-items: center; cursor: pointer; }
+  .micb svg { width: 24px; height: 24px; }
+  .micb.rec { background: var(--rec); animation: pulse 1.2s infinite; }
+  .match small { display: block; font-size: 13px; color: var(--muted); margin-top: 2px; }
+  /* customer */
+  .cname { font-size: 23px; font-weight: 800; line-height: 1.2; overflow-wrap: anywhere; }
+  .csub { color: var(--muted); font-size: 15px; margin-top: 2px; }
+  .crow { display: flex; align-items: baseline; gap: 8px; padding: 10px 0; border-top: 1px solid var(--line); color: var(--ink); text-decoration: none; font-weight: 600; overflow-wrap: anywhere; }
+  .crow:first-of-type { margin-top: 10px; }
+  .crow i { font-style: normal; flex: none; width: 22px; text-align: center; }
+  .crow em { font-style: normal; font-weight: 500; font-size: 13px; color: var(--muted); margin-left: auto; flex: none; padding-left: 8px; }
+  a.crow span { color: var(--brand); }
+  .tags { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
+  .tags span { font-size: 12px; font-weight: 700; color: var(--muted); background: var(--soft); border-radius: 6px; padding: 2px 7px; }
+  .cnote { margin-top: 10px; background: var(--warn-bg); color: var(--warn-ink); border-radius: 10px; padding: 10px 12px; font-size: 15px; white-space: pre-wrap; overflow-wrap: anywhere; }
+  .cnote b { display: block; font-size: 12px; text-transform: uppercase; letter-spacing: .05em; margin-bottom: 2px; }
+  .cmeta { font-size: 13px; color: var(--muted); margin-top: 10px; }
+  .stats { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-bottom: 14px; }
+  .stat { background: var(--card); border: 1px solid var(--line); border-radius: 12px; padding: 10px 12px; min-width: 0; }
+  .stat b { display: block; font-size: 19px; line-height: 1.25; overflow-wrap: anywhere; }
+  .stat span { display: block; font-size: 13px; color: var(--muted); }
+  .stat.owe { background: var(--err-bg); border-color: transparent; }
+  .stat.owe b, .stat.owe span { color: var(--err-ink); }
+  h2 { margin: 18px 0 8px; }
+  .chips { display: flex; gap: 6px; overflow-x: auto; padding: 0 0 8px; scrollbar-width: none; -webkit-overflow-scrolling: touch; }
+  .chips::-webkit-scrollbar { display: none; }
+  .chip { flex: none; height: 36px; padding: 0 12px; border-radius: 18px; border: 1px solid var(--line); background: var(--card); color: var(--ink); font: inherit; font-size: 14px; font-weight: 600; cursor: pointer; white-space: nowrap; }
+  .chip em { font-style: normal; color: var(--muted); font-weight: 600; margin-left: 4px; }
+  .chip.on { background: var(--brand); color: #fff; border-color: var(--brand); }
+  .chip.on em { color: #cfd8e6; }
+  #filter { margin-bottom: 8px; font-size: 16px; padding: 9px 12px; }
+  /* job + estimate rows */
+  .jb { background: var(--card); border: 1px solid var(--line); border-radius: 14px; margin-bottom: 8px; overflow: hidden; }
+  .jh { display: block; width: 100%; text-align: left; font: inherit; color: var(--ink); background: none; border: 0; padding: 12px 14px; cursor: pointer; }
+  .jh:active { background: var(--soft); }
+  .jt { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+  .jt b { font-size: 16px; }
+  .jt small { color: var(--muted); font-size: 13px; }
+  .pill { font-size: 12px; font-weight: 700; border-radius: 6px; padding: 1px 7px; margin-left: auto; flex: none; }
+  .pill.done, .pill.approved { background: var(--ok-bg); color: var(--ok-ink); }
+  .pill.scheduled, .pill.open { background: var(--net-bg); color: var(--net-ink); }
+  .pill.working { background: var(--warn-bg); color: var(--warn-ink); }
+  .pill.unscheduled, .pill.canceled, .pill.declined, .pill.expired { background: var(--soft); color: var(--muted); }
+  .jn { font-weight: 650; margin-top: 3px; overflow-wrap: anywhere; }
+  .jb.canceled .jn { text-decoration: line-through; color: var(--muted); }
+  .jm { font-size: 14px; color: var(--muted); margin-top: 2px; overflow-wrap: anywhere; }
+  .jm .owe { color: var(--err-ink); font-weight: 700; }
+  .jw { font-size: 15px; margin-top: 6px; padding-left: 10px; border-left: 3px solid var(--accent); white-space: pre-wrap; overflow-wrap: anywhere;
+        display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; }
+  .jb.openx .jw { display: none; }
+  .jd { border-top: 1px solid var(--line); padding: 12px 14px; background: var(--soft); }
+  .jd h3 { font-size: 12px; text-transform: uppercase; letter-spacing: .05em; color: var(--muted); margin: 12px 0 4px; }
+  .jd h3:first-child { margin-top: 0; }
+  .jd p { margin: 0; white-space: pre-wrap; overflow-wrap: anywhere; font-size: 15px; }
+  .li { display: flex; gap: 10px; align-items: baseline; padding: 5px 0; border-top: 1px solid var(--line); font-size: 15px; }
+  .li:first-of-type { border-top: 0; }
+  .li div { flex: 1; min-width: 0; overflow-wrap: anywhere; }
+  .li small { display: block; color: var(--muted); font-size: 13px; white-space: pre-wrap; }
+  .li b { flex: none; font-weight: 650; }
+  .jph { display: flex; gap: 8px; overflow-x: auto; padding: 2px 0 6px; -webkit-overflow-scrolling: touch; }
+  .jph a { flex: 0 0 auto; width: 84px; height: 84px; border-radius: 10px; border: 1px solid var(--line); background: var(--card); overflow: hidden; display: flex; align-items: center; justify-content: center; text-decoration: none; color: var(--muted); font-size: 12px; font-weight: 700; text-align: center; }
+  .jph a img { width: 100%; height: 100%; object-fit: cover; display: block; }
+  .jph a.file { padding: 6px; word-break: break-word; line-height: 1.2; }
+  .jd .hcp { display: inline-block; margin-top: 12px; font-size: 15px; font-weight: 600; color: var(--brand); }
+  .opt { background: var(--card); border: 1px solid var(--line); border-radius: 10px; margin-top: 6px; overflow: hidden; }
+  .opt button { display: block; width: 100%; text-align: left; font: inherit; font-weight: 600; color: var(--ink); background: none; border: 0; padding: 9px 11px; cursor: pointer; }
+  .opt button span { display: block; font-size: 13px; font-weight: 500; color: var(--muted); }
+  .opt .lines, .opt .none { padding: 0 11px 8px; }
+  .none { color: var(--muted); font-size: 15px; padding: 4px 2px 10px; }
+  .acts { display: flex; gap: 8px; margin-top: 6px; }
+  .acts > * { flex: 1; margin-top: 0; text-align: center; text-decoration: none; }
+  @media (prefers-color-scheme: dark) { a.crow span, .jd .hcp { color: var(--accent); } }
+</style>
+</head>
+<body>
+<header>
+  <a class="dot" href="home.html" aria-label="All tools">GR</a>
+  <h1>Customer History</h1>
+  <a class="nav" href="home.html">All tools →</a>
+</header>
+
+<div class="card hidden" id="codeCard">
+  <label for="code">Your access code</label>
+  <input id="code" inputmode="numeric" autocomplete="off" placeholder="8-digit code">
+  <button class="btn" id="codeGo">Continue</button>
+  <div class="status" id="codeMsg"></div>
+</div>
+
+<div id="app" class="hidden">
+
+<!-- 1. Find the customer -->
+<div id="find">
+  <div class="card">
+    <label for="q">Find a customer</label>
+    <div class="srow">
+      <input id="q" type="search" placeholder="Name, phone, or address" autocomplete="off" autocapitalize="words" enterkeyhint="search">
+      <button class="micb" id="mic" type="button" aria-label="Say it">
+        <svg viewBox="0 0 24 24" fill="currentColor"><path d="M12 15a3 3 0 0 0 3-3V6a3 3 0 0 0-6 0v6a3 3 0 0 0 3 3zm5-3a5 5 0 0 1-10 0H5a7 7 0 0 0 6 6.92V21h2v-2.08A7 7 0 0 0 19 12h-2z"/></svg>
+      </button>
+    </div>
+    <button class="btn go" id="go">Look up</button>
+    <div class="status" id="findMsg"></div>
+    <div class="hint">Read-only — nothing here changes anything in HCP.</div>
+  </div>
+
+  <div id="matchWrap" class="hidden">
+    <h2 id="matchTitle">Pick the customer</h2>
+    <div id="matchList"></div>
+  </div>
+
+  <div id="recentWrap" class="hidden">
+    <h2>Looked up on this phone</h2>
+    <div id="recentList"></div>
+  </div>
+</div>
+
+<!-- 2. The customer -->
+<div id="cust" class="hidden">
+  <div class="status" id="custMsg"></div>
+  <div class="card" id="custCard"></div>
+  <div class="stats" id="stats"></div>
+  <div class="status" id="warnMsg"></div>
+
+  <h2 id="jobsTitle">Jobs</h2>
+  <div class="chips hidden" id="addrChips"></div>
+  <input id="filter" class="hidden" type="search" placeholder="Filter jobs — water heater, sump, 2024…" autocomplete="off" enterkeyhint="done">
+  <div id="jobList"></div>
+  <button class="btn hidden" id="moreJobs"></button>
+
+  <h2 id="estTitle">Estimates</h2>
+  <div id="estList"></div>
+
+  <div class="acts">
+    <a class="btn" id="hcpLink" target="_blank" rel="noopener">Open in HCP</a>
+    <button class="btn" id="refresh" type="button">⟳ Refresh</button>
+  </div>
+  <button class="btn" id="back" type="button">Look up someone else</button>
+  <div class="hint" id="asOf"></div>
+</div>
+
+</div>
+
+<footer><a href="#" id="forget">Not you? Change code</a></footer>
+
+<script src="config.js"></script>
+<script src="gr-common.js"></script>
+<script>
+(function () {
+  // Shared helpers (access code, server calls, speech, "no signal" strip) live in gr-common.js.
+  // This page reads through the Estimate script (same key, codes and URL); every call carries tool: "history".
+  var $ = GR.$, show = GR.show, say = GR.say, el = GR.el;
+  var SAVED = "grHistory", KEEP = 6, KEEP_JOBS = 80, PAGE = 25;
+
+  var S = { matches: [], cust: null, data: null, addr: "", text: "", shown: PAGE, open: {}, detail: {}, optLines: {}, load: 0, pushed: false };
+
+  var base = GR.client("estimate", { name: "Customer History", onAuthFail: function (msg) { B.showCode(msg); } });
+  function api(action, data) { data = data || {}; data.tool = "history"; return base(action, data); }
+
+  // ---------- small helpers ----------
+  function money(c) { return "$" + (Number(c || 0) / 100).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 }); }
+  function ago(ms) {
+    if (!ms) return "";
+    var d = Math.round((Date.now() - ms) / 86400000);
+    if (d < -1) return "in " + (-d < 14 ? -d + " days" : -d < 60 ? Math.round(-d / 7) + " wk" : Math.round(-d / 30) + " mo");
+    if (d <= 0) return d === 0 ? "today" : "tomorrow";
+    if (d === 1) return "yesterday";
+    if (d < 14) return d + " days ago";
+    if (d < 60) return Math.round(d / 7) + " wk ago";
+    if (d < 365) return Math.round(d / 30) + " mo ago";
+    var y = d / 365; return (y < 2 ? Math.round(y * 10) / 10 : Math.round(y)) + " yr ago";
+  }
+  var LABEL = { done: "Done", scheduled: "Scheduled", working: "In progress", unscheduled: "Needs scheduling", canceled: "Canceled",
+                open: "Open", approved: "Approved", declined: "Declined", expired: "Expired" };
+  function pill(state) { return el("span", "pill " + state, LABEL[state] || state); }
+  function link(cls, href, text) { var a = el("a", cls, text); a.href = href; a.target = "_blank"; a.rel = "noopener"; return a; }
+  function saved() { var r = GR.getJ(SAVED, []); return Array.isArray(r) ? r : []; }
+  function remember(d) {
+    var slim = JSON.parse(JSON.stringify(d)); slim.jobs = slim.jobs.slice(0, KEEP_JOBS);
+    var c = d.customer, list = saved().filter(function (x) { return x.id !== c.id; });
+    list.unshift({ id: c.id, name: c.display_name, sub: (c.addresses[0] || {}).text || (c.phones[0] || {}).text || "", at: Date.now(), data: slim });
+    list = list.slice(0, KEEP);
+    // Too big for the phone's storage? Keep fewer rather than none.
+    while (list.length) { try { localStorage.setItem(SAVED, JSON.stringify(list)); return; } catch (e) { list.pop(); } }
+  }
+
+  // ---------- access code ----------
+  var B = GR.boot({
+    key: "estimate", cache: "history", name: "Customer History", data: { tool: "history" },
+    ready: function (r, meta) {
+      renderRecent();
+      if (meta && meta.refresh) return;
+      var qs = new URLSearchParams(location.search), q = (qs.get("q") || "").trim();
+      if (q && !S.cust) { $("q").value = q; search(); }
+    }
+  });
+
+  // ---------- step 1: search ----------
+  if (!GR.speech) show($("mic"), false);
+  $("mic").onclick = function () {
+    var heard = false;
+    GR.listen($("mic"), {
+      continuous: false,
+      onText: function (b, fin, interim) { heard = true; $("q").value = (fin + interim).trim(); },
+      onError: function (text, kind) { say("findMsg", text, kind); },
+      done: function () { if (heard && $("q").value.trim()) search(); }   // said it → look it up, no second tap
+    });
+  };
+  $("go").onclick = function () { GR.stopAll(search); };
+  $("q").onkeydown = function (e) { if (e.key === "Enter") { e.preventDefault(); $("q").blur(); GR.stopAll(search); } };
+
+  var busy = false;
+  function search() {
+    var q = $("q").value.trim();
+    if (busy) return;
+    if (q.length < 2) { say("findMsg", "Type or say a name, phone number, or address.", "err"); return; }
+    busy = true; $("go").disabled = true;
+    say("findMsg", "Searching HCP…", "busy"); show($("matchWrap"), false);
+    api("search", { q: q }).then(function (r) {
+      busy = false; $("go").disabled = false;
+      if (!r.ok) { say("findMsg", r.net ? "📶 No signal — customers you looked up before still open below." : "❌ " + r.error, r.net ? "wait" : "err"); return; }
+      S.matches = r.matches || [];
+      if (!S.matches.length) { say("findMsg", "Nobody found for “" + q + "”. Try the phone number, or just the last name or house number.", "warn"); return; }
+      say("findMsg", "");
+      if (S.matches.length === 1) { openCustomer(S.matches[0].id, S.matches[0].display_name); return; }
+      renderMatches();
+    });
+  }
+  function matchButton(c) {
+    var b = el("button", "match"); b.type = "button";
+    b.appendChild(el("b", null, c.display_name));
+    var real = [c.first_name, c.last_name].filter(Boolean).join(" "), sub = [];
+    if (real && real !== c.display_name) sub.push(real);
+    if (c.company && c.company !== c.display_name) sub.push(c.company);
+    if (c.phones.length) sub.push(c.phones[0].text);
+    b.appendChild(el("span", null, sub.join(" · ") || "No phone on file"));
+    b.appendChild(el("span", null, c.addresses.length ? c.addresses[0].text + (c.addresses.length > 1 ? "  (+" + (c.addresses.length - 1) + " more)" : "") : "No address on file"));
+    b.onclick = function () { openCustomer(c.id, c.display_name); };
+    return b;
+  }
+  function renderMatches() {
+    var box = $("matchList"); box.innerHTML = "";
+    S.matches.forEach(function (c) { box.appendChild(matchButton(c)); });
+    $("matchTitle").textContent = S.matches.length === 1 ? "Customer" : "Pick the customer (" + S.matches.length + ")";
+    show($("matchWrap"), S.matches.length > 0);
+  }
+  function renderRecent() {
+    var list = saved(), box = $("recentList"); box.innerHTML = "";
+    list.forEach(function (x) {
+      var b = el("button", "match"); b.type = "button";
+      b.appendChild(el("b", null, x.name)); if (x.sub) b.appendChild(el("span", null, x.sub));
+      b.appendChild(el("small", null, "Looked up " + new Date(x.at).toLocaleString([], { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" })));
+      b.onclick = function () { openCustomer(x.id, x.name); };
+      box.appendChild(b);
+    });
+    show($("recentWrap"), list.length > 0);
+  }
+
+  // ---------- step 2: the customer ----------
+  function view(which) {
+    show($("find"), which === "find"); show($("cust"), which === "cust");
+    window.scrollTo(0, 0);
+  }
+  function openCustomer(id, name) {
+    var mine = ++S.load, old = saved().filter(function (x) { return x.id === id; })[0];
+    S.cust = id; S.addr = ""; S.text = ""; S.shown = PAGE; S.open = {}; S.detail = {}; S.optLines = {}; $("filter").value = "";
+    if (!S.pushed) { try { history.pushState({ gr: "cust" }, ""); S.pushed = true; } catch (e) {} }
+    view("cust");
+    // A customer looked up before shows straight away from the phone's copy; the fresh pull replaces it.
+    if (old) { S.data = old.data; render(); say("custMsg", "Checking HCP for anything new…", "busy"); }
+    else { S.data = null; blank(name); say("custMsg", "Pulling up " + (name || "the customer") + "…", "busy"); }
+    api("customer", { customer_id: id }).then(function (r) {
+      if (mine !== S.load) return;
+      if (r.ok) { S.data = r; remember(r); renderRecent(); say("custMsg", ""); render(); return; }
+      if (old) say("custMsg", (r.net ? "📶 No signal" : "❌ " + r.error) + " — showing what this phone saved " + new Date(old.at).toLocaleString([], { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" }) + ".", "wait");
+      else say("custMsg", r.net ? "📶 No signal — this customer hasn't been looked up on this phone before. Try again when you're back in range." : "❌ " + r.error, r.net ? "wait" : "err");
+    });
+  }
+  function closeCustomer() {
+    S.load++; S.cust = null; S.data = null; S.pushed = false;
+    view("find"); renderRecent();
+  }
+  // The phone's back button goes back to the search, not out of the tool.
+  window.addEventListener("popstate", function () { if (S.cust) closeCustomer(); });
+  $("back").onclick = function () { if (S.pushed) { try { history.back(); return; } catch (e) {} } closeCustomer(); };
+  $("refresh").onclick = function () { if (S.cust) openCustomer(S.cust, S.data && S.data.customer.display_name); };
+
+  function blank(name) {
+    $("custCard").innerHTML = ""; $("custCard").appendChild(el("div", "cname", name || "Customer"));
+    ["stats", "jobList", "estList", "addrChips"].forEach(function (id) { $(id).innerHTML = ""; });
+    ["jobsTitle", "estTitle", "filter", "moreJobs", "addrChips", "hcpLink", "refresh"].forEach(function (id) { show($(id), false); });
+    say("warnMsg", ""); $("asOf").textContent = "";
+  }
+
+  function render() {
+    var d = S.data; if (!d) return;
+    var c = d.customer, s = d.summary || {}, card = $("custCard");
+    ["jobsTitle", "estTitle", "hcpLink", "refresh"].forEach(function (id) { show($(id), true); });
+
+    // who they are
+    card.innerHTML = "";
+    card.appendChild(el("div", "cname", c.display_name));
+    var real = [c.first_name, c.last_name].filter(Boolean).join(" "), sub = [];
+    if (real && real !== c.display_name) sub.push(real);
+    if (c.company && c.company !== c.display_name) sub.push(c.company);
+    if (sub.length) card.appendChild(el("div", "csub", sub.join(" · ")));
+    if (c.tags && c.tags.length) { var tg = el("div", "tags"); c.tags.forEach(function (t) { tg.appendChild(el("span", null, t)); }); card.appendChild(tg); }
+    if (c.notes) { var n = el("div", "cnote"); n.appendChild(el("b", null, "Customer notes")); n.appendChild(document.createTextNode(c.notes)); card.appendChild(n); }
+    c.phones.forEach(function (p) {
+      var a = el("a", "crow"); a.href = "tel:" + p.number;
+      a.appendChild(el("i", null, "📞")); a.appendChild(el("span", null, p.text)); a.appendChild(el("em", null, p.label)); card.appendChild(a);
+    });
+    if (!c.phones.length) { var np = el("div", "crow"); np.appendChild(el("i", null, "📞")); np.appendChild(document.createTextNode("No phone on file")); card.appendChild(np); }
+    if (c.email) { var m = el("a", "crow"); m.href = "mailto:" + c.email; m.appendChild(el("i", null, "✉")); m.appendChild(el("span", null, c.email)); card.appendChild(m); }
+    c.addresses.forEach(function (a) {
+      var l = link("crow", "https://maps.google.com/?q=" + encodeURIComponent(a.text), "");
+      l.appendChild(el("i", null, "📍")); l.appendChild(el("span", null, a.text)); if (a.type === "billing") l.appendChild(el("em", null, "Billing")); card.appendChild(l);
+    });
+    var meta = [];
+    if (c.since) meta.push("Customer since " + c.since);
+    if (c.lead_source) meta.push("Came from: " + c.lead_source);
+    if (meta.length) card.appendChild(el("div", "cmeta", meta.join(" · ")));
+
+    // at a glance
+    var st = $("stats"); st.innerHTML = "";
+    function stat(big, small, cls) { var x = el("div", "stat" + (cls ? " " + cls : "")); x.appendChild(el("b", null, big)); x.appendChild(el("span", null, small)); st.appendChild(x); }
+    stat(String(s.done || 0), "job" + (s.done === 1 ? "" : "s") + " finished" + (s.first_year ? " · since " + s.first_year : ""));
+    stat(s.last_ms ? ago(s.last_ms) : "—", s.last ? "last visit · " + s.last : "no finished visit yet");
+    stat(money(s.billed), "billed on finished jobs");
+    if (s.due > 0) stat(money(s.due), "still owed", "owe"); else stat("$0", "nothing owed");
+    var warn = (d.warnings || []).slice();
+    if (s.next) warn.unshift("Next visit on the schedule: " + s.next + ".");
+    if (d.truncated) warn.push("Showing the newest " + d.jobs.length + " of " + d.total_jobs + " jobs. Open the customer in HCP for the rest.");
+    say("warnMsg", warn.join("\n"), "warn");
+
+    renderJobs(); renderEstimates();
+    $("hcpLink").href = c.url;
+    $("asOf").textContent = d.loaded_at ? "From HCP as of " + d.loaded_at + "." : "";
+  }
+
+  // ---------- jobs ----------
+  function jobText(j) { var x = S.detail[j.id] || {}; return [j.number, j.title, j.when, j.address, (j.techs || []).join(" "), (j.tags || []).join(" "), j.work || x.work || "", (j.notes || []).join(" "), LABEL[j.state]].join(" ").toLowerCase(); }
+  function visibleJobs() {
+    var words = S.text.toLowerCase().split(/\s+/).filter(Boolean);
+    return S.data.jobs.filter(function (j) {
+      if (S.addr && j.address_id !== S.addr) return false;
+      if (!words.length) return true;
+      var t = jobText(j); return words.every(function (w) { return t.indexOf(w) !== -1; });
+    });
+  }
+  function renderJobs() {
+    var d = S.data, jobs = d.jobs, box = $("jobList");
+    // address chips: only when the jobs are spread over more than one address
+    var count = {}, order = [];
+    jobs.forEach(function (j) { var k = j.address_id || ""; if (!(k in count)) { count[k] = 0; order.push(k); } count[k]++; });
+    var chips = $("addrChips"); chips.innerHTML = "";
+    if (order.length > 1) {
+      var mk = function (id, text, n) {
+        var b = el("button", "chip" + (S.addr === id ? " on" : ""), text); b.type = "button"; b.appendChild(el("em", null, String(n)));
+        b.onclick = function () { S.addr = id; S.shown = PAGE; renderJobs(); }; chips.appendChild(b);
+      };
+      mk("", "All addresses", jobs.length);
+      order.forEach(function (k) { if (!k) return; var j = jobs.filter(function (x) { return x.address_id === k; })[0]; mk(k, (j.address || "").split(",")[0] || "Other", count[k]); });
+    } else S.addr = "";
+    show(chips, order.length > 1);
+    show($("filter"), jobs.length > 6);
+
+    var list = visibleJobs();
+    $("jobsTitle").textContent = "Jobs (" + (list.length === jobs.length ? jobs.length : list.length + " of " + jobs.length) + ")";
+    box.innerHTML = "";
+    if (!jobs.length) box.appendChild(el("div", "none", "No jobs in HCP for this customer yet."));
+    else if (!list.length) box.appendChild(el("div", "none", "No jobs match that."));
+    list.slice(0, S.shown).forEach(function (j) { box.appendChild(jobRow(j, order.length > 1 && !S.addr)); });
+    var left = list.length - S.shown;
+    $("moreJobs").textContent = "Show " + Math.min(left, PAGE) + " more (" + left + " older)";
+    show($("moreJobs"), left > 0);
+  }
+  $("moreJobs").onclick = function () { S.shown += PAGE; renderJobs(); };
+  var ft = null;
+  $("filter").oninput = function () { clearTimeout(ft); ft = setTimeout(function () { S.text = $("filter").value.trim(); S.shown = PAGE; renderJobs(); }, 200); };
+
+  function jobRow(j, withAddr) {
+    var w = el("div", "jb " + j.state + (S.open[j.id] ? " openx" : ""));
+    var h = el("button", "jh"); h.type = "button"; h.setAttribute("aria-expanded", S.open[j.id] ? "true" : "false");
+    var t = el("div", "jt");
+    t.appendChild(el("b", null, j.dated || j.state === "done" ? j.when : "Not scheduled"));
+    if (j.ms && (j.dated || j.state === "done")) t.appendChild(el("small", null, ago(j.ms)));
+    t.appendChild(pill(j.state)); h.appendChild(t);
+    h.appendChild(el("div", "jn", j.title || "(no description)"));
+    var m = el("div", "jm"), bits = [];
+    if (j.number) bits.push("#" + j.number);
+    if (j.techs && j.techs.length) bits.push(j.techs.join(", "));
+    if (j.total) bits.push(money(j.total));
+    m.appendChild(document.createTextNode(bits.join(" · ")));
+    if (j.due > 0 && j.state === "done") { m.appendChild(document.createTextNode(bits.length ? " · " : "")); m.appendChild(el("span", "owe", money(j.due) + " owed")); }
+    h.appendChild(m);
+    if (withAddr && j.address) h.appendChild(el("div", "jm", "📍 " + j.address));
+    if (j.tags && j.tags.length) { var tg = el("div", "tags"); j.tags.forEach(function (x) { tg.appendChild(el("span", null, x)); }); h.appendChild(tg); }
+    var work = j.work || (S.detail[j.id] || {}).work;
+    if (work) h.appendChild(el("div", "jw", work));
+    w.appendChild(h);
+    if (S.open[j.id]) w.appendChild(jobDetail(j));
+    h.onclick = function () {
+      S.open[j.id] = !S.open[j.id];
+      var fresh = jobRow(j, withAddr); w.replaceWith(fresh);
+      if (S.open[j.id] && !S.detail[j.id]) loadJob(j);
+    };
+    w.id = "job-" + j.id;
+    return w;
+  }
+  function loadJob(j) {
+    var mine = S.load;
+    api("job", { job_id: j.id }).then(function (r) {
+      if (mine !== S.load) return;
+      if (r.ok) S.detail[j.id] = r;   // a failed load isn't kept, so opening the job again retries
+      if (S.open[j.id]) redrawJobWith(j, r.ok ? r : { failed: true, net: !!r.net, error: r.error });
+    });
+  }
+  function redrawJobWith(j, x) { var old = $("job-" + j.id); if (!old) return; var d = old.querySelector(".jd"); if (d) d.replaceWith(jobDetail(j, x)); }
+  function linesBlock(lines) {
+    var box = el("div", "lines");
+    lines.forEach(function (li) {
+      var row = el("div", "li"), left = el("div");
+      left.appendChild(document.createTextNode((li.qty && li.qty !== 1 ? li.qty + " × " : "") + li.name));
+      if (li.description) left.appendChild(el("small", null, li.description));
+      row.appendChild(left); row.appendChild(el("b", null, (li.discount ? "−" : "") + money(li.amount))); box.appendChild(row);
+    });
+    return box;
+  }
+  function jobDetail(j, x) {
+    x = x || S.detail[j.id] || null;
+    var d = el("div", "jd"), work = (x && x.work) || j.work, lines = (x && x.lines_ok !== false && x.lines) || j.lines, notes = (x && x.notes) || j.notes || [];
+    function head(t) { d.appendChild(el("h3", null, t)); }
+    if (work) { head("What was done"); d.appendChild(el("p", null, work)); }
+    if (lines && lines.length) { head("Line items"); d.appendChild(linesBlock(lines)); }
+    else if (x && !x.failed && lines) { head("Line items"); d.appendChild(el("p", null, "None on this job.")); }
+    if (notes.length) { head("Notes"); notes.forEach(function (n, i) { var p = el("p", null, n); if (i) p.style.marginTop = "6px"; d.appendChild(p); }); }
+    if (!x) d.appendChild(el("p", "none", (lines ? "Loading photos…" : "Loading the details…")));
+    else if (x.failed) d.appendChild(el("p", "none", x.net ? "📶 No signal — the rest loads when you're back in range. Tap the job again to retry." : "Couldn't load the rest: " + x.error));
+    else if (x.photos && x.photos.length) {
+      head("Photos (" + x.photos.length + ")");
+      var strip = el("div", "jph");
+      x.photos.forEach(function (a, i) {
+        var l = link(a.image ? null : "file", a.url, ""); l.setAttribute("aria-label", a.name || ("Photo " + (i + 1)));
+        if (a.image) {
+          var im = el("img"); im.loading = "lazy"; im.decoding = "async"; im.alt = a.name || ("Photo " + (i + 1));
+          im.onerror = function () { im.onerror = null; l.removeChild(im); l.className = "file"; l.textContent = a.name || "Open photo"; };
+          im.src = a.url; l.appendChild(im);
+        } else l.textContent = a.name || "Open file";
+        strip.appendChild(l);
+      });
+      d.appendChild(strip);
+    }
+    if (x && !x.failed && !work && !(lines && lines.length) && !notes.length && !(x.photos && x.photos.length)) d.appendChild(el("p", "none", "Nothing else on this job in HCP."));
+    d.appendChild(link("hcp", j.url, "Open job " + (j.number ? "#" + j.number + " " : "") + "in HCP →"));
+    return d;
+  }
+
+  // ---------- estimates ----------
+  function renderEstimates() {
+    var list = S.data.estimates || [], box = $("estList"); box.innerHTML = "";
+    $("estTitle").textContent = "Estimates (" + list.length + ")";
+    if (!list.length) { box.appendChild(el("div", "none", "No estimates in HCP for this customer.")); return; }
+    list.forEach(function (e) {
+      var w = el("div", "jb " + e.state), h = el("div", "jh"); h.style.cursor = "default";
+      var t = el("div", "jt"); t.appendChild(el("b", null, e.when || "Estimate")); if (e.ms) t.appendChild(el("small", null, ago(e.ms))); t.appendChild(pill(e.state)); h.appendChild(t);
+      var bits = []; if (e.number) bits.push("Estimate #" + e.number); if (e.techs.length) bits.push(e.techs.join(", ")); if (e.address) bits.push(e.address);
+      h.appendChild(el("div", "jm", bits.join(" · ")));
+      if (!e.options.length) h.appendChild(el("div", "jm", "No options on it yet."));
+      e.options.forEach(function (o) { h.appendChild(optionButton(e, o)); });
+      h.appendChild(link("hcp", e.url, "Open estimate " + (e.number ? "#" + e.number + " " : "") + "in HCP →"));
+      w.appendChild(h); box.appendChild(w);
+    });
+  }
+  function optionButton(e, o) {
+    var w = el("div", "opt"), b = el("button"); b.type = "button";
+    b.appendChild(document.createTextNode((o.name || "Option") + " — " + money(o.total)));
+    if (o.approval) b.appendChild(el("span", null, o.approval.charAt(0).toUpperCase() + o.approval.slice(1)));
+    w.appendChild(b);
+    var key = e.id + ":" + o.id, mine = S.load;
+    function draw() {
+      var old = w.querySelector(".lines, .none"); if (old) old.remove();
+      var x = S.optLines[key]; if (!x || !x.open) return;
+      if (x.lines) w.appendChild(x.lines.length ? linesBlock(x.lines) : el("div", "none", "No line items on this option."));
+      else w.appendChild(el("div", "none", x.error || "Loading the line items…"));
+    }
+    b.onclick = function () {
+      var x = S.optLines[key] || (S.optLines[key] = { open: false });
+      x.open = !x.open; draw();
+      if (!x.open || x.lines || x.busy) return;
+      x.busy = true; x.error = "";
+      api("option", { estimate_id: e.id, option_id: o.id }).then(function (r) {
+        x.busy = false; if (mine !== S.load) return;
+        if (r.ok) x.lines = r.lines || []; else x.error = r.net ? "📶 No signal — tap again when you're back in range." : "Couldn't load: " + r.error;
+        draw();
+      });
+    };
+    draw();
+    return w;
+  }
+})();
+</script>
+</body>
+</html>
