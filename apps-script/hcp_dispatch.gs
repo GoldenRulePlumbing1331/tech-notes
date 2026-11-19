@@ -37,7 +37,9 @@
  *     CAP_DAY        = workday, default "08:00-16:00"
  *     CAP_LEADS      = comma-separated lead techs — the trucks that can take more work. A single word matches a first
  *                      name ("Dom"); two words match the full name. Default: Dom, Sam, Ed, Jay, Mark, Kevin, Matt, Pat, Donat
- *   A tech on a job booked for 6+ hours counts as full for the day.
+ *   A tech on a job booked for 6+ hours counts as full for the day. A lead with nothing assigned all day counts as not
+ *   working that day. Jobs on the day with no tech yet (not started) still take time: their typical length + drive is
+ *   handed to the leads with the most room before the total / "what still fits" is worked out.
  *   Run learnJobLengths() from the editor to see the numbers it learned; relearnJobLengths() starts over.
  *
  * Actions (POST JSON, all need "token" = the tech's access code):
@@ -693,6 +695,22 @@ function capCapacity_(date, fresh) {
       finish_min: offAll ? null : fullDay ? endM : Math.round(cursor + rem + blocked), items: rows });
   });
 
+  // Jobs / estimates on this day with nobody assigned yet: someone still has to do them, so their typical length + drive
+  // comes off the open time (the Board hands them to the leads with the most room). Started or finished ones don't count.
+  const unassigned = [];
+  if (!past) (day.items || []).forEach(it => {
+    if (it.kind === 'event' || (it.employee_ids || []).length) return;
+    if (it.done || /complete/i.test(it.status || '') || it.start_m != null || it.omw_m != null) return;
+    const typ = capTypical_(stats, it, lines[it.job_id] || null);
+    const booked = it.all_day ? 0 : it.emin - it.smin;
+    if (booked >= CAP.FULL_DAY_MIN) { typ.min = Math.max(typ.min, booked); typ.basis = 'booked ' + Math.round(booked / 60 * 10) / 10 + ' h — full day'; }
+    else if (it.day_of && !it.all_day) { typ.min = Math.max(30, booked); typ.basis = 'multi-day job — booked block'; }
+    if (isToday && !it.all_day && it.emin <= cursor - 60) typ.basis += ' · its time slot has passed';
+    unassigned.push({ number: it.number, kind: it.kind, customer: it.customer, title: it.title, time: it.time, typical: typ.min, basis: typ.basis,
+                      rem: Math.round(drive + typ.min), full_day: booked >= CAP.FULL_DAY_MIN });
+  });
+  unassigned.sort((a, b) => b.rem - a.rem);
+
   // The most common kinds of work with their typical length, so the office can see what fits where.
   const common = stats ? Object.keys(stats.groups).map(k => stats.groups[k]).filter(g => g.n >= CAP.MIN_GROUP)
       .sort((a, b) => b.n - a.n).slice(0, 8).map(g => ({ label: g.label, min: g.med, p25: g.p25, p75: g.p75, n: g.n, crew: g.crew })) : [];
@@ -700,7 +718,7 @@ function capCapacity_(date, fresh) {
   return { date: date, label: day.label, today: day.today, is_today: isToday, past: past, now_min: nowM,
            day_start: startM, day_end: endM, cursor: cursor, over: isToday && nowM >= endM,
            drive_min: drive, typical_min: stats ? stats.all.med : CAP.DEFAULT_JOB, typical_range: stats ? [stats.all.p25, stats.all.p75] : null,
-           common: common, techs: techs, warnings: day.warnings || [], loaded_at: day.loaded_at,
+           common: common, techs: techs, unassigned: unassigned, unassigned_min: unassigned.reduce((t, u) => t + u.rem, 0), warnings: day.warnings || [], loaded_at: day.loaded_at,
            learning: learning, stats_info: stats ? { used: stats.used, seen: stats.seen, from: stats.from, at: dpFmt_(new Date(stats.at), 'MMM d'), via: stats.via || {} } : null,
            stats_stale: learning || Date.now() - stats.at > CAP.STATS_MAX_AGE_MS };
 }

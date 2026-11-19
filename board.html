@@ -640,6 +640,18 @@
     if (prefs.capOn[t.id]) return true;
     return !!t.lead && t.scheduled;
   }
+  // The day's unassigned jobs still need a truck: hand each one (biggest first) to the counted lead with the most open
+  // time, so the total and "what still fits" are what's really left. Jobs nobody has room for are listed as over.
+  function capShare(r, counted) {
+    var open = {}, took = {}, over = [];
+    counted.forEach(function (t) { open[t.id] = t.full_day ? 0 : t.open_min; took[t.id] = []; });
+    (r.unassigned || []).forEach(function (u) {
+      u.to = ""; var best = null; counted.forEach(function (t) { if (!t.full_day && (best === null || open[t.id] > open[best.id])) best = t; });
+      if (!best || open[best.id] <= 0) { over.push(u); return; }
+      open[best.id] -= u.full_day ? Math.max(u.rem, open[best.id]) : u.rem; took[best.id].push(u); u.to = best.short || best.name;
+    });
+    return { open: open, took: took, over: over };
+  }
   function openRoom(fresh) {
     closeMenu();
     var sh = $("sheet"); S.sheetIsUn = false; S.sheetOut = false; S.sheetLoose = false; S.sheetRoom = true;
@@ -662,33 +674,37 @@
     var r = S.room, sh = $("sheet"); sh.innerHTML = ""; sh.appendChild(el("div", "grab"));
     sh.appendChild(el("h3", null, "Room left " + (r.is_today ? "today" : dayLabel(r.date))));
     var per = (r.typical_min || 90) + (r.drive_min || 0), span = Math.max(1, r.day_end - r.cursor);
-    var counted = r.techs.filter(capCounted), open = 0, fits = 0;
-    counted.forEach(function (t) { if (t.open_min > 0) { open += t.open_min; fits += Math.floor(t.open_min / per); } });
+    var counted = r.techs.filter(capCounted), open = 0, fits = 0, share = capShare(r, counted);
+    function om(t) { return share.open.hasOwnProperty(t.id) ? share.open[t.id] : t.open_min; }   // open time after unassigned jobs
+    counted.forEach(function (t) { if (om(t) > 0) { open += om(t); fits += Math.floor(om(t) / per); } });
+    var nUn = (r.unassigned || []).length;
     if (r.past) sh.appendChild(el("div", "kind", "That day is over."));
     else if (r.over) sh.appendChild(el("div", "kind", "The workday (" + hm(r.day_start) + "–" + hm(r.day_end) + ") is over — try tomorrow."));
     else {
       var hero = el("div", "caphero"); hero.appendChild(el("b", null, (Math.round(open / 30) / 2) + " hrs")); hero.appendChild(el("span", null, "open across " + counted.length + " lead" + (counted.length === 1 ? "" : "s"))); sh.appendChild(hero);
       sh.appendChild(el("div", "capfit" + (fits ? "" : " none"), fits ? "≈ " + fits + " more typical job" + (fits === 1 ? "" : "s") + " fit" : "No room for another typical job"));
+      if (nUn) sh.appendChild(el("div", "capsub", "After " + nUn + " unassigned job" + (nUn === 1 ? "" : "s") + " this day (≈ " + dur(r.unassigned_min) + " incl. drive)" + (share.over.length ? " — " + share.over.length + " of them don't fit anywhere" : "")));
       sh.appendChild(el("div", "capsub", "A typical job is " + dur(r.typical_min) + " + " + dur(r.drive_min) + " drive · counting " + hm(r.cursor) + "–" + hm(r.day_end) + " · as of " + (r.loaded_at || "")));
     }
     if (r.learning) { var ln = el("div", "msg warn"); ln.id = "capLearn"; ln.style.margin = "0 0 8px"; sh.appendChild(ln); renderLearnNote(); }
 
     function card(t, dim) {
-      var full = !!t.full_day, cls = t.off ? "off" : full || (t.open_min <= 0 && t.open_min > -30) ? "full" : t.open_min < 0 ? "over" : "open";
+      var o = om(t), full = !!t.full_day, cls = t.off ? "off" : full || (o <= 0 && o > -30) ? "full" : o < 0 ? "over" : "open";
       var c = el("button", "capcard " + cls + (dim ? " dim" : "")); c.type = "button";
       var nm = el("div", "nm"); var av = el("div", "av", t.initials || t.name.charAt(0)); av.style.setProperty("--c", t.color || "#4a6fa5"); nm.appendChild(av); nm.appendChild(document.createTextNode(t.short || t.name)); c.appendChild(nm);
       var big = el("div", "big");
       if (t.off) big.textContent = t.off_label || "Off";
       else if (r.past) big.textContent = "—";
       else if (full) { big.textContent = "Full"; big.appendChild(el("small", null, t.full_day.hours + "h job")); }
-      else if (t.open_min < -30) { big.textContent = "−" + dur(t.open_min); big.appendChild(el("small", null, "over")); }
-      else if (t.open_min <= 0) big.textContent = "Full";
-      else { big.textContent = "+" + dur(t.open_min); var n = Math.floor(t.open_min / per); big.appendChild(el("small", null, n ? n + " job" + (n === 1 ? "" : "s") : "")); }
+      else if (o < -30) { big.textContent = "−" + dur(o); big.appendChild(el("small", null, "over")); }
+      else if (o <= 0) big.textContent = "Full";
+      else { big.textContent = "+" + dur(o); var n = Math.floor(o / per); big.appendChild(el("small", null, n ? n + " job" + (n === 1 ? "" : "s") : "")); }
       c.appendChild(big);
       var st = t.off ? "" : !t.jobs ? "nothing scheduled" : t.left ? t.left + " of " + t.jobs + " left" + (t.finish_min != null && !r.past ? " · done ≈ " + hm(Math.min(t.finish_min, 1439)) : "") : "all " + t.jobs + " done";
+      var tk = (share.took[t.id] || []).length; if (tk && !t.off) st += " · +" + tk + " unassigned";
       c.appendChild(el("div", "st", st));
       if (!t.off && !r.past) {
-        var bar = el("div", "capbar"), used = Math.min(span, Math.max(0, t.booked_min || 0)), blk = Math.min(span - used, Math.max(0, t.blocked_min || 0));
+        var bar = el("div", "capbar"), used = Math.min(span, Math.max(0, (t.booked_min || 0) + (t.open_min - o))), blk = Math.min(span - used, Math.max(0, t.blocked_min || 0));
         var i1 = el("i", "b1"); i1.style.width = (used / span * 100) + "%"; bar.appendChild(i1);
         var i2 = el("i", "b2"); i2.style.width = (blk / span * 100) + "%"; bar.appendChild(i2);
         var i3 = el("i", "b3"); i3.style.width = (Math.max(0, span - used - blk) / span * 100) + "%"; bar.appendChild(i3);
@@ -706,6 +722,7 @@
         d.appendChild(document.createTextNode(" · " + x.time + " · " + (x.state === "done" ? "done" : x.state === "work" ? "working, ≈ " + dur(x.rem) + " left" : x.state === "omw" ? "on the way, ≈ " + dur(x.rem) + " incl. drive" : "≈ " + dur(x.typical) + " + drive") + " · " + x.basis + (x.note ? " · ⚠ " + x.note : "")));
         det.appendChild(d);
       });
+      (share.took[t.id] || []).forEach(function (u) { var d = el("div"); d.appendChild(el("b", null, (u.kind === "estimate" ? "Est " : "#") + u.number + " " + u.customer + " (unassigned)")); d.appendChild(document.createTextNode(" · " + u.time + " · ≈ " + dur(u.typical) + " + drive · " + u.basis + " — counted here because " + (t.short || t.name).split(" ")[0] + " has the most room")); det.appendChild(d); });
       if (t.blocked_min) det.appendChild(el("div", null, "Events block " + dur(t.blocked_min) + "."));
       if (!t.off) {
         var tg = el("button", "incl" + (capCounted(t) ? " on" : ""), capCounted(t) ? "✓ Counted in the total" : "＋ Count in the total"); tg.type = "button";
@@ -719,14 +736,24 @@
       list.forEach(function (t) { var c = card(t, dim); if (S.capOpen === t.id) c.classList.add("on"); g.appendChild(c); if (S.capOpen === t.id) g.appendChild(detail(t)); });
       return g;
     }
-    var sorted = r.techs.slice().sort(function (a, b) { return (b.open_min || 0) - (a.open_min || 0); });
+    var sorted = r.techs.slice().sort(function (a, b) { return (om(b) || 0) - (om(a) || 0); });
     if (counted.length) { sh.appendChild(el("div", "ugrp", "Leads — tap one for the breakdown")); sh.appendChild(grid(sorted.filter(capCounted))); }
+    if (nUn && !r.past) {
+      sh.appendChild(el("div", "ugrp", "Unassigned this day (" + nUn + ")"));
+      var ub = el("div", "capfits");
+      r.unassigned.forEach(function (u) {
+        var row = el("div", "fr"), l = el("div", "l"); l.appendChild(el("b", null, (u.kind === "estimate" ? "Est " : "#") + u.number + " " + u.customer));
+        l.appendChild(el("span", null, u.time + " · " + u.basis + " · " + (u.to ? "counted on " + u.to.split(" ")[0] : "no lead has room")));
+        row.appendChild(l); row.appendChild(el("div", "t", "≈ " + dur(u.rem))); ub.appendChild(row);
+      });
+      sh.appendChild(ub);
+    }
 
     if (!r.past && !r.over && (r.common || []).length) {
       sh.appendChild(el("div", "ugrp", "What still fits"));
       var box = el("div", "capfits");
       r.common.slice(0, S.capAllFits ? 8 : 4).forEach(function (g) {
-        var need = g.min + r.drive_min, who = counted.filter(function (t) { return t.open_min >= need; }).sort(function (a, b) { return b.open_min - a.open_min; });
+        var need = g.min + r.drive_min, who = counted.filter(function (t) { return om(t) >= need; }).sort(function (a, b) { return om(b) - om(a); });
         var row = el("div", "fr"), l = el("div", "l"); l.appendChild(el("b", null, g.label + (g.crew > 1 ? " · " + g.crew + " techs" : "")));
         l.appendChild(el("span", null, who.length ? who.map(function (t) { return (t.short || t.name).split(" ")[0]; }).join(", ") : "nobody has " + dur(need) + " open"));
         row.appendChild(l); var tt = el("div", "t", "≈ " + dur(g.min)); tt.appendChild(el("small", null, dur(g.p25) + "–" + dur(g.p75))); row.appendChild(tt); box.appendChild(row);
@@ -740,7 +767,7 @@
       if (S.capOthers) sh.appendChild(grid(others, true));
     }
     var si = r.stats_info;
-    sh.appendChild(el("div", "capnote", "Rough guide. Only lead techs count. Each unfinished job counts as the usual Start→Finish time for its kind of work (from " + (si ? si.used.toLocaleString() + " finished jobs since " + si.from : "defaults") + ") plus " + dur(r.drive_min) + " drive; a job booked for 6+ hours fills the day. Jobs in progress count only what's usually left."));
+    sh.appendChild(el("div", "capnote", "Rough guide. Only lead techs count. Each unfinished job counts as the usual Start→Finish time for its kind of work (from " + (si ? si.used.toLocaleString() + " finished jobs since " + si.from : "defaults") + ") plus " + dur(r.drive_min) + " drive; a job booked for 6+ hours fills the day. Jobs in progress count only what's usually left. Leads with nothing assigned that day count as not working; jobs with no tech yet are handed to the leads with the most room."));
     if ((r.warnings || []).length) sh.appendChild(el("div", "msg warn", "Some of the schedule couldn't load: " + r.warnings.join(" · ")));
     var acts = el("div", "acts");
     var rf = el("button", "btn", "Refresh"); rf.onclick = function () { openRoom(true); }; acts.appendChild(rf);

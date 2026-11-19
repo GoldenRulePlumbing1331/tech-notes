@@ -89,6 +89,7 @@ const handlers = {
         drive_min: 22, typical_min: 90, typical_range: [60, 150], loaded_at: "12:30 PM", warnings: [], learning: false, stats_stale: false,
         stats_info: { used: 4120, seen: 5210, from: "Nov 6, 2025", at: "Nov 6" },
         common: [{ label: "Service Call", min: 85, p25: 60, p75: 120, n: 2100, crew: 1 }, { label: "Water Heater Replacement", min: 195, p25: 160, p75: 240, n: 310, crew: 2 }, { label: "Drain Cleaning", min: 80, p25: 55, p75: 110, n: 640, crew: 1 }],
+        unassigned: [{ number: "49390", kind: "job", customer: "NoTechYet", title: "Leaking faucet", time: "1:00 PM–3:00 PM", typical: 85, basis: "Faucet / sink (220 jobs, by words)", rem: 107, full_day: false }], unassigned_min: 107,
         techs: [
           { id: "e1", name: "Dom Russo", short: "Dom R.", initials: "DR", color: "#1e88e5", truck: true, lead: true, booked_min: 112, blocked_min: 0, scheduled: true, off: false, jobs: 2, left: 1, done: 1, rem_min: 112, blocked_min: 0, open_min: 248, finish_min: 712,
             items: [{ number: "49370", kind: "job", customer: "CustomerTest", time: "9:00 AM–11:00 AM", state: "todo", typical: 90, basis: "Service Call (2100 jobs)", rem: 112, note: "" }] },
