@@ -16,7 +16,8 @@
  *     in place; "(RETURNED)" at zero). A return with nothing to net against is flagged, never posted negative.
  *   • Duplicate-part guard: the same part already on the job (any order) and the line is $100+ → held, shown
  *     with an "upload anyway" box. Cheaper repeats post normally.
- *   • Several segments (49040-1, 49040-2) for a bare "49040" → the one scheduled closest to the ship date.
+ *   • Several segments (49040-1, 49040-2) for a bare "49040" → always the most recent segment (highest -N, canceled
+ *     segments ignored). No question asked; type the full number (49040-1) on the page to send it somewhere else.
  *   • Inventory / truck / shop stock POs ("Inventory", "TRUCK STOCK", "Truck Restock", "shop stock"…) go to the
  *     MONTHLY job on the customer "Inventory Management" (property INVENTORY_CUSTOMER): the customer's job whose
  *     scheduled (or created) date is in the order's ship month. Nothing to edit each month — just create the
@@ -192,15 +193,9 @@ function jiPlan_(lines, opts) {
     const ls = byRef[ref];
     if (!r) { groups.push(jiGroup_(ref, null, 'pending', 'job ' + ref + ' isn’t in HCP yet (looked through the ' + JI.JOB_SCAN_PAGES * 100 + ' most recent jobs) — saved; retried every morning', ls.map(l => jiItem_('pending', l, 'waiting for the job to appear')))); return; }
     if (r.segments) {
-      // several 49040-N jobs: each line goes to the segment scheduled closest to its ship date
-      const buckets = {};
-      ls.forEach(l => {
-        const pick = jiPickSegment_(r.segments, l.date);
-        if (!pick.job) { groups.push(jiGroup_(ref, null, 'flag', `job ${ref} has segments ${r.segments.map(j => j.invoice_number).join(', ')} — ${pick.why}; type the full job number`, [jiItem_('flag', l, 'which segment?')])); return; }
-        const inv = String(pick.job.invoice_number);
-        (buckets[inv] = buckets[inv] || { job: pick.job, lines: [], note: pick.why }).lines.push(l);
-      });
-      Object.keys(buckets).forEach(inv => work.push({ ref: inv, job: buckets[inv].job, lines: buckets[inv].lines, note: 'auto-picked segment: ' + buckets[inv].note }));
+      // several 49040-N jobs: everything goes to the most recent segment — no asking
+      const pick = jiLatestSegment_(r.segments);
+      work.push({ ref: String(pick.job.invoice_number), job: pick.job, lines: ls, note: 'auto-picked segment: ' + pick.why });
       return;
     }
     work.push({ ref: ref, job: r.job, lines: ls, note: r.note || '', fresh: !!r.fresh, inv: !!invRefs[ref], label: invRefs[ref] ? 'inventory (job typed on the page)' : '' });
@@ -405,19 +400,13 @@ function jiResolveRefsUncached_(refs) {
   return out;
 }
 
-function jiPickSegment_(segments, shipDate) {
-  const m = /^(\d{1,2})\/(\d{1,2})\/(\d{4})/.exec(String(shipDate || '').trim());
-  if (!m) return { job: null, why: 'no usable ship date on the line' };
-  const od = Date.UTC(+m[3], +m[1] - 1, +m[2]);
-  let best = null, gap = null, why = 'segments have no schedule dates';
-  segments.forEach(j => {
-    const ss = String((j.schedule || {}).scheduled_start || '').slice(0, 10);
-    if (!ss) return;
-    const sd = Date.UTC(+ss.slice(0, 4), +ss.slice(5, 7) - 1, +ss.slice(8, 10));
-    const g = Math.abs(Math.round((sd - od) / 86400000));
-    if (gap === null || g < gap) { best = j; gap = g; why = `${j.invoice_number} scheduled ${ss.slice(5, 7)}/${ss.slice(8, 10)}, order shipped ${m[1]}/${m[2]} (${g}d)`; }
-  });
-  return { job: best, why: why };
+/** The most recent segment of a job: highest -N (ties → created last). Canceled segments are skipped unless every one is. */
+function jiLatestSegment_(segments) {
+  const live = segments.filter(j => JI.CANCELED.indexOf(String(j.work_status || '').toLowerCase()) === -1);
+  const pool = live.length ? live : segments;
+  const segNo = j => { const m = /-(\d+)\s*$/.exec(String(j.invoice_number || '')); return m ? +m[1] : 0; };
+  const best = pool.slice().sort((a, b) => segNo(b) - segNo(a) || String(b.created_at || '').localeCompare(String(a.created_at || '')))[0];
+  return { job: best, why: `${best.invoice_number} is the most recent of ${segments.map(j => j.invoice_number).sort((x, y) => x.localeCompare(y, undefined, { numeric: true })).join(', ')}` };
 }
 
 /* ───────────── the monthly Inventory Management job ───────────── */
