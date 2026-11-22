@@ -844,7 +844,7 @@
     var d = S.data; if (!d) return;
     var cols = visible(columns());
     var hourPx = parseFloat(getComputedStyle(document.documentElement).getPropertyValue("--hour")) || 64;
-    if (!cols.length) { g.style.gridTemplateColumns = "1fr"; g.appendChild(el("div", "empty", mineOn() ? "Nothing on your schedule for " + dayLabel(S.date) + "." : (d.items || []).length ? "Every tech is switched off. Tap a name above." : "Nothing on the schedule for " + dayLabel(S.date) + ".")); return; }
+    if (!cols.length) { g.style.gridTemplateColumns = "1fr"; g.style.width = ""; g.appendChild(el("div", "empty", mineOn() ? "Nothing on your schedule for " + dayLabel(S.date) + "." : (d.items || []).length ? "Every tech is switched off. Tap a name above." : "Nothing on the schedule for " + dayLabel(S.date) + ".")); return; }
     var timed = (d.items || []).filter(function (it) { return !it.all_day; });
     var startH = 7, endH = 18;
     timed.forEach(function (it) { startH = Math.min(startH, Math.floor(it.smin / 60)); endH = Math.max(endH, Math.ceil(it.emin / 60)); });
@@ -853,6 +853,9 @@
     var top0 = startH * 60, H = (endH - startH) * hourPx;
     var anyAllDay = cols.some(function (c) { return c.items.some(function (it) { return it.all_day; }); });
     g.style.gridTemplateColumns = "var(--rail) repeat(" + cols.length + ", minmax(var(--colw), 1fr))";
+    // The grid box must be as wide as all its columns: a sticky item (the time rail, corner) only stays put inside its own box,
+    // so a screen-wide grid with columns spilling past it lets the times scroll away after the first screen.
+    g.style.width = "max(100%, calc(var(--rail) + " + cols.length + " * var(--colw)))";
     g.style.gridTemplateRows = "auto " + (anyAllDay ? "auto " : "") + H + "px";
 
     g.appendChild(el("div", "corner"));
