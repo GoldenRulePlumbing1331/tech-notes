@@ -69,7 +69,8 @@ function verifyPurchaseOrders() {
     const r = poGet_(p);
     let verdict, show = false;
     if (r.code >= 200 && r.code < 300) { verdict = '✅ EXISTS — readable. Keys: ' + r.keys; found++; }
-    else if (r.code === bogus.code) verdict = '— not there (same as control)';
+    else if (r.code === bogus.code && r.html === bogus.html) verdict = '— not there (same as control)';
+    else if (r.code === 404) { verdict = '❓ 404 but a different kind of reply than the control — the route may exist'; found++; show = true; }
     else if (r.code === 401 || r.code === 403) { verdict = '🔒 probably exists, key not allowed'; found++; show = true; }
     else { verdict = '❓ unusual answer — look at it'; found++; show = true; }
     const label = job ? p.split('?')[0].split(job.id).join('{job_id}') : p.split('?')[0];
@@ -87,11 +88,12 @@ function verifyPurchaseOrders() {
       const hits = keys.filter(k => /purchase|vendor|supplier|\bpo\b|order/i.test(k));
       out.push(hits.length ? '✅ PO-looking job fields: ' + hits.join(', ') : '— no PO / vendor fields on the job');
     } else out.push('GET job → ' + full.code + ' ' + full.snippet);
-    const inp = poGet_('/jobs/' + job.id + '/job_input_materials');
+    const withInputs = poJobWithInputs_(job);
+    const inp = withInputs ? withInputs.inp : poGet_('/jobs/' + job.id + '/job_input_materials');
     const first = inp.json && (inp.json.job_input_materials || [])[0];
     if (first) {
       const keys = Object.keys(first);
-      out.push('Job Input fields: ' + keys.join(', '));
+      out.push('Job Input fields (job #' + withInputs.job.invoice_number + '): ' + keys.join(', '));
       const hits = keys.filter(k => /purchase|vendor|supplier|source|status|order/i.test(k));
       out.push(hits.length ? '✅ PO-looking Job Input fields: ' + hits.join(', ') : '— no vendor / purchase-status fields on Job Inputs');
     } else out.push('Job Inputs: ' + (inp.json ? 'none on this job' : inp.code + ' ' + inp.snippet));
@@ -122,9 +124,21 @@ function poGet_(path) {
       json: code >= 200 && code < 300 ? json : null,
       keys: isObj ? Object.keys(json).join(', ') : (Array.isArray(json) ? 'array of ' + json.length : '(not JSON)'),
       snippet: text.replace(/\s+/g, ' ').slice(0, 140),
+      html: /^\s*</.test(text),   // Rails answers unknown routes with an HTML page; real endpoints answer JSON
     };
   }
   return { code: 429, json: null, keys: '', snippet: 'HCP kept answering busy' };
+}
+
+/** The test job if it has Job Inputs, else the first of the newest completed jobs that does (checks up to 10). */
+function poJobWithInputs_(job) {
+  const tried = {};
+  const check = j => { tried[j.id] = 1; const inp = poGet_('/jobs/' + j.id + '/job_input_materials'); return inp.json && (inp.json.job_input_materials || []).length ? { job: j, inp: inp } : null; };
+  const own = check(job); if (own) return own;
+  const r = poGet_('/jobs?page=1&page_size=100&sort_by=created_at&sort_direction=desc&work_status[]=completed');
+  const jobs = ((r.json && r.json.jobs) || []).filter(j => !tried[j.id]).slice(0, 10);
+  for (let i = 0; i < jobs.length; i++) { const hit = check(jobs[i]); if (hit) return hit; }
+  return null;
 }
 
 function poPickJob_() {
